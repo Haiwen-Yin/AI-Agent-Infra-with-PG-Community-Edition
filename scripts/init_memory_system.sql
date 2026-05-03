@@ -1,9 +1,43 @@
 -- ============================================
--- Memory System v0.2.0 - Initialization Script
+-- Memory System v0.3.1 - Initialization Script
 -- Platform-agnostic AI Agent Memory with PostgreSQL 18 + Apache AGE
+-- ============================================
+-- 
+-- NEW in v0.3.1: Added [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) extension support
+-- This allows generating embeddings directly from SQL functions
+-- without requiring a Python client SDK.
+--
+-- Prerequisites for embedding generation:
+-- 1. Install [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) extension on the PG server
+-- 2. Configure config.yaml with your embedding API endpoint
 -- ============================================
 
 BEGIN;
+
+-- =====================================================
+-- Step 0: Register [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) Extension (NEW)
+-- Optional - enables SQL-based embedding generation
+-- Run this AFTER installing the .so file on your PG server
+-- =====================================================
+-- 
+-- Method 1: Using CREATE EXTENSION (if properly installed)
+-- SET search_path TO public;
+-- CREATE EXTENSION IF NOT EXISTS "[pg-embedding-gen-by-yhw]";
+--
+-- Method 2: Manual function registration with absolute path
+CREATE OR REPLACE FUNCTION public.generate_embedding(input_text text)
+RETURNS float[] AS '/usr/local/pgsql/lib/pg-embedding-gen-by-yhw', 'generate_embedding'
+IMMUTABLE STRICT
+LANGUAGE C;
+
+-- Register extension_version function  
+CREATE OR REPLACE FUNCTION public.extension_version()
+RETURNS text AS '/usr/local/pgsql/lib/pg-embedding-gen-by-yhw', 'extension_version'
+STABLE
+LANGUAGE C;
+
+-- Verify extension is loaded
+SELECT extension_version();
 
 -- =====================================================
 -- Step 1: Create Schema and Tables
@@ -113,6 +147,42 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- NEW in v0.3.1: Generate embedding directly from SQL using pg-embedding-gen extension
+CREATE OR REPLACE FUNCTION memory.generate_embedding_sql(text_input TEXT)
+RETURNS VECTOR AS $$
+DECLARE
+    result_vector FLOAT[];
+BEGIN
+    -- Call the C extension function to generate embedding
+    SELECT generate_embedding(text_input)::float[] INTO result_vector;
+    
+    -- Convert float array to vector type
+    RETURN result_vector::vector;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE STRICT;
+
+-- NEW in v0.3.1: Add concept with auto-generated embedding via SQL
+CREATE OR REPLACE FUNCTION memory.add_concept_with_embedding(
+    p_name VARCHAR,
+    p_category VARCHAR DEFAULT 'custom',
+    p_description TEXT DEFAULT ''
+) RETURNS UUID AS $$
+DECLARE
+    v_concept_id UUID;
+    v_embedding VECTOR;
+BEGIN
+    -- Generate embedding using the C extension (requires [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) installed)
+    SELECT generate_embedding_sql(p_description)::vector INTO v_embedding;
+    
+    -- Insert concept with generated embedding
+    INSERT INTO memory.concepts (name, category, description, embedding)
+    VALUES (p_name, p_category, p_description, v_embedding)
+    RETURNING concept_id INTO v_concept_id;
+    
+    RETURN v_concept_id;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE STRICT;
+
 -- =====================================================
 -- Step 4: Create Views for Common Queries
 -- =====================================================
@@ -122,7 +192,7 @@ SELECT
     c.concept_id,
     c.name,
     c.category,
-    CASE WHEN c.embedding IS NOT NULL THEN '✓' ELSE '✗' END as has_embedding,
+    CASE WHEN c.embedding IS NOT NULL THEN 'OK' ELSE '-' END as has_embedding,
     COUNT(DISTINCT r.relation_id) as relation_count,
     c.created_at
 FROM memory.concepts c
@@ -180,3 +250,7 @@ SELECT
     relation_count
 FROM memory.v_concepts_with_relations
 ORDER BY created_at DESC;
+
+-- NEW in v0.3.1: Test embedding generation via SQL (requires [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw))
+SELECT 'Test embedding generation via SQL:' AS test,
+       extension_version() AS result;

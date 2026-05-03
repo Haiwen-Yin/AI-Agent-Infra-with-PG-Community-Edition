@@ -1,7 +1,9 @@
 -- ============================================
--- Sample Data for Memory System v0.2.0
+-- Sample Data for Memory System v0.3.1
 -- Platform-agnostic AI Agent Knowledge Base
 -- ============================================
+-- 
+-- Requires pg-embedding-gen-by-yhw extension: https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw
 
 BEGIN;
 
@@ -9,7 +11,7 @@ BEGIN;
 DELETE FROM memory.relations;
 DELETE FROM memory.concepts;
 
--- Insert sample concepts
+-- Insert sample concepts with optional embedding support
 INSERT INTO memory.concepts (concept_id, name, category, description, content) VALUES
     ('user-001', '胖头鱼 🐟', 'user_profile', 
      'Oracle/PostgreSQL/MySQL ACE 数据库专家，专注于 AI Agent Memory System 开发',
@@ -46,3 +48,6 @@ FROM cypher('memory_graph', $$
     MATCH (node_a:concepts)-[r]->(node_b:concepts)
     RETURN node_a.name, type(r), node_b.name, r.strength
 $$) AS (start_node agtype, relation_type agtype, end_node agtype, strength float);
+
+-- v0.3.1 Note: For vector similarity search with pg-embedding-gen-by-yhw extension, use:
+-- SELECT memory.generate_embedding_sql('your text here') FROM dual;

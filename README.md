@@ -1,6 +1,6 @@
 # memory-pg18-by-yhw - AI Agent Memory System with PostgreSQL 18 + Apache AGE
 
-**Version**: v0.3.0  
+**Version**: v0.3.1  
 **Author**: Haiwen Yin - Database Expert  
 **Date**: 2026-04-30 CST  
 **License**: Apache License 2.0

@@ -1,7 +1,7 @@
 ---
 name: memory-pg18-by-yhw
 description: AI Agent Memory System (PostgreSQL 18 + Apache AGE) - Hybrid semantic search and graph-based relationship traversal toolkit for AI applications with vector embeddings and graph relationships.
-version: v0.3.0
+version: v0.3.1
 author: Haiwen Yin (Haiwen Yin - Database Expert)
 license: Apache License 2.0
 lastUpdated: 2026-04-30
@@ -14,7 +14,7 @@ tags: [postgresql, age, vector, graph, memory, pg18]
 
 A production-ready, platform-agnostic AI Agent memory system built on PostgreSQL 18 with pgvector and Apache AGE Property Graph integration. This skill provides a complete toolkit for implementing hybrid semantic search and graph-based relationship traversal in AI applications.
 
-**Version**: v0.3.0  
+**Version**: v0.3.1  
 **Author**: Haiwen Yin (Haiwen Yin - Database Expert)  
 **License**: Apache License 2.0  
 **Last Updated**: 2026-04-30 CST
@@ -35,12 +35,12 @@ This skill enables you to:
 ## 📦 **Package Contents**
 
 ```
-memory-pg18-by-yhw-v0.3.0/
-├── SKILL.md                   # This skill file (v0.3.0)
+memory-pg18-by-yhw-v0.3.1/
+├── SKILL.md                   # This skill file (v0.3.1)
 ├── README.md                  # Full project documentation (English)
 ├── LICENSE                    # Apache License 2.0 full text
 ├── NOTICE                     # Third-party attributions and legal notices
-├── VERSION                    # Version identifier (v0.3.0)
+├── VERSION                    # Version identifier (v0.3.1)
 ├── .gitignore                 # Git ignore rules for this project
 ├── docs/
 │   └── deployment-guide.md    # Detailed deployment instructions for various platforms
@@ -109,9 +109,32 @@ sudo systemctl enable --now postgresql-18.service
   -f /path/to/memory-pg18-by-yhw/scripts/init_memory_system.sql
 ```
 
-### 2. Python Integration (SDK)
+### 2. Embedding Generation Options (v0.3.1 NEW)
 
-See `examples/basic_usage.py` for complete examples:
+#### Option A: SQL Function via [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) Extension (Recommended for low latency)
+
+When the **[pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)** extension is installed on your PostgreSQL server, you can generate embeddings directly from SQL without Python SDK overhead:
+
+```sql
+-- Generate embedding directly in SQL
+SELECT generate_embedding('Hello world');
+
+-- Or use the memory wrapper function that converts to VECTOR type
+SELECT memory.generate_embedding_sql('Your text here') AS vector;
+
+-- Add concept with auto-generated embedding (NEW in v0.3.1)
+SELECT memory.add_concept_with_embedding('My Concept', 'category', 'Description text');
+
+-- Check extension version
+SELECT extension_version();
+```
+
+**Requirements:**
+- [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) C extension installed on PG server
+- Python proxy running at configured endpoint (e.g., `http://localhost:12345/v1/embeddings`)
+- Extension registered in init_memory_system.sql Step 0
+
+#### Option B: Python SDK with flagembedding (Original method)
 
 ```python
 from flagembedding import EmbeddingModel
@@ -131,6 +154,9 @@ cursor.execute("""
     VALUES (%s, %s, %s, %s::vector)
 """, ("Concept Name", "category_type", "Description text", embedding))
 ```
+
+**Pros of Option A:** Lower network latency, simpler SQL-based workflows  
+**Pros of Option B:** More control over model parameters, no C extension dependency
 
 ### 3. Semantic Search Query
 
@@ -367,9 +393,9 @@ assert len(embedding) == 1024, f"Expected 1024 dims, got {len(embedding)}"
 
 ## 📚 **Related Skills**
 
-- `oracle-memory-by-yhw`: Oracle AI Database version of this memory system (v0.1.0)
-- `memory-pg18-by-yhw`: This PostgreSQL 18 + Apache AGE implementation (v0.3.0)
-- `planning-with-files`: Manus-style file-based planning for complex tasks
+|- `oracle-memory-by-yhw`: Oracle AI Database version of this memory system (v0.1.0)
+|- `memory-pg18-by-yhw`: This PostgreSQL 18 + Apache AGE implementation (v0.3.1)
+|- `planning-with-files`: Manus-style file-based planning for complex tasks
 
 ---
 
@@ -394,8 +420,10 @@ For third-party component attributions and legal notices, see NOTICE file.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.3.1 | 2026-05-03 | Added [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) SQL embedding functions, memory.generate_embedding_sql(), memory.add_concept_with_embedding() wrappers, dual-mode embedding generation (SQL vs Python SDK) |
 | v0.3.0 | 2026-04-30 | AGE PG18 compatibility documentation, create_graph() type cast requirements, Cypher usage guidelines, vector dimension (1024 for BGE-M3) |
 | v0.2.0 | 2026-04-19 | Initial release with Apache AGE Property Graph support, Apache License 2.0 migration |
+| v0.1.0 | N/A | Previous Oracle AI Database version (separate skill) |
 
 ---
 
@@ -458,4 +486,4 @@ Before deploying v0.3.0 to production:
 
 ---
 
-**Enjoy using memory-pg18-by-yhw v0.3.0!** 🚀
+**Enjoy using memory-pg18-by-yhw v0.3.1!** 🚀

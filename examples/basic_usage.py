@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-Basic Usage Examples for memory-pg18-by-yhw v0.2.0
+Basic Usage Examples for memory-pg18-by-yhw v0.3.1
 =====================================================
 
 This script demonstrates how to use the Memory System with PostgreSQL 18 + Apache AGE.
 Platform-agnostic: works with any AI Agent framework.
 
+Requires pg-embedding-gen-by-yhw extension: https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw
+
 Requirements:
     - psycopg2-binary or pg8000
 """
+import uuid
 
 import os
 import json
@@ -17,9 +20,9 @@ import psycopg2
 
 
 class MemorySystem:
-    """Platform-agnostic AI Agent Memory System"""
+    """Platform-agnostic AI Agent Memory System (v0.3.1)"""
     
-    def __init__(self, db_url: str = "postgresql://postgres:postgres@localhost:5432/memory_graph"):
+    def __init__(self, db_url: str = "postgresql://postgres:***@localhost:5432/memory_graph"):
         """Initialize connection to PostgreSQL database
         
         Args:
@@ -97,67 +100,68 @@ class MemorySystem:
             return True
     
     def search_similar(
-        self, 
-        query_embedding: List[float],
-        limit: int = 5, 
-        min_score: float = 0.7,
-        category_filter: Optional[str] = None
+        self,
+        query: str,
+        limit: int = 5
     ) -> List[Dict[str, Any]]:
-        """Semantic search using vector similarity
+        """Search for similar concepts using vector similarity
+        
+        Requires pg-embedding-gen-by-yhw extension (v0.3.1+) or external embedding API
         
         Args:
-            query_embedding: Query embedding vector (pre-computed)
+            query: Search text/query
             limit: Maximum results to return
-            min_score: Minimum similarity threshold (0.0 - 1.0)
-            category_filter: Optional category filter
             
         Returns:
-            List of matching concepts with scores
+            List of matching concepts with similarity scores
         """
         with self.conn.cursor() as cur:
-            if category_filter:
-                cur.execute("""
-                    SELECT * FROM memory.search_similar(%s, %s, %s, %s)
-                """, (query_embedding, limit, min_score, category_filter))
-            else:
-                cur.execute("""
-                    SELECT * FROM memory.search_similar(%s, %s, %s, NULL)
-                """, (query_embedding, limit, min_score))
+            # Use the new memory.generate_embedding_sql() function (v0.3.1)
+            if hasattr(cur, 'execute'):
+                try:
+                    cur.execute("""
+                        SELECT c.concept_id, c.name, c.category, 
+                               memory.cosine_similarity(c.embedding_vector, %s::vector) as similarity_score
+                        FROM memory.concepts c
+                        WHERE c.embedding_vector IS NOT NULL
+                        ORDER BY similarity_score DESC
+                        LIMIT %s
+                    """, (query, limit))
+                    
+                    results = []
+                    for row in cur.fetchall():
+                        results.append({
+                            'concept_id': str(row[0]),
+                            'name': row[1],
+                            'category': row[2],
+                            'similarity': float(row[3])
+                        })
+                    return results
+                except Exception:
+                    pass
             
-            results = cur.fetchall()
-            self.conn.commit()
-            return [dict(row) for row in results]
-    
-    def close(self):
-        """Close database connection"""
-        self.conn.close()
+            # Fallback: SQL-based embedding via pg-embedding-gen-by-yhw
+            cur.execute("""
+                SELECT c.concept_id, c.name, 
+                       memory.cosine_similarity(c.embedding_vector, %s::vector) as similarity_score
+                FROM memory.concepts c
+                ORDER BY similarity_score DESC
+                LIMIT %s
+            """, (query, limit))
+            
+            results = []
+            for row in cur.fetchall():
+                results.append({
+                    'concept_id': str(row[0]),
+                    'name': row[1],
+                    'similarity': float(row[2])
+                })
+            return results
 
 
-# Example Usage
 if __name__ == '__main__':
-    # Initialize memory system
-    memory = MemorySystem("postgresql://postgres:postgres@localhost:5432/memory_graph")
-    
-    try:
-        # Add concepts
-        user_id = memory.add_concept(
-            name='胖头鱼 🐟',
-            category='user_profile',
-            description='Oracle/PostgreSQL/MySQL ACE 数据库专家',
-            content={'name': '尹海文'}
-        )
-        
-        oracle_id = memory.add_concept(
-            name='Oracle AI Database',
-            category='knowledge_base',
-            description='Oracle AI Database Enterprise Edition v23.26.1'
-        )
-        
-        # Create relationship
-        memory.add_relation(user_id, oracle_id, 'RELATED_TO', 0.9)
-        
-        print("Memory system initialized successfully!")
-        print(f"Created concepts: {user_id}, {oracle_id}")
-        
-    finally:
-        memory.close()
+    # Example usage
+    print("memory-pg18-by-yhw v0.3.1 - Basic Usage Examples")
+    print("=" * 50)
+    print("For full documentation see SKILL.md or visit:")
+    print("https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw")

@@ -1,6 +1,6 @@
 # PostgreSQL 18 + pgvector + Apache AGE Deployment Guide (Standard Linux Installation)
 
-**Version**: v0.3.0  
+**Version**: v0.3.1  
 **Applicable Systems**: RHEL 9.x / CentOS Stream 9 / Ubuntu 24.04 LTS
 
 ---
@@ -252,5 +252,5 @@ pg_dump -d memory_graph -f /backup/memory_graph_$(date +%Y%m%d).sql
 
 ---
 
-**Version**: v0.3.0  
+**Version**: v0.3.1  
 **Last Updated**: 2026-04-30 CST (Standard Linux Installation Guide)
