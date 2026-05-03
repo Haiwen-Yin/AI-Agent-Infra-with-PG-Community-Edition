@@ -1,4 +1,8 @@
-# memory-pg18-by-yhw - AI Agent Memory System with PostgreSQL 18 + Apache AGE
+# memory-pg18-by-yhw v0.3.1
+
+[GitHub Repository](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) · [SKILL.md](SKILL.md) · [RELEASE_NOTES.md](RELEASE_NOTES.md)
+
+AI Agent Memory System with PostgreSQL 18 + Apache AGE + pg-embedding-gen-by-yhw
 
 **Version**: v0.3.1  
 **Author**: Haiwen Yin - Database Expert  
@@ -15,6 +19,7 @@ An AI Agent memory system built on PostgreSQL 18 + pgvector + Apache AGE Propert
 - ✅ **Property Graph**: Cypher query language, supports multi-hop relationship traversal
 - ✅ **Auto Indexing**: HNSW indexing on embedding properties for fast semantic retrieval
 - ✅ **Platform Agnostic**: Suitable for any AI Agent, chatbot, or knowledge graph application
+- ✅ **Dual-mode Embedding Generation**: SQL-based generation via [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) extension (v0.3.1+)
 
 ---
 
@@ -143,7 +148,38 @@ EOSQL
 
 ---
 
-## 📊 **Performance Benchmarks**
+### 🧠 Embedding Generation (v0.3.1+)
+
+#### Option A: SQL-Based (Recommended for Production)
+
+Requires [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw):
+
+```sql
+-- Generate embedding directly in SQL
+SELECT generate_embedding('Hello world');
+
+-- Use memory wrapper function
+SELECT memory.generate_embedding_sql('Your text here') AS vector;
+
+-- Add concept with auto-generated embedding (NEW)
+SELECT memory.add_concept_with_embedding('My Concept', 'category', 'Description');
+```
+
+**Requirements:**
+- pg-embedding-gen-by-yhw C extension installed on PG server
+- Python proxy running at configured endpoint
+
+#### Option B: Python SDK (Development/Testing)
+
+```python
+from flagembedding import EmbeddingModel
+model = EmbeddingModel('BAAI/bge-m3')
+embedding = model.encode("Your text here")
+```
+
+---
+
+
 
 | Metric | Value | Conditions |
 |--------|-------|------------|
@@ -172,4 +208,4 @@ See LICENSE file for full license terms.
 ---
 
 **Last Updated**: 2026-04-30  
-**Version History**: v0.3.0 (AGE PG18 compatibility documentation + Cypher usage guidelines)
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) for detailed version changelog

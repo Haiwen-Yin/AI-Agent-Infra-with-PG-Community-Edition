@@ -391,11 +391,6 @@ assert len(embedding) == 1024, f"Expected 1024 dims, got {len(embedding)}"
 
 ---
 
-## 📚 **Related Skills**
-
-|- `oracle-memory-by-yhw`: Oracle AI Database version of this memory system (v0.1.0)
-|- `memory-pg18-by-yhw`: This PostgreSQL 18 + Apache AGE implementation (v0.3.1)
-|- `planning-with-files`: Manus-style file-based planning for complex tasks
 
 ---
 
@@ -416,16 +411,6 @@ For third-party component attributions and legal notices, see NOTICE file.
 
 ---
 
-## 🔄 **Version History**
-
-| Version | Date | Changes |
-|---------|------|---------|
-| v0.3.1 | 2026-05-03 | Added [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) SQL embedding functions, memory.generate_embedding_sql(), memory.add_concept_with_embedding() wrappers, dual-mode embedding generation (SQL vs Python SDK) |
-| v0.3.0 | 2026-04-30 | AGE PG18 compatibility documentation, create_graph() type cast requirements, Cypher usage guidelines, vector dimension (1024 for BGE-M3) |
-| v0.2.0 | 2026-04-19 | Initial release with Apache AGE Property Graph support, Apache License 2.0 migration |
-| v0.1.0 | N/A | Previous Oracle AI Database version (separate skill) |
-
----
 
 ## 📞 **Support & Contact**
 
