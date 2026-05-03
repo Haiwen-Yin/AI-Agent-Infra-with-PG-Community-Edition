@@ -1,6 +1,6 @@
 # memory-pg18-by-yhw v0.3.1
 
-[GitHub Repository](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) · [SKILL.md](SKILL.md) · [RELEASE_NOTES.md](RELEASE_NOTES.md)
+[GitHub Repository](https://github.com/Haiwen-Yin/memory-pg18-by-ywh) · [SKILL.md](SKILL.md) · [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
 AI Agent Memory System with PostgreSQL 18 + Apache AGE + pg-embedding-gen-by-yhw
 
