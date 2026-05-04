@@ -17,8 +17,8 @@ INSERT INTO memory.concepts (concept_id, name, category, description, content) V
      'Oracle/PostgreSQL/MySQL ACE 数据库专家，专注于 AI Agent Memory System 开发',
      '{"name": "胖头鱼", "nickname": "尹海文", "role": "ACE DB Expert"}'),
     
-    ('db-001', 'Oracle AI Database 26ai', 'knowledge_base/database', 
-     'Oracle AI Database Enterprise Edition (v23.26.1)',
+    ('db-001', 'PostgreSQL 18', 'knowledge_base/database', 
+     'PostgreSQL Memory System',
      '{"version": "26ai", "features": ["DBMS_VECTOR_DATABASE"]}'),
      
     ('tech-001', 'Apache AGE', 'knowledge_base/technology', 
@@ -28,10 +28,10 @@ INSERT INTO memory.concepts (concept_id, name, category, description, content) V
 -- Create relationships
 INSERT INTO memory.relations (from_concept_id, to_concept_id, relation_type, strength) VALUES
     ((SELECT concept_id FROM memory.concepts WHERE name = '胖头鱼 🐟'),
-     (SELECT concept_id FROM memory.concepts WHERE name = 'Oracle AI Database 26ai'),
+     (SELECT concept_id FROM memory.concepts WHERE name = 'PostgreSQL 18'),
      'RELATED_TO', 0.9),
     
-    ((SELECT concept_id FROM memory.concepts WHERE name = 'Oracle AI Database 26ai'),
+    ((SELECT concept_id FROM memory.concepts WHERE name = 'PostgreSQL 18'),
      (SELECT concept_id FROM memory.concepts WHERE name = 'Apache AGE'),
      'EXTENDS', 0.8);
 

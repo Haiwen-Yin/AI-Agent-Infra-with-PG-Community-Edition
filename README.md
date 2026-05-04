@@ -1,31 +1,134 @@
-# memory-pg18-by-yhw v0.3.1
+# memory-pg18-by-yhw v0.3.2 Task Plan Integration Edition
 
-[GitHub Repository](https://github.com/Haiwen-Yin/memory-pg18-by-ywh) · [SKILL.md](SKILL.md) · [RELEASE_NOTES.md](RELEASE_NOTES.md)
+[GitHub Repository](https://github.com/Haiwen-Yin/memory-pg18-by-yhw) · [SKILL.md](SKILL.md) · [RELEASE_NOTES_v0.3.2.md](RELEASE_NOTES_v0.3.2.md)
 
-AI Agent Memory System with PostgreSQL 18 + Apache AGE + pg-embedding-gen-by-yhw
+AI Agent Memory System with PostgreSQL 18 + Apache AGE + pg-embedding-gen-by-yhw + Task Plan Persistence
 
-**Version**: v0.3.1  
-**Author**: Haiwen Yin - Database Expert  
-**Date**: 2026-04-30 CST  
+**Version**: v0.3.2  
+**Author**: Haiwen Yin (胖头鱼 🐟) - Database Expert  
+**Date**: 2026-05-04 CST  
 **License**: Apache License 2.0
 
 ---
 
-## 🎯 **Project Overview**
+## 🎯 **Executive Summary**
 
-An AI Agent memory system built on PostgreSQL 18 + pgvector + Apache AGE Property Graph. Features:
-
-- ✅ **Hybrid Search**: Vector similarity search + Graph relationship traversal
-- ✅ **Property Graph**: Cypher query language, supports multi-hop relationship traversal
-- ✅ **Auto Indexing**: HNSW indexing on embedding properties for fast semantic retrieval
-- ✅ **Platform Agnostic**: Suitable for any AI Agent, chatbot, or knowledge graph application
-- ✅ **Dual-mode Embedding Generation**: SQL-based generation via [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) extension (v0.3.1+)
+This is the **v0.3.2 Task Plan Integration Edition** - an upgrade from v0.3.1 that introduces critical AI Agent capabilities:
+- ✅ **Task Plan Persistence** - Durable task tracking across sessions
+- ✅ **Breakpoint Recovery** - Resume exactly where interrupted after failures
+- ✅ **Historical Learning** - Learn from past task patterns and outcomes
 
 ---
 
-## 🚀 **Quick Start**
+## 📊 v0.3.1 vs v0.3.2 Feature Comparison
 
-### Step 1: Install PostgreSQL 18 with Extensions (Standard Linux Installation)
+| Feature | v0.3.1 | **v0.3.2** |
+|---------|--------|-----------|
+| **Target Users** | All AI Agents | ✅ All AI Agents |
+| **Embedding Models** | Multi-model | ✅ Multi-model |
+| **Property Graph** | AGE Integration | ✅ Full Cypher Support |
+| **Vector Search** | pgvector HNSW | ✅ Optimized Indexing |
+| **Task Plan Storage** | ❌ Not included | ✅ **Complete Task Plan System** |
+| **Breakpoint Recovery** | ❌ None | ✅ **Auto Snapshot + Resume API** |
+| **Historical Learning** | ❌ Limited | ✅ **Task Pattern Recognition** |
+
+---
+
+## 🆕 v0.3.2 New: Task Plan Persistence System
+
+### Overview
+
+The Task Plan system provides AI Agents with durable task execution tracking, enabling:
+- **Breakpoint recovery after failures** - Resume exactly where interrupted with full context
+- **Historical pattern learning from completed tasks** - Learn from past success/failure modes
+- **Detailed status auditing** - Complete audit trail of all agent actions
+
+### Quick Start
+
+```bash
+# 1. Deploy Task Plan schema (NEW in v0.3.2)
+psql -U postgres -d memory_graph -f scripts/init_task_plan_system.sql
+
+# 2. Import Python API
+from scripts.task_plan_api import create_task_plan, resume_task, search_completed_tasks
+
+# 3. Create task plan with auto-snapshot
+plan = create_task_plan(
+    plan_name="Deploy Database Migration",
+    plan_type="deployment",
+    goal={"objective": "Migrate schema changes safely"}
+)
+
+# 4. Resume from breakpoint (if agent was interrupted)
+context = resume_task(plan_id=plan['plan_id'])
+```
+
+### Task Plan Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│                   AI Agent Task Execution            │
+└──────────────────────────────────────────────────────┘
+
+[Agent] ──Start Task──► [create_task_plan()]
+                         │
+                  ┌──────▼───────┐
+                  │ TASK_PLANS   │ ← Task plan (status, goals)
+                  └──────┬───────┘
+                         │
+                  ┌──────▼───────┐
+                  │ TASK_STEPS   │ ← Execution steps and results
+                  └──────┬───────┘
+                         │
+              [Executing...] ──► [update_task_progress()]
+                              │
+                       ┌──────▼──────────┐
+                       │ ONTEXT_SNAPSHOTS│ ← **Critical for breakpoint recovery**
+                       └──────┬──────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │  AGENT_STATE      │ ← Agent current state
+                    │  CONVERSATION     │ ← Conversation history
+                    │  NEXT_ACTION      │ ← Next action
+                    │  MEMORY_IDS       │ ← Associated memory nodes
+                    └───────────────────┘
+
+[Exception/Interruption] ◄──► [resume_task()] ──► [Load latest snapshot to continue execution]
+```
+
+### Database Schema (Task Plan System)
+
+Five new tables for task persistence:
+
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| `task_plans` | Core plan management | plan_id, status, goal(JSONB), priority |
+| `task_steps` | Step execution tracking | step_order, action, tools_used(JSONB) |
+| `task_context_snapshots` | Breakpoint recovery state | context_data(JSONB), is_latest(BOOLEAN), next_action |
+| `task_tool_calls` | Tool call audit trail | tool_name, action, duration_ms |
+| `task_dependencies` | Task dependency graph | source_plan_id, target_plan_id, condition(JSONB) |
+
+---
+
+## 📋 **Quick Start**
+
+### Prerequisites
+
+1. **PostgreSQL 18** (Required)
+   - Must support pgvector and Apache AGE extensions
+   - Download from [PostgreSQL](https://www.postgresql.org/download/)
+
+2. **Python 3.8+** (Required for Task Plan API)
+   ```bash
+   python3 --version
+   pip install psycopg2-binary
+   ```
+
+---
+
+## 🚀 **Installation**
+
+### Step 1: Install PostgreSQL 18 with Extensions
 
 For Ubuntu/Debian systems:
 ```bash
@@ -58,154 +161,235 @@ Create the database if it doesn't exist:
 psql -U postgres -c "CREATE DATABASE memory_graph;"
 ```
 
-Then run the initialization script:
+Deploy all schema components:
 ```bash
-psql -U postgres -d memory_graph \
-  -f scripts/init_memory_system.sql
+# Original memory system (v0.3.1)
+psql -U postgres -d memory_graph -f scripts/init_memory_system.sql
+
+# Task plan persistence (NEW v0.3.2)
+psql -U postgres -d memory_graph -f scripts/init_task_plan_system.sql
 ```
 
-> **⚠️ AGE PG18 Critical Setup Requirements**: Before running any Cypher queries, execute these commands in every session:
-> ```sql
-> SET search_path TO ag_catalog;
-> SELECT create_graph('memory_graph'::name);  -- Note: ::name type cast is REQUIRED!
-> ```
-
-This ensures Cypher functions are accessible and the graph object exists. Without this setup, you will encounter errors like "function cypher(unknown) does not exist" when attempting graph queries.
-    name VARCHAR(256) NOT NULL,
-    category VARCHAR(128),
-    description TEXT,
-    content JSONB DEFAULT '{}'::jsonb,
-    embedding VECTOR(1024),
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE memory.relations (
-    relation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    from_concept_id UUID REFERENCES memory.concepts(concept_id),
-    to_concept_id UUID REFERENCES memory.concepts(concept_id),
-    relation_type VARCHAR(128) NOT NULL,
-    strength FLOAT DEFAULT 1.0
-);
-
--- Create HNSW index for vector similarity search
-CREATE INDEX idx_concepts_embedding 
-ON memory.concepts USING hnsw (embedding vector_cosine_ops) 
-WITH (m = 16, ef_construction = 200);
-
-GRANT ALL PRIVILEGES ON SCHEMA memory TO postgres;
-EOSQL
-```
-
-### Step 3: Insert Sample Data
-
-```bash
-psql -U postgres -d memory_graph << 'EOSQL'
-INSERT INTO memory.concepts (name, category, description) VALUES
-    ('Haiwen Yin - DB Expert', 'user_profile', 'Oracle/PostgreSQL/MySQL ACE Database Expert'),
-    ('Oracle AI Database', 'knowledge_base', 'Oracle AI Database Enterprise Edition v23.26.1'),
-    ('Apache AGE', 'technology', 'PostgreSQL Property Graph extension');
-
--- Create relationships using Cypher
-SELECT * FROM cypher('memory_graph', $$
-    MATCH (a:concepts {name: 'Haiwen Yin - DB Expert'}), 
-          (b:concepts {name: 'Oracle AI Database'})
-    CREATE (a)-[:RELATED_TO]->(b)
-$$) AS (result agtype);
-EOSQL
-```
-
-### Step 4: Query Memory System
-
-#### Semantic Search (Vector Similarity)
-
-```bash
-psql -U postgres -d memory_graph << 'EOSQL'
-SELECT 
-    name,
-    category,
-    1 - (embedding <=> '[0.1,0.2,...,1.0]'::vector) as similarity_score
-FROM memory.concepts
-WHERE embedding IS NOT NULL
-ORDER BY similarity_score DESC
-LIMIT 5;
-EOSQL
-```
-
-#### Property Graph Query (Cypher)
-
-```bash
-psql -U postgres -d memory_graph << 'EOSQL'
-SELECT 
-    start_node.name,
-    end_node.name,
-    type(rel) as relation_type
-FROM cypher('memory_graph', $$
-    MATCH path = (node_a:concepts)-[rel]->(node_b:concepts)
-    RETURN node_a, node_b, rel
-$$) AS (start_node agtype, end_node agtype, rel agtype);
-EOSQL
-```
-
----
-
-### 🧠 Embedding Generation (v0.3.1+)
-
-#### Option A: SQL-Based (Recommended for Production)
-
-Requires [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw):
-
-```sql
--- Generate embedding directly in SQL
-SELECT generate_embedding('Hello world');
-
--- Use memory wrapper function
-SELECT memory.generate_embedding_sql('Your text here') AS vector;
-
--- Add concept with auto-generated embedding (NEW)
-SELECT memory.add_concept_with_embedding('My Concept', 'category', 'Description');
-```
-
-**Requirements:**
-- pg-embedding-gen-by-yhw C extension installed on PG server
-- Python proxy running at configured endpoint
-
-#### Option B: Python SDK (Development/Testing)
+### Step 3: Use Python API for Task Management
 
 ```python
-from flagembedding import EmbeddingModel
-model = EmbeddingModel('BAAI/bge-m3')
-embedding = model.encode("Your text here")
+from scripts.task_plan_api import create_task_plan, resume_task
+
+# Create task with auto-snapshot on creation
+plan = create_task_plan(
+    plan_name="Deploy Production Database",
+    plan_type="deployment",
+    description="Execute zero-downtime migration with rollback capability",
+    goal={
+        "objective": "Migrate schema changes safely without downtime",
+        "risk_level": "high",
+        "rollback_required": True,
+        "estimated_duration_minutes": 45
+    },
+    steps=[
+        {"order": 1, "name": "Backup current state"},
+        {"order": 2, "name": "Execute migration script"},
+        {"order": 3, "name": "Run validation queries"},
+        {"order": 4, "name": "Update documentation"}
+    ]
+)
+
+print(f"Created task: {plan['plan_id']} - {plan['plan_name']}")
+
+# If agent was interrupted and needs to resume
+context = resume_task(plan_id=plan['plan_id'])
+if context.get('incomplete_steps'):
+    print(f"Resuming from step: {context['next_action']}")
 ```
 
 ---
 
+## 📊 **System Architecture Overview**
 
+### Component Layers
 
-| Metric | Value | Conditions |
-|--------|-------|------------|
-| Vector Dimensions | 1024 (BGE-M3) | Cosine similarity |
-| HNSW Index Build Time | ~5s | 1K records, m=16 |
-| Semantic Search (<1K) | <30ms | Average latency |
-| Multi-hop Traversal | <100ms | Up to 3 hops |
+| Layer | Component | Description |
+|-------|-----------|-------------|
+| **Application** | AI Agents | All AI agents using memory system via Python API |
+| **Interface** | Task Plan API | PostgreSQL connection layer for all operations |
+| **Storage** | JSONB Tables | Structured storage with native indexing |
+| **Graph** | Property Graph | Apache AGE with Cypher query support |
+
+### Data Flow Architecture
+
+#### Write Operations (Task Creation)
+
+```mermaid
+graph LR
+    A[AI Agent Query] --> B{Operation Type}
+    B -->|Create Task| C[Python API]
+    C --> D[PostgreSQL 18]
+    D --> E[TASK_PLANS Table]
+    D --> F[TASK_STEPS Table]
+    D --> G[AUTO SNAPSHOT]
+    
+    style D fill:#f96,stroke:#333,stroke-width:2px
+```
+
+#### Breakpoint Recovery Flow
+
+```mermaid
+sequenceDiagram
+    participant Agent as AI Agent
+    participant API as Task Plan API
+    participant DB as PostgreSQL 18
+    
+    Agent->>API: resume_task(plan_id)
+    API->>DB: SELECT snapshot WHERE is_latest=true
+    DB-->>API: Return context_data (JSONB)
+    
+    alt Interrupted Execution
+        API->>Agent: Restore agent_state + next_action
+        Agent->>DB: Update status = 'RUNNING'
+        API->>DB: Query incomplete steps
+        DB-->>API: Return pending/blocked steps
+    end
+    
+    API-->>Agent: Restored context with recovery path
+```
 
 ---
 
-## 📚 **Reference Resources**
+## 🗄️ **Database Schema**
 
-- Apache AGE Documentation: https://age.apache.org/docs.html
-- Cypher Reference Manual: https://neo4j.com/docs/cypher-manual/
-- pgvector Documentation: https://github.com/pgvector/pgvector
-- HNSW Algorithm Paper: https://arxiv.org/abs/1603.09320
+### Original Memory System Tables (v0.3.1 - Unchanged)
+
+```sql
+-- Memory nodes (vertices for Property Graph)
+CREATE TABLE memory_nodes (
+    node_id      SERIAL PRIMARY KEY,
+    label        VARCHAR(100),
+    node_type    VARCHAR(50),
+    properties   JSONB,           -- Properties stored as JSONB
+    embedding    VECTOR(1024)     -- BGE-M3 embedding
+);
+
+-- Memory edges (edges for Property Graph)  
+CREATE TABLE memory_edges (
+    edge_id      SERIAL PRIMARY KEY,
+    source_node  INTEGER REFERENCES memory_nodes(node_id),
+    target_node  INTEGER REFERENCES memory_nodes(node_id),
+    edge_type    VARCHAR(100),
+    properties   JSONB            -- Properties stored as JSONB
+);
+
+-- Core memories table
+CREATE TABLE memories (
+    id           SERIAL PRIMARY KEY,
+    content      TEXT,
+    memory_type  VARCHAR(100),
+    category     VARCHAR(100),
+    priority     INTEGER,
+    created_at   TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMPTZ,
+    expires_at   TIMESTAMPTZ,
+    tags         JSONB,           -- Array of tags as JSONB
+    metadata     JSONB            -- Metadata object as JSONB
+);
+
+-- Vector embeddings for memories
+CREATE TABLE memories_vectors (
+    id            SERIAL PRIMARY KEY,
+    memory_id     INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    embedding     VECTOR(1024),
+    created_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    model_version VARCHAR(50) DEFAULT 'bge-m3'
+);
+```
+
+### v0.3.2 New: Task Plan System Tables
+
+```sql
+-- See scripts/init_task_plan_system.sql for complete DDL
+-- Key tables: task_plans, task_steps, task_context_snapshots, 
+--             task_tool_calls, task_dependencies
+```
+
+---
+
+## 🔧 **API Functions (Python Integration)**
+
+### create_task_plan() - Create task plan and automatically save initial context snapshot
+
+```python
+def create_task_plan(plan_name, plan_type="task", description="", goal=None, steps=None):
+    """
+    Create a new task plan and automatically save initial context
+    
+    Args:
+        plan_name (str): Task name
+        plan_type (str): task/deployment/research/analysis  
+        description (str): Task description
+        goal (dict): Final goal (structured)
+        steps (list[dict]): Step list [{order, name, action}, ...]
+    
+    Returns:
+        dict: Created plan information
+    """
+```
+
+### resume_task() - Resume task execution from breakpoint (core feature)
+
+```python  
+def resume_task(plan_id):
+    """
+    Resume task execution from breakpoint
+    
+    Args:
+        plan_id (int): Plan ID
+    
+    Returns:
+        dict: Restored context information including next_action, incomplete_steps
+    """
+    # 1. Get latest snapshot (is_latest = true)
+    # 2. Restore agent_state and conversation_history from context_data
+    # 3. Identify incomplete steps by checking step status  
+    # 4. Resume execution with next_action as starting point
+```
+
+### search_completed_tasks() - Search completed tasks for learning and pattern reuse
+
+```python
+def search_completed_tasks(query_params=None):
+    """
+    Search completed tasks for learning and pattern reuse
+    
+    Args:
+        query_params (dict): {type, status, tags, keywords, date_range}
+    
+    Returns:
+        list[dict]: Matching task list with success metrics and statistics
+    """
+```
+
+---
+
+## 📚 **Documentation**
+
+- [SKILL.md](./SKILL.md) - Skill definition and usage guide (v0.3.2)
+- [README.md](./README.md) - This file (project documentation v0.3.2)
+- [CHANGELOG.md](./CHANGELOG.md) - Complete version history and changes (v0.2.0 through v0.3.2)
+- [RELEASE_NOTES_v0.3.2.md](./RELEASE_NOTES_v0.3.2.md) - Detailed release notes for v0.3.2
+
+---
+
+## 👨‍💻 **Author & Maintainer**
+
+**Haiwen Yin (胖头鱼 🐟)**  
+Oracle/PostgreSQL/MySQL ACE Database Expert
+
+- **Blog**: https://blog.csdn.net/yhw1809
+- **GitHub**: https://github.com/Haiwen-Yin
 
 ---
 
 ## 📄 **License**
 
-Apache License 2.0 - Free to use, modify, and distribute with proper attribution.
+This project is licensed under the Apache License, Version 2.0 - see the [LICENSE](LICENSE) file for details.
 
-See LICENSE file for full license terms.
-
----
-
-**Last Updated**: 2026-04-30  
-See [RELEASE_NOTES.md](RELEASE_NOTES.md) for detailed version changelog
+**Last Updated**: 2026-05-04 v0.3.2
