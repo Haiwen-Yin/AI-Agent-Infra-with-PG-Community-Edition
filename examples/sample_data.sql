@@ -11,11 +11,11 @@ BEGIN;
 DELETE FROM memory.relations;
 DELETE FROM memory.concepts;
 
--- Insert sample concepts with optional embedding support
+|-- Insert sample concepts with optional embedding support
 INSERT INTO memory.concepts (concept_id, name, category, description, content) VALUES
-    ('user-001', '胖头鱼 🐟', 'user_profile', 
-     'Oracle/PostgreSQL/MySQL ACE 数据库专家，专注于 AI Agent Memory System 开发',
-     '{"name": "胖头鱼", "nickname": "尹海文", "role": "ACE DB Expert"}'),
+    ('user-001', 'Haiwen Yin (胖头鱼 🐟)', 'user_profile', 
+     'Oracle/PostgreSQL/MySQL ACE Database Expert specializing in AI Agent Memory System development',
+     '{"name": "Haiwen Yin", "nickname": "胖头鱼", "role": "ACE DB Expert"}'),
     
     ('db-001', 'PostgreSQL 18', 'knowledge_base/database', 
      'PostgreSQL Memory System',
@@ -25,9 +25,9 @@ INSERT INTO memory.concepts (concept_id, name, category, description, content) V
      'PostgreSQL Property Graph extension with Cypher support',
      '{"project": "apache.org", "license": "MIT", "version": "1.7.0"}');
 
--- Create relationships
+|-- Create relationships
 INSERT INTO memory.relations (from_concept_id, to_concept_id, relation_type, strength) VALUES
-    ((SELECT concept_id FROM memory.concepts WHERE name = '胖头鱼 🐟'),
+    ((SELECT concept_id FROM memory.concepts WHERE name = 'Haiwen Yin (胖头鱼 🐟)'),
      (SELECT concept_id FROM memory.concepts WHERE name = 'PostgreSQL 18'),
      'RELATED_TO', 0.9),
     

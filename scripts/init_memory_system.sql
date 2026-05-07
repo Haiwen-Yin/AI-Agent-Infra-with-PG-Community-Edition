@@ -218,15 +218,15 @@ DELETE FROM memory.relations;
 DELETE FROM memory.concepts;
 
 INSERT INTO memory.concepts (concept_id, name, category, description) VALUES
-    ('001', '胖头鱼 🐟', 'user_profile', 
-     'Oracle/PostgreSQL/MySQL ACE 数据库专家，专注于 AI Agent Memory System'),
+    ('001', 'Haiwen Yin (胖头鱼 🐟)', 'user_profile', 
+     'Oracle/PostgreSQL/MySQL ACE Database Expert specializing in AI Agent Memory System'),
     
-    ('002', 'Hermes Agent (爱马仕)', 'ai_agent', 
+    ('002', 'Hermes Agent', 'ai_agent', 
      'AI Assistant with persistent memory, skills system, and multi-agent orchestration');
 
 INSERT INTO memory.relations (from_concept_id, to_concept_id, relation_type, strength) VALUES
-    ((SELECT concept_id FROM memory.concepts WHERE name = '胖头鱼 🐟'),
-     (SELECT concept_id FROM memory.concepts WHERE name = 'Hermes Agent (爱马仕)'),
+    ((SELECT concept_id FROM memory.concepts WHERE name = 'Haiwen Yin (胖头鱼 🐟)'),
+     (SELECT concept_id FROM memory.concepts WHERE name = 'Hermes Agent'),
      'RELATED_TO', 0.9);
 
 -- =====================================================

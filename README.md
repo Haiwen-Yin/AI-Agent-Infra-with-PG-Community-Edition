@@ -1,36 +1,64 @@
-# memory-pg18-by-yhw v0.3.2 Task Plan Integration Edition
+# memory-pg18-by-yhw v0.3.3 Multi-Agent Architecture Edition
 
-[GitHub Repository](https://github.com/Haiwen-Yin/memory-pg18-by-yhw) · [SKILL.md](SKILL.md) · [RELEASE_NOTES_v0.3.2.md](RELEASE_NOTES_v0.3.2.md)
+[GitHub Repository](https://github.com/Haiwen-Yin/memory-pg18-by-yhw) · [SKILL.md](SKILL.md) · [RELEASE_NOTES_v0.3.3.md](RELEASE_NOTES_v0.3.3.md)
 
-AI Agent Memory System with PostgreSQL 18 + Apache AGE + pg-embedding-gen-by-yhw + Task Plan Persistence
+AI Agent Memory System with PostgreSQL 18 + Apache AGE + pg-embedding-gen-by-yhw + Task Plan Persistence + Multi-Agent Architecture
 
-**Version**: v0.3.2  
-**Author**: Haiwen Yin (胖头鱼 🐟) - Database Expert  
-**Date**: 2026-05-04 CST  
+**Version**: v0.3.3
+**Author**: Haiwen Yin (胖头鱼 🐟) - Database Expert
+**Date**: 2026-05-07 CST
 **License**: Apache License 2.0
 
 ---
 
 ## 🎯 **Executive Summary**
 
-This is the **v0.3.2 Task Plan Integration Edition** - an upgrade from v0.3.1 that introduces critical AI Agent capabilities:
+This is the **v0.3.3 Multi-Agent Architecture Edition** - an upgrade from v0.3.2 that introduces critical AI Agent capabilities:
 - ✅ **Task Plan Persistence** - Durable task tracking across sessions
 - ✅ **Breakpoint Recovery** - Resume exactly where interrupted after failures
 - ✅ **Historical Learning** - Learn from past task patterns and outcomes
+- ✅ **Multi-Agent Architecture** - Complete framework for managing multiple coordinated AI agents
+- ✅ **Agent Registry System** - Centralized agent lifecycle management
+- ✅ **Memory Access Control** - Fine-grained visibility policies per agent
+- ✅ **Collaboration Framework** - Built-in communication channels for agent-to-agent coordination
 
 ---
 
-## 📊 v0.3.1 vs v0.3.2 Feature Comparison
+## 📊 v0.3.1 vs v0.3.2 vs v0.3.3 Feature Comparison
 
-| Feature | v0.3.1 | **v0.3.2** |
-|---------|--------|-----------|
-| **Target Users** | All AI Agents | ✅ All AI Agents |
-| **Embedding Models** | Multi-model | ✅ Multi-model |
-| **Property Graph** | AGE Integration | ✅ Full Cypher Support |
-| **Vector Search** | pgvector HNSW | ✅ Optimized Indexing |
-| **Task Plan Storage** | ❌ Not included | ✅ **Complete Task Plan System** |
-| **Breakpoint Recovery** | ❌ None | ✅ **Auto Snapshot + Resume API** |
-| **Historical Learning** | ❌ Limited | ✅ **Task Pattern Recognition** |
+| Feature | v0.3.1 | v0.3.2 | **v0.3.3** |
+|---------|--------|--------|-----------|
+| **Target Users** | All AI Agents | ✅ All AI Agents | ✅ Multi-Agent Teams |
+| **Embedding Models** | Multi-model | ✅ Multi-model | ✅ Multi-model |
+| **Property Graph** | AGE Integration | ✅ Full Cypher Support | ✅ Enhanced Agent Support |
+| **Vector Search** | pgvector HNSW | ✅ Optimized Indexing | ✅ Optimized Indexing |
+| **Task Plan Storage** | ❌ Not included | ✅ **Complete Task Plan System** | ✅ Enhanced with Sessions |
+| **Breakpoint Recovery** | ❌ None | ✅ **Auto Snapshot + Resume API** | ✅ Improved Context Tracking |
+| **Historical Learning** | ❌ Limited | ✅ **Task Pattern Recognition** | ✅ Multi-Agent Pattern Analysis |
+| **Multi-Agent Architecture** | ❌ Not included | ❌ Not included | ✅ **Complete Framework** |
+| **Agent Registry System** | ❌ None | ❌ None | ✅ **Centralized Management** |
+| **Memory Access Control** | ❌ None | ❌ None | ✅ **Fine-Grained Policies** |
+| **Collaboration Channels** | ❌ None | ❌ None | ✅ **Built-in Communication** |
+
+
+---
+
+## 📊 v0.3.1 vs v0.3.2 vs v0.3.3 Feature Comparison
+
+| Feature | v0.3.1 | v0.3.2 | **v0.3.3** |
+|---------|--------|--------|-----------|
+| **Target Users** | All AI Agents | ✅ All AI Agents | ✅ Multi-Agent Teams |
+| **Embedding Models** | Multi-model | ✅ Multi-model | ✅ Multi-model |
+| **Property Graph** | AGE Integration | ✅ Full Cypher Support | ✅ Enhanced Agent Support |
+| **Vector Search** | pgvector HNSW | ✅ Optimized Indexing | ✅ Optimized Indexing |
+| **Task Plan Storage** | ❌ Not included | ✅ **Complete Task Plan System** | ✅ Enhanced with Sessions |
+| **Breakpoint Recovery** | ❌ None | ✅ **Auto Snapshot + Resume API** | ✅ Improved Context Tracking |
+| **Historical Learning** | ❌ Limited | ✅ **Task Pattern Recognition** | ✅ Multi-Agent Pattern Analysis |
+| **Multi-Agent Architecture** | ❌ Not included | ❌ Not included | ✅ **Complete Framework** |
+| **Agent Registry System** | ❌ None | ❌ None | ✅ **Centralized Management** |
+| **Memory Access Control** | ❌ None | ❌ None | ✅ **Fine-Grained Policies** |
+| **Collaboration Channels** | ❌ None | ❌ None | ✅ **Built-in Communication** |
+
 
 ---
 
@@ -83,7 +111,7 @@ context = resume_task(plan_id=plan['plan_id'])
               [Executing...] ──► [update_task_progress()]
                               │
                        ┌──────▼──────────┐
-                       │ ONTEXT_SNAPSHOTS│ ← **Critical for breakpoint recovery**
+                       │CONTEXT_SNAPSHOTS│ ← **Critical for breakpoint recovery**
                        └──────┬──────────┘
                               │
                     ┌─────────▼─────────┐
@@ -107,6 +135,188 @@ Five new tables for task persistence:
 | `task_context_snapshots` | Breakpoint recovery state | context_data(JSONB), is_latest(BOOLEAN), next_action |
 | `task_tool_calls` | Tool call audit trail | tool_name, action, duration_ms |
 | `task_dependencies` | Task dependency graph | source_plan_id, target_plan_id, condition(JSONB) |
+
+---
+
+## 🆕 v0.3.3 New: Multi-Agent Architecture
+
+### Overview
+
+The Multi-Agent Architecture provides a structured framework for managing multiple AI agents with centralized memory access control, session management, and collaboration capabilities.
+
+This edition introduces four new components:
+- **Agent Registry (agent_registry)** - Centralized agent lifecycle management
+- **Memory Access Control (agent_memory_access)** - Fine-grained visibility policies  
+- **Collaboration Framework (agent_collaboration)** - Agent-to-agent communication channels
+- **Session Management (agent_session)** - Active session tracking and monitoring
+
+### Architecture Diagram (Multi-Agent System)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Multi-Agent Memory System                        │
+│                      v0.3.3 Edition                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌───────────┐    ┌───────────┐    ┌───────────┐                    │
+│  │ Agent A   │    │ Agent B   │    │ Agent C   │                    │
+│  │ (Analyzer)│    │(Writer)   │    │(Deployer) │                    │
+│  └─────┬─────┘    └─────┬─────┘    └─────┬─────┘                    │
+│        │                │                │                          │
+│        ▼                ▼                ▼                          │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │              AGENT_REGISTRY (Central)                         │  │
+│  │  • Registration & Lifecycle                                   │  │
+│  │  • Capability Discovery                                       │  │
+│  │  • Health Monitoring                                          │  │
+│  └───────────────────────┬───────────────────────────────────────┘  │
+│                          │                                          │
+│  ┌───────────────────────▼───────┐                                  │
+│  │    AGENT_MEMORY_ACCESS        │                                  │
+│  │  • Visibility Policies        │                                  │
+│  │  • Data Access Control        │                                  │
+│  └───────────────────────────────┘                                  │
+│                          │                                          │
+│  ┌───────────────────────▼───────┐                                  │
+│  │    AGENT_COLLABORATION        │                                  │
+│  │  • Communication Channels     │                                  │
+│  │  • Cross-Agent Sharing        │                                  │
+│  └───────────────────────────────┘                                  │
+│                          │                                          │
+│  ┌───────────────────────▼───────┐                                  │
+│  │    AGENT_SESSION              │                                  │
+│  │  • Session Tracking           │                                  │
+│  │  • State Management           │                                  │
+│  └───────────────────────────────┘                                  │
+│                          │                                          │
+│  ┌───────────────────────▼───────┐                                  │
+│  │       MEMORIES TABLE          │                                  │
+│  │    (Memory Storage Layer)     │                                  │
+│  └───────────────────────────────┘                                  │
+│                                                                     │
+│    Benefits:                                                        │
+│    ✅ Centralized Agent Management	                              │
+│    ✅ Fine-Grained Memory Access Control	                          │
+│    ✅ Built-in Collaboration Framework	                          │
+│    ✅ Session State Persistence	                                  │
+│    ✅ Multi-Agent Scalability	                                      │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Quick Start (Multi-Agent)
+
+```bash
+# 1. Deploy Multi-Agent schema
+psql -U postgres -d memory_graph -f scripts/init_multi_agent_schema.sql
+
+# 2. Import Python API
+from scripts.agent_api import create_agent, get_active_agents, create_session
+
+# 3. Register an agent
+agent = create_agent(
+    agent_name="analysis-agent",
+    agent_type="analytical",
+    capabilities={"sql_query": True, "data_analysis": True}
+)
+print(f"Registered agent: {agent['agent_id']}")
+
+# 4. Create a session
+session = create_session(agent_id=agent['agent_id'])
+print(f"Created session: {session['session_id']}")
+
+# 5. List active agents
+agents = get_active_agents()
+for agent in agents:
+    print(f"- {agent['agent_name']} ({agent['status']})")
+```
+
+### Python API Functions (Multi-Agent)
+
+#### AgentRegistryAPI - Agent Lifecycle Management
+
+```python
+from scripts.agent_api import AgentRegistryAPI
+
+registry = AgentRegistryAPI(conn_params={'host': 'localhost', 'database': 'memory_graph'})
+
+# Register new agent
+agent = registry.register_agent(
+    agent_name="writing-agent",
+    agent_type="content",
+    capabilities={"text_generation": True, "editing": True},
+    status="ACTIVE"
+)
+
+# Get agent details
+agent_info = registry.get_agent(agent_id=1)
+
+# List active agents
+active_agents = registry.list_active_agents()
+```
+
+#### MemoryVisibilityAPI - Access Control
+
+```python
+from scripts.agent_api import MemoryVisibilityAPI
+
+access_api = MemoryVisibilityAPI(conn_params={'host': 'localhost', 'database': 'memory_graph'})
+
+# Set collaborative access (shared among specific agents)
+access_api.set_access_policy(
+    agent_id=1,
+    memory_scope="COLLABORATIVE",
+    accessible_to=[2, 3],  # Agents 2 and 3 can access
+    can_read=True,
+    can_write=False
+)
+
+# Get current policy
+policy = access_api.get_access_policy(agent_id=1)
+```
+
+#### AgentSessionAPI - Session Management
+
+```python
+from scripts.agent_api import AgentSessionAPI
+
+session_api = AgentSessionAPI(conn_params={'host': 'localhost', 'database': 'memory_graph'})
+
+# Create session for agent execution
+session = session_api.create_session(
+    agent_id=1,
+    task_plan_id=42  # Optional: link to a task plan
+)
+
+# Get all active sessions
+active_sessions = session_api.get_active_sessions()
+
+# End session when done
+session_api.end_session(session['session_id'])
+```
+
+#### CollaborationAPI - Agent Communication
+
+```python
+from scripts.agent_api import CollaborationAPI
+
+collab_api = CollaborationAPI(conn_params={'host': 'localhost', 'database': 'memory_graph'})
+
+# Send collaboration request to another agent
+request = collab_api.send_collaboration_message(
+    source_agent_id=1,  # analysis-agent
+    target_agent_id=2,  # writing-agent
+    collab_type="REQUEST",
+    message="Please generate documentation for this query result"
+)
+
+# Update request status when complete
+collab_api.update_collaboration_status(request['collab_id'], "COMPLETED")
+
+# Get all pending requests
+pending = collab_api.get_pending_requests()
+```
+
 
 ---
 
@@ -168,6 +378,9 @@ psql -U postgres -d memory_graph -f scripts/init_memory_system.sql
 
 # Task plan persistence (NEW v0.3.2)
 psql -U postgres -d memory_graph -f scripts/init_task_plan_system.sql
+
+# Multi-Agent Architecture (NEW v0.3.3)
+psql -U postgres -d memory_graph -f scripts/init_multi_agent_schema.sql
 ```
 
 ### Step 3: Use Python API for Task Management
@@ -371,10 +584,10 @@ def search_completed_tasks(query_params=None):
 
 ## 📚 **Documentation**
 
-- [SKILL.md](./SKILL.md) - Skill definition and usage guide (v0.3.2)
-- [README.md](./README.md) - This file (project documentation v0.3.2)
-- [CHANGELOG.md](./CHANGELOG.md) - Complete version history and changes (v0.2.0 through v0.3.2)
-- [RELEASE_NOTES_v0.3.2.md](./RELEASE_NOTES_v0.3.2.md) - Detailed release notes for v0.3.2
+- [SKILL.md](./SKILL.md) - Skill definition and usage guide (v0.3.3 Multi-Agent Edition)
+- [README.md](./README.md) - This file (project documentation v0.3.3)
+- [CHANGELOG.md](./CHANGELOG.md) - Complete version history and changes (v0.2.0 through v0.3.3)
+- [RELEASE_NOTES_v0.3.3.md](./RELEASE_NOTES_v0.3.3.md) - Detailed release notes for v0.3.3
 
 ---
 
@@ -391,5 +604,3 @@ Oracle/PostgreSQL/MySQL ACE Database Expert
 ## 📄 **License**
 
 This project is licensed under the Apache License, Version 2.0 - see the [LICENSE](LICENSE) file for details.
-
-**Last Updated**: 2026-05-04 v0.3.2
