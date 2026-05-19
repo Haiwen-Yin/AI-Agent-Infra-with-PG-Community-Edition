@@ -1,0 +1,27 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "memory_graph",
+    "user": "pgsql",
+    "password": "",
+    "min_conn": 2,
+    "max_conn": 5
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "session_timeout": 300
+  },
+  "embedding": {
+    "api_url": "http://10.10.10.1:12345/v1/embeddings",
+    "model": "text-embedding-bge-m3",
+    "dimension": 1024
+  },
+  "security": {
+    "masking_enabled": true,
+    "pbkdf2_iterations": 100000,
+    "max_login_attempts": 5,
+    "lockout_minutes": 15
+  }
+}

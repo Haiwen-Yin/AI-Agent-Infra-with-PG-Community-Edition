@@ -3,7 +3,7 @@
 -- Platform-agnostic AI Agent Knowledge Base
 -- ============================================
 -- 
--- Requires pg-embedding-gen-by-yhw extension: https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw
+-- Requires pg-embedding-gen-by-yhw extension (uses COPY FROM PROGRAM + Python proxy; see references/)
 
 BEGIN;
 
@@ -50,4 +50,4 @@ FROM cypher('memory_graph', $$
 $$) AS (start_node agtype, relation_type agtype, end_node agtype, strength float);
 
 -- v0.3.1 Note: For vector similarity search with pg-embedding-gen-by-yhw extension, use:
--- SELECT memory.generate_embedding_sql('your text here') FROM dual;
+-- SELECT memory.generate_embedding_sql('your text here');

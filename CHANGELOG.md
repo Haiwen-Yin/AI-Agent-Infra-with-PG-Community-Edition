@@ -2,6 +2,69 @@
 
 All notable changes to memory-pg18-by-yhw will be documented in this file.
 
+## [2.0.0] - 2026-05-18
+
+### Major Release — Complete Rewrite: Unified Architecture
+
+v2.0.0 is a **complete rewrite** mirroring oracle-memory-by-yhw v2.0.0. Every component redesigned from scratch.
+
+### Added
+
+- **Unified Entity Model** — All entity types (MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE) in single `entities` table with `entity_type` discriminator
+- **Unified Edge Model** — All relationships in single `entity_edges` table with strength (0–2) and confidence (0–1)
+- **4-Phase SQL Deployment** — Ordered schema, API, jobs, harness template scripts (idempotent)
+- **18 Tables** — entities, entity_edges, knowledge_meta, harness_meta, entity_embeddings, agent_registry, agent_session, entity_access_log, agent_permission_log, agent_collaboration, task_plans, task_steps, task_context_snapshots, task_tool_calls, task_dependencies, tags, entity_tags, system_config, system_users
+- **53 Indexes** — B-tree, GIN, HNSW (vector), composite
+- **5 Views** — v_memory_entities, v_knowledge_entities, v_active_sessions, v_collaboration_status, v_entity_graph
+- **PL/pgSQL API** — 4 schemas (memory, memory_fusion, knowledge_api, agent_perm, session_cleanup) with 21 functions
+- **7 pg_cron Jobs** — Memory fusion, knowledge extraction, session cleanup, log purge, tag counts, collaboration expiry, entity archiving
+- **Python API** — 8 modules (~2000 lines): config, connection, memory_api, knowledge_api, agent_api, task_plan_api, security, harness_api
+- **psycopg2 ThreadedConnectionPool** — Replaces psql subprocess (20ms/query vs 90s, 4500x faster)
+- **Unix Socket Support** — Automatic when config host is localhost/empty
+- **Security Module** — DataMaskingService (email, phone, SSN, credit card, custom patterns), ReversibleEncryption (AES-256-CBC), PBKDF2 password hashing
+- **Harness Template System** — 5 built-in templates (Research Analyst, Code Assistant, Data Analyst, Task Planner, Security Auditor) with full CRUD, instantiate, derive, validate, publish, deprecate, lineage
+- **Apache AGE Property Graph** — 1 unified `memory_graph` graph (replaces 2 separate v1.x graphs)
+- **pg-embedding-gen-by-yhw Integration** — Custom PG18 extension (COPY FROM PROGRAM + Python proxy) for in-database embedding generation; multi-model profiles, auto-dimension detection, health check, batch, validation, cosine similarity, logging
+- **Test Suite** — 37 tests across 5 modules (connection, memory, knowledge, agent, security), all passing
+- **Documentation** — SKILL.md (211 lines), README.md, 6 topic docs, 4 reference docs
+
+### Changed
+
+- knowledge_concepts + memory concepts → `entities` (entity_type discriminator)
+- knowledge_graph + memory relations → `entity_edges`
+- psql subprocess → psycopg2 ThreadedConnectionPool
+- 4+ independent SQL scripts → 4-phase ordered deployment
+- No PL/pgSQL API → 4 schemas with 21 functions
+- No scheduled jobs → 7 pg_cron jobs
+- No security module → DataMaskingService + ReversibleEncryption
+- No harness templates → 5 built-in templates + full CRUD API
+- 2 property graphs → 1 unified AGE graph (memory_graph)
+- agent_memory_access → entity_access_log (all entity types)
+- `generate_embedding()` marked VOLATILE (not STABLE) since it calls external API
+
+### Fixed
+
+- knowledge_api.py: `concept_type` column → `category` in entities table
+- agent_api.py: wrong table name references
+- task_plan_api.py: column names and status values (SUCCESS→COMPLETED, IN_PROGRESS→ACTIVE)
+- test_agent.py: wrong assertions and table names
+- 1_schema.sql: `generate_embedding()` STABLE → VOLATILE (calls external API)
+- All pg-embedding-gen-by-yhw documentation: corrected from "C extension" / "database-native" to accurate description (COPY FROM PROGRAM + Python proxy)
+
+### Removed
+
+- `knowledge_concepts` table (replaced by entities with entity_type='KNOWLEDGE')
+- `knowledge_graph` table (replaced by entity_edges)
+- `knowledge_versions` table (replaced by knowledge_meta.version)
+- `knowledge_tags` / `knowledge_concept_tags` tables (replaced by tags / entity_tags)
+- `knowledge_distillation_log` table (replaced by knowledge_meta.source_type)
+- `knowledge_search_history` table (removed)
+- `agent_memory_access` table (replaced by entity_access_log)
+- All v1.x SQL scripts (replaced by 4-phase deployment)
+- psql subprocess approach (replaced by psycopg2)
+
+---
+
 ## [1.0.0] - 2026-05-10
 
 ### Major Release - Production-Grade Memory System
@@ -28,10 +91,10 @@ This is a **major breakthrough for Production AI Agents** - v1.0.0 brings Postgr
   - `add_tag_to_concept()` - Tag management
   - `get_statistics()` - System analytics
 
-- **Enhanced pg-embedding-gen Integration**
-  - Database-native BGE-M3 embedding generation
-  - Configurable model endpoints
-  - Retry logic and error handling
+- **Enhanced pg-embedding-gen-by-yhw Integration**
+  - In-database embedding generation via COPY FROM PROGRAM + Python proxy
+  - Multi-model profile management
+  - Auto-dimension detection, health check, batch generation
 
 ### Updated
 
@@ -172,6 +235,7 @@ This is a **major breakthrough for Production AI Agents** - v1.0.0 brings Postgr
 
 | Version | Release Date | Major Features | Status |
 |---------|--------------|----------------|--------|
+| v2.0.0 | 2026-05-18 | Complete rewrite: unified entities, psycopg2, PL/pgSQL API, harness, security | ✅ Current |
 | v1.0.0 | 2026-05-10 | Knowledge Base, Enhanced API, Production-Ready | ✅ Stable |
 | v0.3.3 | 2026-05-07 | Multi-Agent Architecture | ✅ Stable |
 | v0.3.2 | 2026-05-06 | Task Plan Persistence | ✅ Stable |

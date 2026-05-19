@@ -108,37 +108,25 @@ mkdir -p ~/pgsql_data
 /usr/local/pgsql/bin/initdb -D ~/pgsql_data
 ```
 
-### Issue 4: pg-embedding-gen Extension Not Found
+### Issue 4: pg-embedding-gen-by-yhw Not Installed
 
-**Symptom**: `ERROR: extension "pg_embedding_gen" does not exist`
+**Symptom**: `ERROR: function embedding_generate does not exist`
 
-**Cause**: Missing .control file or SQL script
+**Cause**: pg-embedding-gen-by-yhw SQL functions not installed in the database
 
-**Current Status** (v0.4.0):
-- Plugin files exist: `/usr/local/pgsql/lib/extension/pg_embedding_gen.so`, `/usr/local/pgsql/bin/pg_embedding_proxy.py`
-- Missing: `.control` file and SQL installation script
+**Solution** (v2.0.0):
+Install the custom pg-embedding-gen-by-yhw extension (by Haiwen Yin). It is NOT a C extension — it uses PG18's `COPY FROM PROGRAM` + Python proxy:
 
-**Recommended Approach** (v0.4.0):
-Use external BGE-M3 API instead of native PostgreSQL extension:
+```bash
+# Install from the pg-embedding-gen-by-yhw project directory
+sudo bash scripts/install.sh
+psql -d memory_graph -f sql/install.sql
 
-```python
-# BGE-M3 API configuration
-BGE_M3_API = "http://10.10.10.1:12345/v1/embeddings"
-MODEL_NAME = "text-embedding-bge-m3"
-VECTOR_DIM = 1024
-
-# Python client for embedding generation
-import requests
-
-def generate_embedding(text):
-    payload = {
-        "model": MODEL_NAME,
-        "input": text,
-        "encoding_format": "float"
-    }
-    response = requests.post(BGE_M3_API, json=payload, timeout=30)
-    return response.json()["data"][0]["embedding"]
+# Verify
+psql -d memory_graph -c "SELECT * FROM embedding_health_check();"
 ```
+
+See `references/pg-embedding-gen-installation.md` for full details.
 
 ### Issue 5: AGE Graph Creation Fails
 

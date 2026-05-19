@@ -6,7 +6,7 @@
 
 #### SQL-Based Embedding Generation (via [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) extension)
 
-**What's new:** Added support for generating text embeddings directly from PostgreSQL using the **[pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)** C extension. This eliminates the need for Python SDK overhead and reduces network latency when calling external embedding APIs.
+**What's new:** Added support for generating text embeddings directly from PostgreSQL using the **[pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)** custom PG18 extension. This extension uses PostgreSQL 18's `COPY FROM PROGRAM` mechanism + Python proxy to call any OpenAI-compatible `/v1/embeddings` API endpoint, eliminating the need for Python SDK overhead in the application layer.
 
 **New SQL Functions:**
 ```sql
@@ -67,7 +67,7 @@ CREATE FUNCTION memory.add_concept_with_embedding(
 ) RETURNS UUID;
 ```
 
-**Requires:** [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) C extension installed at `/usr/local/pgsql/lib/[pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)` with Python proxy configured.
+**Requires:** [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) extension installed (uses COPY FROM PROGRAM + Python proxy; see `references/` for installation).
 
 ---
 

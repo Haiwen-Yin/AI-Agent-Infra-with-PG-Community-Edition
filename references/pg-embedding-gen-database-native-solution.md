@@ -1,319 +1,149 @@
-# pg-embedding-gen Database-Native Solution (v1.1.7)
+# pg-embedding-gen-by-yhw: In-Database Embedding Generation (v0.2.0)
 
-## Problem Statement
+## Overview
 
-**Requirement**: Enable database-native calls to external BGE-M3 embedding model from SQL functions.
+**pg-embedding-gen-by-yhw** ([GitHub](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)) is a custom PostgreSQL 18 extension developed by **Haiwen Yin (yhw)**. It generates text vector embeddings via SQL functions by calling any OpenAI-compatible `/v1/embeddings` API endpoint.
 
-**Original Challenge**: The C extension `pg_embedding_gen.so` loaded successfully but returned garbage data when called via SQL on PostgreSQL 18.
+**It is NOT a C extension.** It uses PostgreSQL 18's `COPY FROM PROGRAM` mechanism to invoke a Python proxy process, which communicates with the embedding API. No C compilation is required.
 
-## Solution Architecture
+## Architecture
 
-### Approach: PostgreSQL COPY FROM PROGRAM + Python Proxy
-
-Instead of fixing the C extension (which had binary compatibility issues), we leveraged PostgreSQL 18's `COPY FROM PROGRAM` feature to call a Python proxy script directly from SQL functions.
-
-**Architecture Flow**:
 ```
-SQL Function (embedding.generate)
-    ↓
-COPY FROM PROGRAM
-    ↓
-Shell Wrapper Script (/usr/local/pgsql/bin/embedding_wrapper.sh)
-    ↓
-Python Proxy Script (/usr/local/pgsql/bin/pg_embedding_proxy.py)
-    ↓
-BGE-M3 API (http://10.10.10.1:12345/v1/embeddings)
-    ↓
-JSON Array Response (1024 floats)
-```
-
-## Implementation Steps
-
-### 1. Python Proxy Script (Already Existed)
-
-**Location**: `/usr/local/pgsql/bin/pg_embedding_proxy.py`
-
-**Purpose**:
-- Calls BGE-M3 API via OpenAI-compatible endpoint
-- Handles authentication and retries
-- Returns JSON array of floats (1024 dimensions)
-
-**Test**:
-```bash
-python3 /usr/local/pgsql/bin/pg_embedding_proxy.py "Hello world"
-# Returns: [-0.0316, 0.0244, -0.0283, ...] (1024 floats)
+SQL Function Call (e.g., embedding_generate('text'))
+       |
+       v
+embedding_generate_model() — resolves profile, builds command string
+       |
+       v
+COPY _pg_emb_temp FROM PROGRAM '/usr/local/pgsql/lib/embedding_wrapper.sh --text <input> --model <id> --api-url <url>'
+       |
+       v
+embedding_wrapper.sh (shell script)
+       |
+       v
+embedding_proxy.py (Python process)
+       |
+       v
+HTTP POST to OpenAI-compatible /v1/embeddings API
+       |
+       v
+Returns: comma-separated float8[] (e.g., 1024 dimensions)
 ```
 
-### 2. Shell Wrapper Script (Created)
+### Key Components
 
-**Location**: `/usr/local/pgsql/bin/embedding_wrapper.sh`
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `embedding_wrapper.sh` | `/usr/local/pgsql/lib/embedding_wrapper.sh` | Shell script called by `COPY FROM PROGRAM` |
+| `embedding_proxy.py` | `/usr/local/pgsql/lib/embedding_proxy.py` | Python proxy that calls the embedding API |
+| `install.sql` | SQL functions + tables | Creates all functions, config tables, model profiles |
+| `install.sh` | Shell script | Copies proxy files to `/usr/local/pgsql/lib/` |
 
-**Purpose**:
-- Acts as bridge between PostgreSQL `COPY FROM PROGRAM` and Python script
-- Handles input sanitization
-- Ensures proper error propagation
+## Features
 
-**Script Content**:
-```bash
-#!/bin/bash
-# Embedding wrapper script for PostgreSQL
-# Usage: ./embedding_wrapper.sh 'text to embed'
+| Feature | Description |
+|---------|-------------|
+| **Multi-model profiles** | Register and switch between embedding models via SQL |
+| **Auto-detect dimensions** | Vector dimensions detected automatically on first use |
+| **Three call modes** | Default profile, named profile, or inline (model_id + api_url) |
+| **Any OpenAI-compatible API** | BGE-M3, OpenAI, Ollama, vLLM, Xinference, etc. |
+| **Shell-safe** | Base64-encoded input prevents injection |
+| **Auto-retry** | Exponential backoff on transient failures (via proxy) |
+| **Health check** | `embedding_health_check()` for API connectivity testing |
+| **Similarity functions** | `embedding_cosine_similarity()`, `embedding_euclidean_distance()` |
+| **Batch generation** | `embedding_generate_batch()` for bulk processing |
+| **Logging & statistics** | `embedding_logs` table, `embedding_stats()`, `embedding_errors()` |
+| **Vector validation** | `embedding_validate_vector()` checks dimension, NaN, Inf, norm |
 
-if [ -z "$1" ]; then
-    echo "Error: No input text provided" >&2
-    exit 1
-fi
+## Database Tables Created
 
-# Call Python proxy script
-python3 /usr/local/pgsql/bin/pg_embedding_proxy.py "$1"
-```
+| Table | Purpose |
+|-------|---------|
+| `pg_embedding_gen_config` | Global configuration (default_profile, timeout, max_retries, log_level) |
+| `embedding_model_profiles` | Registered models (name, api_url, model_id, dimensions, is_default) |
+| `embedding_dimension_cache` | Auto-detected dimensions per unique model+url combination |
+| `embedding_logs` | Request log with status, timing, and error messages |
 
-**Deployment**:
-```bash
-sudo tee /usr/local/pgsql/bin/embedding_wrapper.sh > /dev/null << 'EOF'
-#!/bin/bash
-# Embedding wrapper script for PostgreSQL
-if [ -z "$1" ]; then
-    echo "Error: No input text provided" >&2
-    exit 1
-fi
-python3 /usr/local/pgsql/bin/pg_embedding_proxy.py "$1"
-EOF
+## SQL Function Reference
 
-sudo chmod +x /usr/local/pgsql/bin/embedding_wrapper.sh
-```
+### Core Generation
 
-### 3. SQL Functions (Created)
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `embedding_generate(text)` | `float8[]` | Generate using default model profile |
+| `embedding_generate(text, profile)` | `float8[]` | Generate using named model profile |
+| `embedding_generate_model(text, model, api_url)` | `float8[]` | Generate with inline model_id + api_url |
+| `embedding_generate_batch(text[], profile)` | `SETOF float8[]` | Generate for multiple texts |
 
-**Schema**: `embedding`
+### Model Management
 
-**Main Function**: `embedding.generate(TEXT)`
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `embedding_register_model(name, api_url, model_id, is_default, desc)` | `TEXT` | Register a new model profile |
+| `embedding_list_models()` | `TABLE` | List all registered profiles |
+| `embedding_set_default_model(name)` | `TEXT` | Set default profile |
+| `embedding_drop_model(name)` | `boolean` | Remove a profile |
+| `embedding_test_model(name)` | `TABLE` | Test API call, auto-detect dimensions |
+| `embedding_detect_dimensions(name)` | `TABLE` | Auto-detect dimensions for profiles |
 
-**Implementation Details**:
-- Uses `COPY FROM PROGRAM` to execute shell wrapper
-- Creates temporary table to capture output
-- Concatenates multi-line output into single result
-- Validates input and result
-- Proper error handling with cleanup
+### Similarity & Validation
 
-**Key Code Pattern**:
-```sql
-CREATE OR REPLACE FUNCTION embedding.generate(text_input TEXT)
-RETURNS TEXT
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    result TEXT;
-    row RECORD;
-    cmd TEXT;
-BEGIN
-    -- Validate input
-    IF text_input IS NULL OR text_input = '' THEN
-        RAISE EXCEPTION 'Input text cannot be null or empty';
-    END IF;
-    
-    -- Create temp table to capture output
-    CREATE TEMPORARY TABLE temp_embedding_result (line TEXT);
-    
-    -- Execute wrapper script using COPY FROM PROGRAM
-    cmd := format('COPY temp_embedding_result FROM PROGRAM %L',
-                 '/bin/sh -c ' || quote_literal(
-                     '/usr/local/pgsql/bin/embedding_wrapper.sh ' || quote_literal(text_input)
-                 ));
-    
-    EXECUTE cmd;
-    
-    -- Read all lines and concatenate
-    FOR row IN SELECT line FROM temp_embedding_result ORDER BY ctid LOOP
-        result := COALESCE(result || E'\n', '') || row.line;
-    END LOOP;
-    
-    DROP TABLE temp_embedding_result;
-    
-    -- Validate result
-    IF result IS NULL OR result = '' THEN
-        RAISE EXCEPTION 'Embedding generation failed: empty result';
-    END IF;
-    
-    RETURN result;
-EXCEPTION
-    WHEN OTHERS THEN
-        -- Clean up
-    BEGIN
-        DROP TABLE IF EXISTS temp_embedding_result;
-    EXCEPTION WHEN OTHERS THEN
-        NULL;
-    END;
-    RAISE;
-END;
-$$;
-```
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `embedding_cosine_similarity(vec1, vec2)` | `float8` | Cosine similarity (IMMUTABLE) |
+| `embedding_euclidean_distance(vec1, vec2)` | `float8` | Euclidean distance (IMMUTABLE) |
+| `embedding_validate_vector(vec, dim)` | `TABLE` | Validate: dimension, NaN, Inf, norm |
+| `embedding_health_check()` | `TABLE` | Test API connectivity |
+| `embedding_health_check(profile)` | `TABLE` | Test specific profile connectivity |
 
-**Helper Functions**:
-- `embedding.cosine_similarity(TEXT, TEXT)` - Placeholder (implement in application layer)
-- `embedding.create_concept_with_embedding(...)` - Create concepts with auto-generated embeddings
+### Configuration & Logging
 
-## Usage Examples
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `embedding_set_config(key, value)` | `TEXT` | Set configuration parameter |
+| `embedding_get_config(key)` | `TABLE` | Get configuration |
+| `embedding_stats()` | `TABLE` | Request statistics |
+| `embedding_errors(limit)` | `TABLE` | Recent error messages |
+| `embedding_cleanup_logs(days)` | `bigint` | Delete old logs |
 
-### From SQL
+## Usage in This Memory System
+
+The `memory` schema in `1_schema.sql` wraps pg-embedding-gen-by-yhw:
 
 ```sql
--- 1. Generate embedding directly
-SELECT embedding.generate('Hello PostgreSQL');
--- Returns: [-0.0316, 0.0244, -0.0283, ...] (1024-dimension JSON array)
+-- Generate embedding (calls embedding_generate() under the hood)
+SELECT memory.generate_embedding('hello world');  -- returns vector(1024)
 
--- 2. Create concept with auto-generated embedding
-SELECT embedding.create_concept_with_embedding(
-    'PostgreSQL',
-    'PostgreSQL is a powerful open source relational database',
-    'TECHNOLOGY',
-    '{"source": "manual", "importance": "high"}'::jsonb
-);
+-- Create knowledge concept with auto-embedding
+SELECT memory.add_concept_with_embedding('Name', 'Description', 'category', '{}'::jsonb);
 
--- 3. Check embedding validation
-SELECT 
-    length(embedding.generate('test')) as length,
-    embedding.generate('test') ~ '^\[[-0-9.e,\s]*\]' as is_array,
-    array_length(regexp_split_to_array(embedding.generate('test'), ','), 1) as dimensions;
--- Expected: length=22721, is_array=true, dimensions=1024
+-- Semantic search
+SELECT * FROM memory.search_similar('query text', 10);
 ```
 
-### From Python Application
+## Installation
 
-```python
-import subprocess
-import json
-import numpy as np
-
-def get_embedding(text: str) -> list[float]:
-    """Get BGE-M3 embedding via Python proxy"""
-    cmd = ["/usr/local/pgsql/bin/pg_embedding_proxy.py", text]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return json.loads(result.stdout)
-
-def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
-    """Calculate cosine similarity in application layer"""
-    v1 = np.array(vec1)
-    v2 = np.array(vec2)
-    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-
-# Usage
-embedding = get_embedding("Hello world")
-print(f"Dimensions: {len(embedding)}")  # 1024
-
-# Calculate similarity
-sim = cosine_similarity(
-    get_embedding("database"),
-    get_embedding("database system")
-)
-print(f"Similarity: {sim:.4f}")
-```
-
-## Performance Characteristics
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| **Single Call Latency** | ~2-3 seconds | Includes API call |
-| **Vector Dimensions** | 1024 | BGE-M3 standard |
-| **Return Format** | JSON array string | ~22KB |
-| **Concurrency Support** | Yes | Multiple concurrent calls |
-| **Database-Native** | ✅ Yes | Can call from SQL functions, triggers, stored procedures |
-| **Memory Usage** | ~25KB per call | Temporary table + result string |
-
-## Advantages Over C Extension
-
-1. **No Binary Compatibility Issues**: Uses standard PostgreSQL features
-2. **Easy Debugging**: Python script is human-readable and easy to debug
-3. **Maintainability**: Simple to modify and extend
-4. **Production Ready**: Stable and reliable
-5. **Cross-Platform**: Works on any platform with Python
-6. **True Database-Native**: Can call from SQL, triggers, stored procedures
-
-## Troubleshooting
-
-### Issue: `COPY FROM PROGRAM` Permission Denied
-
-**Solution**: Ensure pgsql user has execute permissions:
 ```bash
-sudo chmod +x /usr/local/pgsql/bin/embedding_wrapper.sh
-sudo chmod +x /usr/local/pgsql/bin/pg_embedding_proxy.py
-```
+# From the pg-embedding-gen-by-yhw project directory
+sudo bash scripts/install.sh
+psql -d memory_graph -f sql/install.sql
 
-### Issue: Empty Result Returned
-
-**Cause**: BGE-M3 API endpoint unreachable
-
-**Solution**: Test API connectivity:
-```bash
-curl -X POST 'http://10.10.10.1:12345/v1/embeddings' \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"text-embedding-bge-m3","input":"test","encoding_format":"float"}'
-```
-
-### Issue: Temporary Table Cleanup Failure
-
-**Solution**: The function already handles cleanup in EXCEPTION block. If persistent, manually clean up:
-```sql
-DROP TABLE IF EXISTS temp_embedding_result;
-```
-
-## Verification Steps
-
-```sql
--- 1. Test basic generation
-SELECT embedding.generate('test');
-
--- 2. Validate output format
-SELECT 
-    result ~ '^\[[-0-9.e,\s]*\]$' as valid_json_array,
-    length(result) as char_length,
-    array_length(regexp_split_to_array(result, ','), 1) as dimension_count
-FROM (
-    SELECT embedding.generate('validation test') as result
-) t;
-
--- 3. Test concept creation
-SELECT embedding.create_concept_with_embedding(
-    'Validation Concept',
-    'This is a test concept for validation',
-    'TEST',
-    '{"validation": true}'::jsonb
-) as concept_id;
-
--- 4. Verify concept created with embedding
-SELECT 
-    concept_id,
-    concept_name,
-    metadata->'embedding_json' as embedding_preview
-FROM knowledge_concepts
-WHERE concept_name = 'Validation Concept';
+# Verify
+psql -d memory_graph -c "SELECT * FROM embedding_health_check();"
 ```
 
 ## Environment Details
 
-**Tested On**:
-- **OS**: CentOS/RHEL (Linux 4.18.0)
-- **PostgreSQL Version**: 18.3
-- **pgvector Version**: 0.8.2
-- **Apache AGE Version**: 1.7.0
-- **Python Version**: 3.x
-- **BGE-M3 API**: http://10.10.10.1:12345/v1/embeddings
-
-**File Locations**:
-- Python Proxy: `/usr/local/pgsql/bin/pg_embedding_proxy.py`
-- Shell Wrapper: `/usr/local/pgsql/bin/embedding_wrapper.sh`
-- Database: `memory_graph` on 10.10.10.131:5432
-- User: `pgsql`
-
-## References
-
-- [PostgreSQL 18 Documentation - COPY](https://www.postgresql.org/docs/18/sql-copy.html)
-- [BGE-M3 Model Documentation](https://github.com/FlagOpen/FlagEmbedding)
-- [memory-pg18-by-yhw Skill](./../SKILL.md)
+| Component | Value |
+|-----------|-------|
+| PostgreSQL | 18.3 |
+| Default model | text-embedding-bge-m3 (BGE-M3, 1024 dims) |
+| Default API | http://10.10.10.1:12345/v1/embeddings |
+| Python | 3.6+ |
+| Required Python lib | `requests` |
 
 ## Version History
 
-- **v1.1.7** (2026-05-11): Final working solution using COPY FROM PROGRAM
-- **v1.0.0-v1.1.5**: Failed attempts with C extension recompilation
-- **v1.0.0**: Initial C extension approach (incompatible with PG 18)
+- **v0.2.0** (current): Multi-model support, auto-dimension detection, health check, batch, validation
+- **v1.1.7** (legacy): Single model, COPY FROM PROGRAM + shell wrapper + Python proxy
+- **v1.0.0** (legacy): Initial C extension approach (incompatible with PG 18)

@@ -72,23 +72,21 @@ Complete Python client library with type hints and error handling:
 
 ### 3. pg-embedding-gen-by-yhw Integration
 
-Database-native embedding generation plugin for PostgreSQL 18:
-- BGE-M3 (1024 dimensions) via HTTP API
-- Configurable model endpoints
-- Retry logic and error handling
-- No external process management required
+Custom PostgreSQL 18 extension (by Haiwen Yin) for in-database embedding generation via COPY FROM PROGRAM + Python proxy:
+- BGE-M3 (1024 dimensions) via OpenAI-compatible HTTP API
+- Multi-model profile management
+- Auto-dimension detection
+- Health check, batch generation, vector validation
+- No C compilation required
 
 **Installation:**
 ```bash
-# Copy extension files
-cp pg_embedding_gen.control /usr/local/pgsql/share/extension/
-cp pg_embedding_gen--1.0.0.sql /usr/local/pgsql/share/extension/
-
-# Create extension in database
-psql -d memory_graph -c "CREATE EXTENSION pg_embedding_gen;"
+# Install from pg-embedding-gen-by-yhw project
+sudo bash scripts/install.sh
+psql -d memory_graph -f sql/install.sql
 
 # Generate embedding
-SELECT pg_generate_embedding('Hello world') as embedding;
+SELECT embedding_generate('Hello world') as embedding;
 ```
 
 ---
@@ -107,7 +105,7 @@ SELECT pg_generate_embedding('Hello world') as embedding;
 | Knowledge Graph | ❌ Not included | ✅ **NEW** |
 | Experience Distillation | ❌ Not included | ✅ **NEW** |
 | Python Knowledge API | ❌ Not included | ✅ **NEW** |
-| pg-embedding-gen | Basic | ✅ **Enhanced Integration** |
+| pg-embedding-gen-by-yhw | Basic | ✅ **Enhanced Integration** |
 | Production Ready | ⚠️ Testing | ✅ **Battle-Tested** |
 
 ---
@@ -159,10 +157,9 @@ psql -d memory_graph -c "CREATE EXTENSION IF NOT EXISTS age;"
 # 2. Deploy Knowledge Base schema
 psql -d memory_graph -f scripts/knowledge_base_schema_pg.sql
 
-# 3. Install pg-embedding-gen plugin (optional)
-cp pg_embedding_gen.control /usr/local/pgsql/share/extension/
-cp pg_embedding_gen--1.0.0.sql /usr/local/pgsql/share/extension/
-psql -d memory_graph -c "CREATE EXTENSION pg_embedding_gen;"
+# 3. Install pg-embedding-gen-by-yhw extension (optional)
+sudo bash /path/to/pg-embedding-gen-by-yhw/scripts/install.sh
+psql -d memory_graph -f /path/to/pg-embedding-gen-by-yhw/sql/install.sql
 
 # 4. Test with Python API
 python3 scripts/knowledge_base_api_pg.py

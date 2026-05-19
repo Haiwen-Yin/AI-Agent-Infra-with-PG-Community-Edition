@@ -1,92 +1,102 @@
-memory-pg18-by-yhw - AI Agent Memory System with PostgreSQL 18 + Apache AGE
-===========================================================================
+memory-pg18-by-yhw — PostgreSQL AI Database Memory System
+==========================================================
 
-Copyright (c) 2026 尹海文 (胖头鱼 🐟)
+Copyright (c) 2026 Haiwen Yin (尹海文 / 胖头鱼 🐟)
+
+Licensed under the Apache License, Version 2.0.
 
 This product includes software developed at
 Apache Software Foundation (http://www.apache.org/).
 
 ---
 
-## 第三方组件与引用
+## Third-Party Components
 
-本项目依赖以下开源组件，遵循各自的许可证：
+This project depends on the following open-source components:
 
-### PostgreSQL Core Database
+### PostgreSQL
 - **URL**: https://www.postgresql.org/
 - **License**: PostgreSQL License (MIT-style)
-- **Version**: 18.x
+- **Version**: 18+
+- **Usage**: Core database engine
 
-### pgvector - Vector Similarity Search for PostgreSQL
+### pgvector — Vector Similarity Search for PostgreSQL
 - **GitHub**: https://github.com/pgvector/pgvector
 - **License**: Apache License 2.0
-- **Usage**: Vector type, HNSW index support, similarity functions
+- **Version**: 0.8.2+
+- **Usage**: VECTOR type, HNSW index, cosine similarity operators
 
-### Apache AGE (Apache Graph Extension)
+### Apache AGE — Apache Graph Extension
 - **URL**: https://age.apache.org/
 - **License**: Apache License 2.0
-- **Version**: 1.7.0
-- **Usage**: Property Graph support, Cypher query language
+- **Version**: 1.7.0+
+- **Usage**: Property graph support, Cypher query language, graph traversal
+
+### pg-embedding-gen-by-yhw — In-Database Embedding Generation
+- **Author**: Haiwen Yin (尹海文)
+- **GitHub**: https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw
+- **License**: Apache License 2.0
+- **Version**: 0.2.0+
+- **Usage**: Custom PG18 extension for SQL-callable embedding generation via COPY FROM PROGRAM + Python proxy; calls any OpenAI-compatible /v1/embeddings API
+- **Note**: NOT a built-in PostgreSQL feature; requires separate installation
+
+### psycopg2 — PostgreSQL Adapter for Python
+- **URL**: https://www.psycopg.org/
+- **License**: GNU LGPL v3 (psycopg2) / Apache License 2.0 (psycopg2-binary)
+- **Version**: 2.8.6+
+- **Usage**: Python database driver, ThreadedConnectionPool
 
 ### BGE-M3 Embedding Model (FlagEmbedding)
 - **GitHub**: https://github.com/FlagOpen/FlagEmbedding
-- **License**: Apache License 2.0
+- **License**: Apache License 2.0 (MIT-style for model weights)
 - **Model**: BAAI/bge-m3
-- **Usage**: Text embedding generation (1024 dimensions)
+- **Usage**: Text embedding generation (1024 dimensions), served via vLLM / LM Studio
 
-### HNSW Algorithm Research Paper
-- **Title**: Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs
+### Python `requests` Library
+- **URL**: https://docs.python-requests.org/
+- **License**: Apache License 2.0
+- **Usage**: HTTP client for pg-embedding-gen-by-yhw proxy
+
+### HNSW Algorithm
+- **Paper**: Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs
 - **Authors**: Yuivii A. Malkov, Dmitry A. Yashunin
 - **URL**: https://arxiv.org/abs/1603.09320
-- **License**: Research Paper (for algorithm reference)
+- **Usage**: Algorithm reference for pgvector HNSW index implementation
 
 ---
 
-## 贡献者
+## Trademark Notices
 
-本项目接受社区贡献。如需提交代码或文档改进，请遵循以下流程：
+- **PostgreSQL** is a registered trademark of the PostgreSQL Community Association of Canada
+- **Apache**, **Apache AGE** are registered trademarks or trademarks of the Apache Software Foundation
+- **BGE-M3** is developed by BAAI (北京智源人工智能研究院)
+- **Python** is a registered trademark of the Python Software Foundation
 
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 发起 Pull Request
-
----
-
-## 商标声明
-
-- **PostgreSQL** 是 PostgreSQL Foundation 的注册商标
-- **Apache**, **Apache AGE** 是 Apache Software Foundation 的注册商标或商标
-- **BGE-M3** 属于 BAAI (北京智源人工智能研究院)
-
-本项目的名称和标识符不授予任何使用上述商标的权利，除非符合商标使用政策。
+Use of these trademarks does not imply endorsement by the trademark holders.
 
 ---
 
-## 法律声明
+## Legal Notice
 
-根据 Apache License 2.0：
+Under Apache License 2.0:
 
-1. 本软件按"原样"提供，不提供任何形式的明示或暗示保证
-2. 贡献者不对因使用本软件产生的任何直接、间接、特殊、偶然或后果性损害承担责任
-3. 重新分发时必须包含完整的许可证和版权声明
-4. 修改后的文件必须显著标示已更改
+1. This software is provided "AS IS", without warranty of any kind
+2. Contributors shall not be liable for any damages arising from the use of this software
+3. Redistributions must retain the full license and copyright notices
+4. Modified files must carry prominent notices stating that You changed the files
+5. If this product includes a NOTICE file, derivative works must include a readable copy of the attribution notices
 
 ---
 
-## 联系方式
+## Contact
 
-- **作者**: 尹海文 (胖头鱼 🐟)
-- **博客**: https://blog.csdn.net/yhw1809
+- **Author**: Haiwen Yin (尹海文 / 胖头鱼 🐟)
+- **Blog**: https://blog.csdn.net/yhw1809
 - **GitHub**: https://github.com/Haiwen-Yin
-- **位置**: 中国四川省成都市郫都区犀浦镇
+- **Location**: Chengdu, Sichuan, China
 
 ---
 
-## Apache License 2.0 全文
+The full text of the Apache License 2.0 is available in the LICENSE file of this repository.
 
-完整的 Apache License 2.0 文本请参见本仓库的 LICENSE 文件。
-
-如需了解许可证条款，请访问：
 https://www.apache.org/licenses/LICENSE-2.0

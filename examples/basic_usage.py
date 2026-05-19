@@ -6,7 +6,7 @@ Basic Usage Examples for memory-pg18-by-yhw v0.3.1
 This script demonstrates how to use the Memory System with PostgreSQL 18 + Apache AGE.
 Platform-agnostic: works with any AI Agent framework.
 
-Requires pg-embedding-gen-by-yhw extension: https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw
+Requires pg-embedding-gen-by-yhw extension (uses COPY FROM PROGRAM + Python proxy; see references/)
 
 Requirements:
     - psycopg2-binary or pg8000
@@ -164,4 +164,4 @@ if __name__ == '__main__':
     print("memory-pg18-by-yhw v0.3.1 - Basic Usage Examples")
     print("=" * 50)
     print("For full documentation see SKILL.md or visit:")
-    print("https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw")
+    print("For pg-embedding-gen-by-yhw docs, see references/")

@@ -103,54 +103,54 @@ This is the most significant update, introducing a complete multi-agent coordina
 ## 🔧 Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Multi-Agent Memory System                        │
-│                      v0.3.3 Edition                                 │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌───────────┐    ┌───────────┐    ┌───────────┐                    │
-│  │ Agent A   │    │ Agent B   │    │ Agent C   │                    │
-│  │ (Analyzer)│    │(Writer)   │    │(Deployer) │                    │
-│  └─────┬─────┘    └─────┬─────┘    └─────┬─────┘                    │
-│        │                │                │                          │
-│        ▼                ▼                ▼                          │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │              AGENT_REGISTRY (Central)                         │  │
-│  │  • Registration & Lifecycle                                   │  │
-│  │  • Capability Discovery                                       │  │
-│  │  • Health Monitoring                                          │  │
-│  └───────────────────────┬───────────────────────────────────────┘  │
-│                          │                                          │
-│  ┌───────────────────────▼───────┐                                  │
-│  │    AGENT_MEMORY_ACCESS        │                                  │
-│  │  • Visibility Policies        │                                  │
-│  │  • Data Access Control        │                                  │
-│  └───────────────────────────────┘                                  │
-│                          │                                          │
-│  ┌───────────────────────▼───────┐                                  │
-│  │    AGENT_COLLABORATION        │                                  │
-│  │  • Communication Channels     │                                  │
-│  │  • Cross-Agent Sharing        │                                  │
-│  └───────────────────────────────┘                                  │
-│                          │                                          │
-│  ┌───────────────────────▼───────┐                                  │
-│  │    AGENT_SESSION              │                                  │
-│  │  • Session Tracking           │                                  │
-│  │  • State Management           │                                  │
-│  └───────────────────────────────┘                                  │
-│                          │                                          │
-│  ┌───────────────────────▼───────┐                                  │
-│  │       MEMORIES TABLE          │                                  │
-│  │    (Memory Storage Layer)     │                                  │
-│  └───────────────────────────────┘                                  │
-│                                                                     │
-│    Benefits:                                                        │
-│    ✅ Centralized Agent Management	                              │
-│    ✅ Fine-Grained Memory Access Control	                          │
-│    ✅ Built-in Collaboration Framework	                          │
-│    ✅ Session State Persistence	                                  │
-│    ✅ Multi-Agent Scalability	                                      │
-│                                                                     │
+┌─────────────────────────────────────────────────────────────┐
+│                    Multi-Agent Memory System                 │
+│                      v0.3.3 Edition                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌───────────┐    ┌───────────┐    ┌───────────┐            │
+│  │ Agent A   │    │ Agent B   │    │ Agent C   │            │
+│  │ (Analyzer)│    │(Writer)   │    │(Deployer)│             │
+│  └─────┬─────┘    └─────┬─────┘    └─────┬─────┘            │
+│        │                │                │                    │
+│        ▼                ▼                ▼                    │
+│  ┌───────────────────────────────────────────────────────────┐│
+│  │              AGENT_REGISTRY (Central)                     ││
+│  │  • Registration & Lifecycle                               ││
+│  │  • Capability Discovery                                   ││
+│  │  • Health Monitoring                                      ││
+│  └───────────────────────┬───────────────────────────────────┘│
+│                          │                                     │
+│                    ┌──────▼───────┐                           │
+│  │    AGENT_MEMORY_ACCESS        │                                    │
+│  │  • Visibility Policies        │                                    │
+│  │  • Data Access Control        │                                    │
+│  └───────────────────────────────┘                                    │
+│                          │                                             │
+│                    ┌──────▼───────┐                                    │
+│  │    AGENT_COLLABORATION        │                                    │
+│  │  • Communication Channels     │                                    │
+│  │  • Cross-Agent Sharing       │                                    │
+│  └───────────────────────────────┘                                    │
+│                          │                                             │
+│                    ┌──────▼───────┐                                    │
+│  │    AGENT_SESSION             │                                    │
+│  │  • Session Tracking         │                                    │
+│  │  • State Management        │                                    │
+│  └───────────────────────────────┘                                    │
+│                          │                                             │
+│                    ┌──────▼───────┐                                    │
+│  │       MEMORIES TABLE          │                                    │
+│  │    (Memory Storage Layer)     │                                    │
+│  └───────────────────────────────┘                                    │
+│                                                                      │
+│    Benefits:                                                         │
+│    ✅ Centralized Agent Management                                  │
+│    ✅ Fine-Grained Memory Access Control                            │
+│    ✅ Built-in Collaboration Framework                              │
+│    ✅ Session State Persistence                                     │
+│    ✅ Multi-Agent Scalability                                       │
+│                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
 ---
