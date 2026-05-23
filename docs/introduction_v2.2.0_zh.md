@@ -56,7 +56,12 @@ PostgreSQL 18 AI 数据库记忆系统是一个面向 AI 智能体（Agent）的
 - **上下文数据**: CONTEXT_DATA 为 JSONB 类型，灵活存储各类上下文负载
 
 ### 2.3 智能体交接
-AGENT_SESSION 表新增 3 列支持智能体交接: | 新增列 | 类型 | 说明 | |--------|------|------| | OWNER_USER_ID | VARCHAR(64) | 会话归属用户 | | WORKSPACE_ID | BIGINT | 关联工作空间 | | PREDECESSOR_SESSION_ID | VARCHAR(128) | 前任会话 ID，形成交接链 |
+AGENT_SESSION 表新增 3 列支持智能体交接: 
+| 新增列 | 类型 | 说明 |
+|--------|------|------| 
+| OWNER_USER_ID | VARCHAR(64) | 会话归属用户 |
+| WORKSPACE_ID | BIGINT | 关联工作空间 |
+| PREDECESSOR_SESSION_ID | VARCHAR(128) | 前任会话 ID，形成交接链 |
 
 `create_handoff_session()` 函数:基于当前会话创建交接会话，自动设置 PREDECESSOR_SESSION_ID 和 WORKSPACE_ID，生成 HANDOFF 类型上下文条目。
 
