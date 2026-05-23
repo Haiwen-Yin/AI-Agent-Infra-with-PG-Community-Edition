@@ -1,4 +1,4 @@
-# Security — PostgreSQL Memory System v2.0.0
+# Security — PostgreSQL Memory System v2.2.0
 
 ## Data Masking
 
@@ -78,7 +78,24 @@ Visibility is enforced at the database level by `agent_perm.check_entity_access(
 |------------|-------------|-----------|
 | `SHARED` | All agents | `visibility = 'SHARED'` |
 | `PRIVATE` | Owner only | `owned_by_agent = current_agent` |
-| `COLLABORATIVE` | Owner + `accessible_to` list | `accessible_to @> '[agent_id]'` |
+| `PUBLIC` | Unrestricted | `visibility = 'PUBLIC'` |
+
+> **Note**: The visibility model is enforced by the `agent_perm.check_entity_access`
+> function, which must be called before any entity read/write operation. See the
+> `agent_perm` schema in the PL/pgSQL API for grant/revoke operations.
+
+Workspaces provide additional isolation: entities within a workspace are only
+accessible to agents operating in that workspace context, regardless of visibility.
+
+### Default Admin Account
+
+The system seeds a default admin user in `system_users` with credentials
+`admin` / `admin123`. **This is for development only** — change the password
+before any production deployment:
+
+```sql
+UPDATE system_users SET password_hash = ... WHERE username = 'admin';
+```
 
 Grant/revoke access:
 

@@ -1,5 +1,6 @@
 -- ============================================================================
--- PostgreSQL Memory System v2.0.0 - Unified Schema
+-- PostgreSQL Memory System v2.2.0 - Unified Schema
+-- Workspace & Context Continuity
 -- ============================================================================
 
 -- Extensions
@@ -11,52 +12,83 @@ CREATE EXTENSION IF NOT EXISTS age;
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS entities (
-    entity_id     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    entity_type   VARCHAR(32) NOT NULL CHECK (entity_type IN ('MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE')),
-    name          VARCHAR(500) NOT NULL,
-    description   TEXT,
-    content       TEXT,
-    category      VARCHAR(100),
-    priority      INT DEFAULT 2,
-    status        VARCHAR(32) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ARCHIVED','DEPRECATED','DELETED')),
-    tags          JSONB DEFAULT '[]',
-    metadata      JSONB DEFAULT '{}',
-    owned_by_agent VARCHAR(64),
-    visibility    VARCHAR(32) DEFAULT 'SHARED' CHECK (visibility IN ('PRIVATE','SHARED','COLLABORATIVE')),
-    accessible_to JSONB DEFAULT '[]',
-    created_at    TIMESTAMPTZ DEFAULT now(),
-    updated_at    TIMESTAMPTZ DEFAULT now(),
-    expires_at    TIMESTAMPTZ
+    entity_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    entity_type     VARCHAR(32) NOT NULL CHECK (entity_type IN ('MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE')),
+    title           VARCHAR(500) NOT NULL,
+    content         TEXT,
+    summary         VARCHAR(2000),
+    category        VARCHAR(100),
+    status          VARCHAR(32) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ARCHIVED','DELETED','DRAFT')),
+    importance      INT DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
+    owned_by_agent  VARCHAR(64),
+    source_agent    VARCHAR(64),
+    visibility      VARCHAR(16) DEFAULT 'PRIVATE' CHECK (visibility IN ('PRIVATE','SHARED','PUBLIC')),
+    retrieval_count INT DEFAULT 0,
+    workspace_id    BIGINT,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now(),
+    expires_at      TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS entity_edges (
     edge_id     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     source_id   BIGINT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
+    source_type VARCHAR(32) NOT NULL,
     target_id   BIGINT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
     edge_type   VARCHAR(64) NOT NULL,
-    strength    NUMERIC DEFAULT 1.0 CHECK (strength >= 0 AND strength <= 2),
+    strength    NUMERIC DEFAULT 1.0 CHECK (strength >= 0 AND strength <= 1),
     confidence  NUMERIC DEFAULT 0.8 CHECK (confidence >= 0 AND confidence <= 1),
-    properties  JSONB DEFAULT '{}',
+    metadata    JSONB DEFAULT '{}',
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_meta (
-    entity_id         BIGINT PRIMARY KEY REFERENCES entities(entity_id) ON DELETE CASCADE,
-    source_type       VARCHAR(32) DEFAULT 'MANUAL',
-    source_entity_ids JSONB DEFAULT '[]',
-    validation_status VARCHAR(32) DEFAULT 'PENDING' CHECK (validation_status IN ('PENDING','VALIDATED','REJECTED','DEPRECATED')),
-    confidence        NUMERIC DEFAULT 0.8,
-    version           INT DEFAULT 1,
-    is_current        BOOLEAN DEFAULT TRUE,
-    validated_at      TIMESTAMPTZ,
-    deprecated_at     TIMESTAMPTZ
+    entity_id     BIGINT PRIMARY KEY REFERENCES entities(entity_id) ON DELETE CASCADE,
+    entity_type   VARCHAR(32) DEFAULT 'KNOWLEDGE',
+    domain        VARCHAR(100),
+    topic         VARCHAR(200),
+    difficulty    VARCHAR(32) DEFAULT 'INTERMEDIATE' CHECK (difficulty IN ('BEGINNER','INTERMEDIATE','ADVANCED','EXPERT')),
+    review_count  INT DEFAULT 0,
+    last_reviewed TIMESTAMPTZ,
+    next_review   TIMESTAMPTZ DEFAULT (now() + INTERVAL '7 days')
+);
+
+CREATE TABLE IF NOT EXISTS harness_meta (
+    entity_id        BIGINT PRIMARY KEY REFERENCES entities(entity_id) ON DELETE CASCADE,
+    entity_type      VARCHAR(32) DEFAULT 'HARNESS_TEMPLATE',
+    template_version INT DEFAULT 1,
+    input_schema     JSONB,
+    output_schema    JSONB,
+    execution_mode   VARCHAR(32) DEFAULT 'SEQUENTIAL' CHECK (execution_mode IN ('SEQUENTIAL','PARALLEL','CONDITIONAL'))
 );
 
 CREATE TABLE IF NOT EXISTS entity_embeddings (
-    entity_id   BIGINT PRIMARY KEY REFERENCES entities(entity_id) ON DELETE CASCADE,
+    entity_id   BIGINT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
+    entity_type VARCHAR(32),
     embedding   vector(1024),
     embed_model VARCHAR(100) DEFAULT 'text-embedding-bge-m3',
-    embedded_at TIMESTAMPTZ DEFAULT now()
+    embedded_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (entity_id, entity_type)
+);
+
+-- ============================================================================
+-- Tag System (normalized)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS tags (
+    tag_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tag_name     VARCHAR(100) UNIQUE NOT NULL,
+    tag_group    VARCHAR(50),
+    usage_count  INT DEFAULT 0,
+    created_at   TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS entity_tags (
+    entity_id   BIGINT NOT NULL,
+    entity_type VARCHAR(32) NOT NULL,
+    tag_id      BIGINT NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
+    PRIMARY KEY (entity_id, entity_type, tag_id),
+    FOREIGN KEY (entity_id) REFERENCES entities(entity_id) ON DELETE CASCADE
 );
 
 -- ============================================================================
@@ -64,57 +96,87 @@ CREATE TABLE IF NOT EXISTS entity_embeddings (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS agent_registry (
-    agent_id         VARCHAR(64) PRIMARY KEY,
-    agent_name       VARCHAR(200) NOT NULL,
-    agent_type       VARCHAR(50) DEFAULT 'general',
-    description      TEXT,
-    capabilities     JSONB DEFAULT '[]',
-    status           VARCHAR(32) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','DISABLED','SUSPENDED')),
-    permission_level VARCHAR(32) DEFAULT 'READ_WRITE' CHECK (permission_level IN ('READ_ONLY','READ_WRITE','ADMIN')),
-    pending_recovery BOOLEAN DEFAULT FALSE,
-    recovered_count  INT DEFAULT 0,
-    created_at       TIMESTAMPTZ DEFAULT now(),
-    updated_at       TIMESTAMPTZ DEFAULT now()
+    agent_id     VARCHAR(64) PRIMARY KEY,
+    agent_name   VARCHAR(200) NOT NULL,
+    agent_type   VARCHAR(50) DEFAULT 'general',
+    description  TEXT,
+    capabilities JSONB DEFAULT '[]',
+    config       JSONB DEFAULT '{}',
+    status       VARCHAR(32) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE','SUSPENDED','DECOMMISSIONED')),
+    last_seen_at TIMESTAMPTZ DEFAULT now(),
+    created_at   TIMESTAMPTZ DEFAULT now(),
+    updated_at   TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS agent_session (
-    session_id       VARCHAR(128) PRIMARY KEY,
-    agent_id         VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
-    is_active        BOOLEAN DEFAULT TRUE,
-    context_snapshot JSONB DEFAULT '{}',
-    working_memory_id BIGINT REFERENCES entities(entity_id),
-    start_time       TIMESTAMPTZ DEFAULT now(),
-    end_time         TIMESTAMPTZ,
-    last_activity    TIMESTAMPTZ DEFAULT now()
+    session_id              VARCHAR(128) PRIMARY KEY,
+    agent_id                VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
+    owner_user_id           VARCHAR(64),
+    workspace_id            BIGINT,
+    predecessor_session_id  VARCHAR(128),
+    is_active               BOOLEAN DEFAULT TRUE,
+    context                 JSONB DEFAULT '{}',
+    start_time              TIMESTAMPTZ DEFAULT now(),
+    end_time                TIMESTAMPTZ,
+    last_activity           TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS entity_access_log (
     log_id      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    agent_id    VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
     entity_id   BIGINT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
+    agent_id    VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
     access_type VARCHAR(32) DEFAULT 'READ' CHECK (access_type IN ('READ','WRITE','DELETE','SHARE')),
+    session_id  VARCHAR(128),
     access_time TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS agent_permission_log (
-    log_id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    agent_id      VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
-    old_status    VARCHAR(32),
-    new_status    VARCHAR(32),
-    change_reason TEXT,
-    status        VARCHAR(32) DEFAULT 'APPLIED',
-    created_at    TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS agent_collaboration (
     collab_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    sharing_agent   VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
-    receiving_agent VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
-    memory_id       BIGINT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
-    share_reason    TEXT,
-    status          VARCHAR(32) DEFAULT 'PENDING' CHECK (status IN ('PENDING','APPROVED','REJECTED','EXPIRED')),
-    approved_at     TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ DEFAULT now()
+    source_agent_id VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
+    target_agent_id VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
+    col_type        VARCHAR(32) DEFAULT 'SHARE',
+    entity_id       BIGINT REFERENCES entities(entity_id) ON DELETE SET NULL,
+    context         JSONB,
+    strength        NUMERIC DEFAULT 1.0,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- ============================================================================
+-- Workspace Tables (v2.2.0)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS workspaces (
+    workspace_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    workspace_name     VARCHAR(200),
+    workspace_type     VARCHAR(32) DEFAULT 'CONVERSATION' CHECK (workspace_type IN ('CONVERSATION','AUTONOMOUS','PIPELINE')),
+    isolation_mode     VARCHAR(16) DEFAULT 'SHARED' CHECK (isolation_mode IN ('SHARED','ISOLATED')),
+    owner_user_id      VARCHAR(64),
+    current_agent_id   VARCHAR(64),
+    current_session_id VARCHAR(128),
+    summary            TEXT,
+    metadata           JSONB DEFAULT '{}',
+    status             VARCHAR(32) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','PAUSED','ARCHIVED')),
+    created_at         TIMESTAMPTZ DEFAULT now(),
+    updated_at         TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS workspace_context (
+    context_id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    workspace_id      BIGINT NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+    agent_id          VARCHAR(64),
+    session_id        VARCHAR(128),
+    context_type      VARCHAR(32) NOT NULL CHECK (context_type IN ('SNAPSHOT','CHECKPOINT','HANDOFF','SUMMARY','ERROR_STATE','AUTO_SAVE')),
+    context_data      JSONB DEFAULT '{}',
+    parent_context_id BIGINT REFERENCES workspace_context(context_id) ON DELETE SET NULL,
+    created_at        TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS workspace_tasks (
+    workspace_id BIGINT NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+    plan_id      BIGINT NOT NULL,
+    assigned_at  TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (workspace_id, plan_id)
 );
 
 -- ============================================================================
@@ -122,32 +184,28 @@ CREATE TABLE IF NOT EXISTS agent_collaboration (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS task_plans (
-    plan_id      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    plan_name    VARCHAR(500) NOT NULL,
-    plan_type    VARCHAR(50) DEFAULT 'task',
-    status       VARCHAR(32) DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACTIVE','PAUSED','COMPLETED','FAILED','CANCELLED')),
-    description  TEXT,
-    goal         TEXT,
-    priority     INT DEFAULT 2,
-    metadata     JSONB DEFAULT '{}',
-    tags         JSONB DEFAULT '[]',
-    created_at   TIMESTAMPTZ DEFAULT now(),
-    started_at   TIMESTAMPTZ,
-    updated_at   TIMESTAMPTZ DEFAULT now(),
-    completed_at TIMESTAMPTZ
+    plan_id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    agent_id       VARCHAR(64),
+    goal           TEXT NOT NULL,
+    status         VARCHAR(32) DEFAULT 'PENDING' CHECK (status IN ('PENDING','RUNNING','BLOCKED','SUCCESS','FAILED','CANCELLED')),
+    priority       INT DEFAULT 5,
+    strategy       VARCHAR(200),
+    result_summary TEXT,
+    created_at     TIMESTAMPTZ DEFAULT now(),
+    updated_at     TIMESTAMPTZ DEFAULT now(),
+    completed_at   TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS task_steps (
     step_id      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     plan_id      BIGINT NOT NULL REFERENCES task_plans(plan_id) ON DELETE CASCADE,
+    plan_status  VARCHAR(32) DEFAULT 'PENDING',
     step_order   INT NOT NULL,
-    step_name    VARCHAR(500) NOT NULL,
-    action       TEXT,
-    tools_used   JSONB DEFAULT '[]',
-    status       VARCHAR(32) DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACTIVE','COMPLETED','FAILED','SKIPPED')),
-    result       TEXT,
-    error_msg    TEXT,
-    created_at   TIMESTAMPTZ DEFAULT now(),
+    description  TEXT,
+    tool_name    VARCHAR(100),
+    tool_input   JSONB,
+    tool_output  JSONB,
+    status       VARCHAR(32) DEFAULT 'PENDING' CHECK (status IN ('PENDING','RUNNING','SUCCESS','FAILED','SKIPPED')),
     started_at   TIMESTAMPTZ,
     completed_at TIMESTAMPTZ
 );
@@ -157,9 +215,6 @@ CREATE TABLE IF NOT EXISTS task_context_snapshots (
     plan_id        BIGINT NOT NULL REFERENCES task_plans(plan_id) ON DELETE CASCADE,
     snapshot_type  VARCHAR(32) DEFAULT 'MANUAL' CHECK (snapshot_type IN ('MANUAL','AUTO','CHECKPOINT','RECOVERY')),
     context_data   JSONB DEFAULT '{}',
-    next_action    TEXT,
-    is_latest      BOOLEAN DEFAULT TRUE,
-    trigger_reason JSONB DEFAULT '{}',
     created_at     TIMESTAMPTZ DEFAULT now()
 );
 
@@ -168,36 +223,18 @@ CREATE TABLE IF NOT EXISTS task_tool_calls (
     plan_id      BIGINT NOT NULL REFERENCES task_plans(plan_id) ON DELETE CASCADE,
     step_id      BIGINT REFERENCES task_steps(step_id) ON DELETE SET NULL,
     tool_name    VARCHAR(100) NOT NULL,
-    action       TEXT,
-    status       VARCHAR(32) DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACTIVE','COMPLETED','FAILED')),
-    result_size  INT,
+    tool_input   JSONB,
+    tool_output  JSONB,
+    status       VARCHAR(32) DEFAULT 'PENDING' CHECK (status IN ('PENDING','RUNNING','SUCCESS','FAILED')),
     duration_ms  INT
 );
 
 CREATE TABLE IF NOT EXISTS task_dependencies (
-    dependency_id   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    source_plan_id  BIGINT NOT NULL REFERENCES task_plans(plan_id) ON DELETE CASCADE,
-    target_plan_id  BIGINT NOT NULL REFERENCES task_plans(plan_id) ON DELETE CASCADE,
-    dependency_type VARCHAR(32) DEFAULT 'HARD' CHECK (dependency_type IN ('HARD','SOFT','CONDITIONAL')),
-    condition       TEXT
-);
-
--- ============================================================================
--- Tag System
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS tags (
-    tag_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    tag_name     VARCHAR(100) UNIQUE NOT NULL,
-    tag_category VARCHAR(50),
-    usage_count  INT DEFAULT 0,
-    created_at   TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS entity_tags (
-    entity_id BIGINT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
-    tag_id    BIGINT NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
-    PRIMARY KEY (entity_id, tag_id)
+    dep_id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source_plan_id   BIGINT NOT NULL REFERENCES task_plans(plan_id) ON DELETE CASCADE,
+    target_plan_id   BIGINT NOT NULL REFERENCES task_plans(plan_id) ON DELETE CASCADE,
+    dep_type         VARCHAR(32) DEFAULT 'HARD' CHECK (dep_type IN ('HARD','SOFT','CONDITIONAL')),
+    created_at       TIMESTAMPTZ DEFAULT now()
 );
 
 -- ============================================================================
@@ -234,23 +271,29 @@ CREATE INDEX IF NOT EXISTS idx_entities_visibility ON entities(visibility);
 CREATE INDEX IF NOT EXISTS idx_entities_created ON entities(created_at);
 CREATE INDEX IF NOT EXISTS idx_entities_type_owner ON entities(entity_type, owned_by_agent);
 CREATE INDEX IF NOT EXISTS idx_entities_type_cat ON entities(entity_type, category);
+CREATE INDEX IF NOT EXISTS idx_entities_workspace ON entities(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_edges_source ON entity_edges(source_id);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON entity_edges(target_id);
 CREATE INDEX IF NOT EXISTS idx_edges_type ON entity_edges(edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_source_type ON entity_edges(source_id, edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_target_type ON entity_edges(target_id, edge_type);
-CREATE INDEX IF NOT EXISTS idx_km_validation ON knowledge_meta(validation_status);
-CREATE INDEX IF NOT EXISTS idx_km_current ON knowledge_meta(is_current);
+CREATE INDEX IF NOT EXISTS idx_km_domain ON knowledge_meta(domain);
+CREATE INDEX IF NOT EXISTS idx_km_next_review ON knowledge_meta(next_review);
+CREATE INDEX IF NOT EXISTS idx_hm_execution_mode ON harness_meta(execution_mode);
+CREATE INDEX IF NOT EXISTS idx_et_tag ON entity_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_emb_hnsw ON entity_embeddings USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+CREATE INDEX IF NOT EXISTS idx_session_agent ON agent_session(agent_id);
+CREATE INDEX IF NOT EXISTS idx_session_active ON agent_session(is_active);
+CREATE INDEX IF NOT EXISTS idx_session_workspace ON agent_session(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_access_agent ON entity_access_log(agent_id);
 CREATE INDEX IF NOT EXISTS idx_access_entity ON entity_access_log(entity_id);
 CREATE INDEX IF NOT EXISTS idx_access_time ON entity_access_log(access_time);
-CREATE INDEX IF NOT EXISTS idx_session_agent ON agent_session(agent_id);
-CREATE INDEX IF NOT EXISTS idx_session_active ON agent_session(is_active);
+CREATE INDEX IF NOT EXISTS idx_ws_status ON workspaces(status);
+CREATE INDEX IF NOT EXISTS idx_ws_owner ON workspaces(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_wctx_workspace ON workspace_context(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_wctx_type ON workspace_context(context_type);
 CREATE INDEX IF NOT EXISTS idx_plan_status ON task_plans(status);
 CREATE INDEX IF NOT EXISTS idx_step_plan ON task_steps(plan_id);
-CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(tag_name);
-CREATE INDEX IF NOT EXISTS idx_et_tag ON entity_tags(tag_id);
-CREATE INDEX IF NOT EXISTS idx_emb_hnsw ON entity_embeddings USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
 
 -- ============================================================================
 -- Apache AGE Graph
@@ -269,20 +312,20 @@ $$;
 -- ============================================================================
 
 CREATE OR REPLACE VIEW v_memory_entities AS
-SELECT e.entity_id, e.entity_type, e.name, e.description, e.content, e.category,
-       e.priority, e.status, e.tags, e.metadata, e.owned_by_agent, e.visibility,
-       e.accessible_to, e.created_at, e.updated_at, e.expires_at,
+SELECT e.entity_id, e.entity_type, e.title, e.content, e.summary, e.category,
+       e.importance, e.status, e.owned_by_agent, e.source_agent, e.visibility,
+       e.retrieval_count, e.workspace_id, e.created_at, e.updated_at, e.expires_at,
        ee.embedding, ee.embed_model, ee.embedded_at
 FROM entities e
 LEFT JOIN entity_embeddings ee ON e.entity_id = ee.entity_id
 WHERE e.entity_type = 'MEMORY';
 
 CREATE OR REPLACE VIEW v_knowledge_entities AS
-SELECT e.entity_id, e.entity_type, e.name, e.description, e.content, e.category,
-       e.priority, e.status, e.tags, e.metadata, e.owned_by_agent, e.visibility,
-       e.accessible_to, e.created_at, e.updated_at, e.expires_at,
-       km.source_type, km.source_entity_ids, km.validation_status, km.confidence AS km_confidence,
-       km.version, km.is_current, km.validated_at, km.deprecated_at,
+SELECT e.entity_id, e.entity_type, e.title, e.content, e.summary, e.category,
+       e.importance, e.status, e.owned_by_agent, e.source_agent, e.visibility,
+       e.retrieval_count, e.workspace_id, e.created_at, e.updated_at, e.expires_at,
+       km.domain, km.topic, km.difficulty, km.review_count,
+       km.last_reviewed, km.next_review,
        ee.embedding, ee.embed_model, ee.embedded_at
 FROM entities e
 LEFT JOIN knowledge_meta km ON e.entity_id = km.entity_id
@@ -290,35 +333,24 @@ LEFT JOIN entity_embeddings ee ON e.entity_id = ee.entity_id
 WHERE e.entity_type = 'KNOWLEDGE';
 
 CREATE OR REPLACE VIEW v_active_sessions AS
-SELECT s.session_id, s.agent_id, s.is_active, s.context_snapshot, s.working_memory_id,
+SELECT s.session_id, s.agent_id, s.is_active, s.context, s.workspace_id,
+       s.owner_user_id, s.predecessor_session_id,
        s.start_time, s.end_time, s.last_activity,
-       a.agent_name, a.agent_type, a.permission_level
+       a.agent_name, a.agent_type
 FROM agent_session s
 JOIN agent_registry a ON s.agent_id = a.agent_id
 WHERE s.is_active = TRUE;
 
-CREATE OR REPLACE VIEW v_collaboration_status AS
-SELECT c.collab_id, c.sharing_agent, c.receiving_agent, c.memory_id, c.share_reason,
-       c.status, c.approved_at, c.created_at,
-       sa.agent_name AS sharing_agent_name,
-       ra.agent_name AS receiving_agent_name
-FROM agent_collaboration c
-JOIN agent_registry sa ON c.sharing_agent = sa.agent_id
-JOIN agent_registry ra ON c.receiving_agent = ra.agent_id;
-
 CREATE OR REPLACE VIEW v_entity_graph AS
-SELECT ee.edge_id, ee.edge_type, ee.strength, ee.confidence, ee.properties, ee.created_at,
-       ee.source_id, se.name AS source_name, se.entity_type AS source_type,
-       ee.target_id, te.name AS target_name, te.entity_type AS target_type
+SELECT ee.edge_id, ee.edge_type, ee.strength, ee.confidence, ee.metadata, ee.created_at,
+       ee.source_id, se.title AS source_title, se.entity_type AS source_type,
+       ee.target_id, te.title AS target_title, te.entity_type AS target_type
 FROM entity_edges ee
 JOIN entities se ON ee.source_id = se.entity_id
 JOIN entities te ON ee.target_id = te.entity_id;
 
 -- ============================================================================
 -- Helper Functions (memory schema)
--- These functions wrap pg-embedding-gen-by-yhw (custom extension by Haiwen Yin)
--- which uses COPY FROM PROGRAM + Python proxy to call embedding APIs.
--- Install pg-embedding-gen-by-yhw first: see references/ for instructions.
 -- ============================================================================
 
 CREATE SCHEMA IF NOT EXISTS memory;
@@ -336,10 +368,10 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION memory.add_concept_with_embedding(
-    p_name VARCHAR,
-    p_description TEXT,
+    p_title VARCHAR,
+    p_content TEXT,
     p_category VARCHAR,
-    p_metadata JSONB
+    p_importance INT DEFAULT 5
 )
 RETURNS BIGINT
 LANGUAGE plpgsql
@@ -348,17 +380,17 @@ DECLARE
     v_entity_id BIGINT;
     v_embedding vector(1024);
 BEGIN
-    INSERT INTO entities (entity_type, name, description, category, metadata, status)
-    VALUES ('KNOWLEDGE', p_name, p_description, p_category, COALESCE(p_metadata, '{}'), 'ACTIVE')
+    INSERT INTO entities (entity_type, title, content, category, importance, status)
+    VALUES ('KNOWLEDGE', p_title, p_content, p_category, p_importance, 'ACTIVE')
     RETURNING entity_id INTO v_entity_id;
 
-    INSERT INTO knowledge_meta (entity_id, source_type, validation_status, confidence, version, is_current)
-    VALUES (v_entity_id, 'MANUAL', 'PENDING', 0.8, 1, TRUE);
+    INSERT INTO knowledge_meta (entity_id)
+    VALUES (v_entity_id);
 
-    v_embedding := memory.generate_embedding(COALESCE(p_name, '') || ' ' || COALESCE(p_description, ''));
+    v_embedding := memory.generate_embedding(COALESCE(p_title, '') || ' ' || COALESCE(p_content, ''));
 
-    INSERT INTO entity_embeddings (entity_id, embedding)
-    VALUES (v_entity_id, v_embedding);
+    INSERT INTO entity_embeddings (entity_id, entity_type, embedding)
+    VALUES (v_entity_id, 'KNOWLEDGE', v_embedding);
 
     RETURN v_entity_id;
 END;
@@ -368,7 +400,7 @@ CREATE OR REPLACE FUNCTION memory.search_similar(
     p_query TEXT,
     p_limit INT DEFAULT 10
 )
-RETURNS TABLE(entity_id BIGINT, name VARCHAR, category VARCHAR, similarity FLOAT)
+RETURNS TABLE(entity_id BIGINT, title VARCHAR, category VARCHAR, similarity FLOAT)
 LANGUAGE plpgsql
 AS $$
 DECLARE
@@ -377,7 +409,7 @@ BEGIN
     v_embedding := memory.generate_embedding(p_query);
 
     RETURN QUERY
-    SELECT ee.entity_id, e.name, e.category,
+    SELECT ee.entity_id, e.title, e.category,
            1 - (ee.embedding <=> v_embedding) AS similarity
     FROM entity_embeddings ee
     JOIN entities e ON ee.entity_id = e.entity_id
@@ -392,46 +424,13 @@ $$;
 -- ============================================================================
 
 INSERT INTO system_config (config_key, config_value, description)
-VALUES ('system.version', '2.0.0', 'PostgreSQL Memory System version')
+VALUES ('system.version', '2.2.0', 'PostgreSQL Memory System version')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = now();
 
 INSERT INTO system_config (config_key, config_value, description)
 VALUES ('schema.deployed_at', now()::TEXT, 'Schema deployment timestamp')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = now();
 
--- ============================================================================
--- Comments
--- ============================================================================
-
-COMMENT ON TABLE entities IS 'Core entity table storing all memory, knowledge, task outputs, experiences, and harness templates';
-COMMENT ON TABLE entity_edges IS 'Directed relationships between entities with strength and confidence weights';
-COMMENT ON TABLE knowledge_meta IS 'Metadata for KNOWLEDGE entities tracking validation, versioning, and lineage';
-COMMENT ON TABLE entity_embeddings IS 'Vector embeddings for semantic search on entities';
-COMMENT ON TABLE agent_registry IS 'Registered agents with their capabilities and permission levels';
-COMMENT ON TABLE agent_session IS 'Active and historical agent sessions';
-COMMENT ON TABLE entity_access_log IS 'Audit log of entity access by agents';
-COMMENT ON TABLE agent_permission_log IS 'Audit log of agent permission changes';
-COMMENT ON TABLE agent_collaboration IS 'Memory sharing and collaboration requests between agents';
-COMMENT ON TABLE task_plans IS 'Task execution plans with status tracking';
-COMMENT ON TABLE task_steps IS 'Individual steps within a task plan';
-COMMENT ON TABLE task_context_snapshots IS 'Context snapshots for task recovery and resumption';
-COMMENT ON TABLE task_tool_calls IS 'Tool invocation records within task steps';
-COMMENT ON TABLE task_dependencies IS 'Dependencies between task plans';
-COMMENT ON TABLE tags IS 'Tag dictionary with usage counts';
-COMMENT ON TABLE entity_tags IS 'Many-to-many association between entities and tags';
-COMMENT ON TABLE system_config IS 'System configuration key-value store';
-COMMENT ON TABLE system_users IS 'System user accounts with authentication';
-
-COMMENT ON COLUMN entities.entity_type IS 'Entity type: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, or HARNESS_TEMPLATE';
-COMMENT ON COLUMN entities.visibility IS 'Access scope: PRIVATE (owner only), SHARED (all agents), COLLABORATIVE (specific agents)';
-COMMENT ON COLUMN entities.accessible_to IS 'JSONB array of agent_ids with explicit access when visibility is COLLABORATIVE';
-COMMENT ON COLUMN entities.priority IS 'Priority level: 1=high, 2=medium, 3=low';
-COMMENT ON COLUMN entities.status IS 'Entity lifecycle status';
-COMMENT ON COLUMN entity_edges.strength IS 'Relationship strength from 0.0 to 2.0';
-COMMENT ON COLUMN entity_edges.confidence IS 'Confidence score from 0.0 to 1.0';
-COMMENT ON COLUMN knowledge_meta.validation_status IS 'Validation state: PENDING, VALIDATED, REJECTED, or DEPRECATED';
-COMMENT ON COLUMN knowledge_meta.is_current IS 'Whether this is the current version of the knowledge concept';
-COMMENT ON COLUMN agent_registry.permission_level IS 'Agent permission: READ_ONLY, READ_WRITE, or ADMIN';
-COMMENT ON COLUMN agent_collaboration.status IS 'Collaboration state: PENDING, APPROVED, REJECTED, or EXPIRED';
-COMMENT ON COLUMN task_plans.status IS 'Plan lifecycle: PENDING, ACTIVE, PAUSED, COMPLETED, FAILED, or CANCELLED';
-COMMENT ON COLUMN task_steps.status IS 'Step lifecycle: PENDING, ACTIVE, COMPLETED, FAILED, or SKIPPED';
+INSERT INTO system_users (user_id, username, password_hash, salt, role, status)
+VALUES ('admin', 'admin', 'placeholder_hash', 'placeholder_salt', 'ADMIN', 'ACTIVE')
+ON CONFLICT (user_id) DO NOTHING;

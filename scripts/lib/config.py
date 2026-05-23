@@ -1,57 +1,59 @@
-"""PostgreSQL Memory System v2.0.0 - Configuration"""
+"""PostgreSQL Memory System v2.2.0 - Configuration"""
 
 import json
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 
+@dataclass
 class DatabaseConfig:
-    def __init__(self, host='10.10.10.131', port=5432, database='memory_graph',
-                 user='pgsql', password='', min_conn=2, max_conn=5):
-        self.host = host
-        self.port = port
-        self.database = database
-        self.user = user
-        self.password = password
-        self.min_conn = min_conn
-        self.max_conn = max_conn
+    host: str = '10.10.10.131'
+    port: int = 5432
+    database: str = 'memory_graph'
+    user: str = 'pgsql'
+    password: str = ''
+    min_conn: int = 2
+    max_conn: int = 5
 
 
+@dataclass
 class ServerConfig:
-    def __init__(self, host='0.0.0.0', port=8000, session_timeout=300):
-        self.host = host
-        self.port = port
-        self.session_timeout = session_timeout
+    host: str = '0.0.0.0'
+    port: int = 8000
+    session_timeout: int = 300
 
 
+@dataclass
 class EmbeddingConfig:
-    def __init__(self, api_url='http://10.10.10.1:12345/v1/embeddings',
-                 model='text-embedding-bge-m3', dimension=1024):
-        self.api_url = api_url
-        self.model = model
-        self.dimension = dimension
+    api_url: str = 'http://10.10.10.1:12345/v1/embeddings'
+    model: str = 'text-embedding-bge-m3'
+    dimension: int = 1024
 
 
+@dataclass
 class SecurityConfig:
-    def __init__(self, masking_enabled=True, pbkdf2_iterations=100000,
-                 max_login_attempts=5, lockout_minutes=15):
-        self.masking_enabled = masking_enabled
-        self.pbkdf2_iterations = pbkdf2_iterations
-        self.max_login_attempts = max_login_attempts
-        self.lockout_minutes = lockout_minutes
+    masking_enabled: bool = True
+    pbkdf2_iterations: int = 100000
+    max_login_attempts: int = 5
+    lockout_minutes: int = 15
 
 
+@dataclass
 class Config:
-    def __init__(self):
-        self.database = DatabaseConfig()
-        self.server = ServerConfig()
-        self.embedding = EmbeddingConfig()
-        self.security = SecurityConfig()
-        self.project_root = Path(__file__).resolve().parent.parent.parent
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
+    project_root: str = field(default_factory=lambda: str(Path(__file__).resolve().parent.parent.parent))
+
+    def __post_init__(self):
         self._load_config_file()
+        self._load_env_overrides()
 
     def _load_config_file(self):
-        config_path = self.project_root / 'config.json'
+        config_path = Path(self.project_root) / 'config.json'
         if not config_path.exists():
             return
         try:
@@ -60,46 +62,32 @@ class Config:
         except (json.JSONDecodeError, IOError):
             return
 
-        if 'database' in data:
-            for k, v in data['database'].items():
-                if hasattr(self.database, k):
-                    setattr(self.database, k, v)
-        if 'server' in data:
-            for k, v in data['server'].items():
-                if hasattr(self.server, k):
-                    setattr(self.server, k, v)
-        if 'embedding' in data:
-            for k, v in data['embedding'].items():
-                if hasattr(self.embedding, k):
-                    setattr(self.embedding, k, v)
-        if 'security' in data:
-            for k, v in data['security'].items():
-                if hasattr(self.security, k):
-                    setattr(self.security, k, v)
+        section_map = {
+            'database': self.database,
+            'server': self.server,
+            'embedding': self.embedding,
+            'security': self.security,
+        }
+        for section_key, section_obj in section_map.items():
+            if section_key in data:
+                for k, v in data[section_key].items():
+                    if hasattr(section_obj, k):
+                        setattr(section_obj, k, v)
 
-
-def load_config():
-    config = Config()
-
-    env_map = {
-        'MEMORY_DB_HOST': ('database', 'host'),
-        'MEMORY_DB_PORT': ('database', 'port', int),
-        'MEMORY_DB_NAME': ('database', 'database'),
-        'MEMORY_DB_USER': ('database', 'user'),
-        'MEMORY_DB_PASSWORD': ('database', 'password'),
-        'MEMORY_SERVER_PORT': ('server', 'port', int),
-        'MEMORY_EMBEDDING_API': ('embedding', 'api_url'),
-    }
-
-    for env_var, spec in env_map.items():
-        val = os.environ.get(env_var)
-        if val is not None:
-            section = getattr(config, spec[0])
-            attr = spec[1]
-            converter = spec[2] if len(spec) > 2 else None
-            setattr(section, attr, converter(val) if converter else val)
-
-    return config
+    def _load_env_overrides(self):
+        env_map = {
+            'MEMORY_DB_HOST': (self.database, 'host', None),
+            'MEMORY_DB_PORT': (self.database, 'port', int),
+            'MEMORY_DB_NAME': (self.database, 'database', None),
+            'MEMORY_DB_USER': (self.database, 'user', None),
+            'MEMORY_DB_PASSWORD': (self.database, 'password', None),
+            'MEMORY_SERVER_PORT': (self.server, 'port', int),
+            'MEMORY_EMBEDDING_API': (self.embedding, 'api_url', None),
+        }
+        for env_var, (obj, attr, converter) in env_map.items():
+            val = os.environ.get(env_var)
+            if val is not None:
+                setattr(obj, attr, converter(val) if converter else val)
 
 
 _config_instance = None
@@ -108,5 +96,5 @@ _config_instance = None
 def get_config():
     global _config_instance
     if _config_instance is None:
-        _config_instance = load_config()
+        _config_instance = Config()
     return _config_instance

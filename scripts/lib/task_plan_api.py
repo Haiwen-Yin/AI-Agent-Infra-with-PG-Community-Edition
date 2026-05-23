@@ -1,6 +1,7 @@
-"""PostgreSQL Memory System v2.0.0 - Task Plan API
+"""PostgreSQL Memory System v2.2.0 - Task Plan API
 
-Task plan management with steps, snapshots, tool calls, and dependencies.
+Task plan creation, step management, breakpoint recovery,
+tool call auditing, and dependency tracking.
 """
 
 import json
@@ -11,279 +12,210 @@ from .connection import execute, execute_query, execute_query_one, execute_inser
 
 logger = logging.getLogger(__name__)
 
+_TERMINAL_STATUSES = frozenset({"SUCCESS", "FAILED", "CANCELLED"})
+_STEP_TERMINAL_STATUSES = frozenset({"SUCCESS", "FAILED", "SKIPPED"})
+_ALLOWED_PLAN_UPDATES = frozenset({"goal", "priority", "strategy", "result_summary", "status"})
+_ALLOWED_STEP_UPDATES = frozenset({"description", "tool_name", "tool_input", "tool_output", "status"})
 
-def create_task_plan(plan_name, plan_type='task', description=None, goal=None,
-                     priority=2, steps=None, metadata=None, tags=None):
-    plan_sql = """
-        INSERT INTO task_plans (plan_name, plan_type, description, goal,
-                                priority, status, metadata, tags)
-        VALUES (%s, %s, %s, %s, %s, 'PENDING', %s, %s)
+
+def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
+    result = {}
+    for key, value in row.items():
+        lk = key.lower()
+        if isinstance(value, str) and lk in (
+            "tool_input", "tool_output", "context_data",
+        ):
+            try:
+                result[lk] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                result[lk] = value
+        else:
+            result[lk] = value
+    return result
+
+
+def create_plan(agent_id: str, goal: str, priority: int = 5,
+                strategy: Optional[str] = None) -> str:
+    sql = """
+        INSERT INTO task_plans (agent_id, goal, status, priority, strategy)
+        VALUES (%s, %s, 'PENDING', %s, %s)
         RETURNING plan_id
     """
-    plan_id = execute_insert_returning_id(plan_sql, (
-        plan_name,
-        plan_type,
-        description,
-        goal,
-        priority,
-        json.dumps(metadata or {}),
-        json.dumps(tags or []),
-    ), id_column='plan_id')
-
-    if steps:
-        step_sql = """
-            INSERT INTO task_steps (plan_id, step_order, step_name, action,
-                                    tools_used, status)
-            VALUES (%s, %s, %s, %s, %s, 'PENDING')
-        """
-        for i, step in enumerate(steps):
-            step_name = step.get('name', step.get('step_name', 'Step {}'.format(i + 1)))
-            action = step.get('action', '')
-            tools_used = step.get('tools_used', [])
-            execute(step_sql, (
-                plan_id, i + 1, step_name, action,
-                json.dumps(tools_used if isinstance(tools_used, list) else []),
-            ))
-
-    save_snapshot(plan_id, {
-        'next_action': steps[0].get('action') if steps else None,
-        'step_index': 0,
-    }, snapshot_type='AUTO')
-
-    return plan_id
+    return execute_insert_returning_id(sql, (
+        agent_id, goal, priority, strategy,
+    ))
 
 
-def get_task_plan(plan_id):
+def get_plan(plan_id: str) -> Optional[Dict[str, Any]]:
     sql = """
-        SELECT plan_id, plan_name, plan_type, description, goal,
-               priority, status, metadata, tags,
-               created_at, started_at, updated_at, completed_at
+        SELECT plan_id, agent_id, goal, status, priority, strategy, result_summary,
+               created_at, updated_at, completed_at
         FROM task_plans
         WHERE plan_id = %s
     """
     row = execute_query_one(sql, (plan_id,))
     if row is None:
         return None
-    for col in ('metadata', 'tags'):
-        val = row.get(col)
-        if isinstance(val, str):
-            try:
-                row[col] = json.loads(val)
-            except (json.JSONDecodeError, TypeError):
-                pass
-    return row
+    return _row_to_dict(row)
 
 
-def get_task_steps(plan_id):
-    sql = """
-        SELECT step_id, plan_id, step_order, step_name, action,
-               tools_used, status, result, error_msg,
-               created_at, started_at, completed_at
-        FROM task_steps
-        WHERE plan_id = %s
-        ORDER BY step_order ASC
-    """
-    rows = execute_query(sql, (plan_id,))
-    for r in rows:
-        for col in ('tools_used',):
-            val = r.get(col)
-            if isinstance(val, str):
-                try:
-                    r[col] = json.loads(val)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-    return rows
-
-
-def update_step_status(plan_id, step_id, status, result=None, error_msg=None):
-    if status == 'SUCCESS':
-        status = 'COMPLETED'
-    elif status == 'IN_PROGRESS':
-        status = 'ACTIVE'
-    updates = {"status": status}
-    if result is not None:
-        updates["result"] = result
-    if error_msg is not None:
-        updates["error_msg"] = error_msg
-
-    if status == 'IN_PROGRESS' or status == 'ACTIVE':
-        updates["started_at"] = "now()"
-    elif status in ('SUCCESS', 'COMPLETED', 'FAILED', 'BLOCKED', 'SKIPPED'):
-        updates["completed_at"] = "now()"
+def update_plan(plan_id: str, **kwargs: Any) -> bool:
+    valid = {k: v for k, v in kwargs.items() if k in _ALLOWED_PLAN_UPDATES}
+    if not valid:
+        return False
 
     set_parts = []
-    values = []
-    for k, v in updates.items():
-        if v == "now()":
-            set_parts.append("{} = now()".format(k))
-        else:
-            set_parts.append("{} = %s".format(k))
-            values.append(v)
+    values: List[Any] = []
+    for key, value in valid.items():
+        if key == "status" and value in _TERMINAL_STATUSES:
+            set_parts.append("completed_at = NOW()")
+        set_parts.append("{} = %s".format(key))
+        values.append(value)
 
-    values.extend([step_id, plan_id])
-    sql = "UPDATE task_steps SET {} WHERE step_id = %s AND plan_id = %s".format(', '.join(set_parts))
-    affected = execute(sql, values)
+    if not set_parts:
+        return False
 
-    if affected > 0:
-        new_status = _derive_plan_status(plan_id)
-        execute("UPDATE task_plans SET status = %s, updated_at = now() WHERE plan_id = %s",
-                (new_status, plan_id))
-        save_snapshot(plan_id, {"trigger": "step_{}".format(status), "step_id": step_id}, snapshot_type='AUTO')
-
-    return affected > 0
+    set_parts.append("updated_at = NOW()")
+    values.append(plan_id)
+    sql = "UPDATE task_plans SET {} WHERE plan_id = %s".format(', '.join(set_parts))
+    return execute(sql, values) > 0
 
 
-def save_snapshot(plan_id, context, snapshot_type='MANUAL'):
-    execute(
-        "UPDATE task_context_snapshots SET is_latest = FALSE WHERE plan_id = %s AND is_latest = TRUE",
-        (plan_id,)
-    )
-
-    context_data = context if isinstance(context, dict) else {"context": context}
-    next_action = context_data.get('next_action')
-
+def add_step(plan_id: str, plan_status: str, description: str, step_order: int,
+             tool_name: Optional[str] = None, tool_input: Optional[Any] = None) -> str:
     sql = """
-        INSERT INTO task_context_snapshots (plan_id, snapshot_type, context_data,
-                                            next_action, is_latest, trigger_reason)
-        VALUES (%s, %s, %s, %s, TRUE, %s)
+        INSERT INTO task_steps (plan_id, plan_status, step_order, description,
+                                tool_name, tool_input, status)
+        VALUES (%s, %s, %s, %s, %s, %s, 'PENDING')
+        RETURNING step_id
+    """
+    return execute_insert_returning_id(sql, (
+        plan_id, plan_status, step_order, description,
+        tool_name,
+        json.dumps(tool_input) if tool_input is not None else None,
+    ))
+
+
+def update_step(step_id: str, **kwargs: Any) -> bool:
+    valid = {k: v for k, v in kwargs.items() if k in _ALLOWED_STEP_UPDATES}
+    if not valid:
+        return False
+
+    set_parts = []
+    values: List[Any] = []
+    for key, value in valid.items():
+        if key in ("tool_input", "tool_output"):
+            values.append(json.dumps(value) if value is not None else None)
+        else:
+            values.append(value)
+        set_parts.append("{} = %s".format(key))
+
+    if "status" in valid:
+        if valid["status"] == "RUNNING":
+            set_parts.append("started_at = NOW()")
+        elif valid["status"] in _STEP_TERMINAL_STATUSES:
+            set_parts.append("completed_at = NOW()")
+
+    values.append(step_id)
+    sql = "UPDATE task_steps SET {} WHERE step_id = %s".format(', '.join(set_parts))
+    return execute(sql, values) > 0
+
+
+def get_plan_steps(plan_id: str) -> List[Dict[str, Any]]:
+    sql = """
+        SELECT step_id, plan_id, plan_status, step_order, description,
+               tool_name, tool_input, tool_output, status,
+               started_at, completed_at
+        FROM task_steps
+        WHERE plan_id = %s
+        ORDER BY step_order
+    """
+    rows = execute_query(sql, (plan_id,))
+    return [_row_to_dict(r) for r in rows]
+
+
+def add_dependency(source_plan_id: str, target_plan_id: str, dep_type: str) -> str:
+    sql = """
+        INSERT INTO task_dependencies (source_plan_id, target_plan_id, dep_type)
+        VALUES (%s, %s, %s)
+        RETURNING dep_id
+    """
+    return execute_insert_returning_id(sql, (
+        source_plan_id, target_plan_id, dep_type,
+    ))
+
+
+def get_plan_dependencies(plan_id: str) -> List[Dict[str, Any]]:
+    sql = """
+        SELECT dep_id, source_plan_id, target_plan_id, dep_type, created_at
+        FROM task_dependencies
+        WHERE source_plan_id = %s OR target_plan_id = %s
+        ORDER BY created_at
+    """
+    return [_row_to_dict(r) for r in execute_query(sql, (plan_id, plan_id))]
+
+
+def log_tool_call(plan_id: str, step_id: Optional[str] = None,
+                  tool_name: Optional[str] = None,
+                  tool_input: Optional[Any] = None,
+                  tool_output: Optional[Any] = None,
+                  status: str = "PENDING",
+                  duration_ms: Optional[int] = None) -> str:
+    sql = """
+        INSERT INTO task_tool_calls (plan_id, step_id, tool_name,
+                                     tool_input, tool_output, status, duration_ms)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING call_id
+    """
+    return execute_insert_returning_id(sql, (
+        plan_id, step_id, tool_name,
+        json.dumps(tool_input) if tool_input is not None else None,
+        json.dumps(tool_output) if tool_output is not None else None,
+        status, duration_ms,
+    ))
+
+
+def save_snapshot(plan_id: str, snapshot_type: str, context_data: Any) -> str:
+    sql = """
+        INSERT INTO task_context_snapshots (plan_id, snapshot_type, context_data)
+        VALUES (%s, %s, %s)
         RETURNING snapshot_id
     """
     return execute_insert_returning_id(sql, (
         plan_id,
         snapshot_type,
-        json.dumps(context_data),
-        next_action,
-        json.dumps({"trigger": context_data.get("trigger", snapshot_type)}),
-    ), id_column='snapshot_id')
+        json.dumps(context_data) if context_data is not None else None,
+    ))
 
 
-def resume_task(plan_id):
-    plan = get_task_plan(plan_id)
-    if plan is None:
-        return None
-
-    snapshot_row = execute_query_one(
-        """SELECT snapshot_id, context_data, next_action, snapshot_type, created_at
-           FROM task_context_snapshots
-           WHERE plan_id = %s AND is_latest = TRUE
-           ORDER BY created_at DESC
-           LIMIT 1""",
-        (plan_id,)
-    )
-
-    context = {}
-    if snapshot_row:
-        context = snapshot_row.get('context_data', '{}')
-        if isinstance(context, str):
-            try:
-                context = json.loads(context)
-            except (json.JSONDecodeError, TypeError):
-                context = {}
-
-    incomplete_steps = execute_query(
-        """SELECT step_id, step_order, step_name, action, status
-           FROM task_steps
-           WHERE plan_id = %s AND status IN ('PENDING', 'IN_PROGRESS', 'ACTIVE', 'BLOCKED')
-           ORDER BY step_order ASC""",
-        (plan_id,)
-    )
-
-    execute(
-        "UPDATE task_plans SET status = 'ACTIVE', updated_at = now() WHERE plan_id = %s",
-        (plan_id,)
-    )
-
-    return {
-        'plan_id': plan_id,
-        'context': context,
-        'next_action': snapshot_row.get('next_action') if snapshot_row else None,
-        'snapshot_time': snapshot_row.get('created_at') if snapshot_row else None,
-        'incomplete_steps': incomplete_steps,
-    }
-
-
-def log_tool_call(plan_id, tool_name, action, step_id=None, status='SUCCESS',
-                  result_size=None, duration_ms=None):
-    if status == 'SUCCESS':
-        status = 'COMPLETED'
-    sql = """
-        INSERT INTO task_tool_calls (plan_id, step_id, tool_name, action,
-                                     status, result_size, duration_ms)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        RETURNING call_id
-    """
-    return execute_insert_returning_id(sql, (
-        plan_id, step_id, tool_name, action, status, result_size, duration_ms,
-    ), id_column='call_id')
-
-
-def add_dependency(source_plan_id, target_plan_id, dependency_type='HARD',
-                   condition=None):
-    sql = """
-        INSERT INTO task_dependencies (source_plan_id, target_plan_id,
-                                       dependency_type, condition)
-        VALUES (%s, %s, %s, %s)
-        RETURNING dependency_id
-    """
-    return execute_insert_returning_id(sql, (
-        source_plan_id, target_plan_id, dependency_type, condition,
-    ), id_column='dependency_id')
-
-
-def search_completed_tasks(plan_type=None, status=None, limit=50):
+def list_plans(agent_id: Optional[str] = None, status: Optional[str] = None,
+               limit: int = 50) -> List[Dict[str, Any]]:
     conditions = []
-    params = []
-
-    if plan_type:
-        conditions.append("plan_type = %s")
-        params.append(plan_type)
-
-    if status:
+    params: List[Any] = []
+    if agent_id is not None:
+        conditions.append("agent_id = %s")
+        params.append(agent_id)
+    if status is not None:
         conditions.append("status = %s")
         params.append(status)
-    else:
-        conditions.append("status IN ('COMPLETED', 'FAILED', 'CANCELLED')")
 
-    where = ' AND '.join(conditions)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     params.append(limit)
-
     sql = """
-        SELECT plan_id, plan_name, plan_type, description, goal,
-               priority, status, created_at, completed_at
+        SELECT plan_id, agent_id, goal, status, priority, strategy, result_summary,
+               created_at, updated_at, completed_at
         FROM task_plans
-        WHERE {}
-        ORDER BY completed_at DESC
+        {}
+        ORDER BY created_at DESC
         LIMIT %s
     """.format(where)
+    return [_row_to_dict(r) for r in execute_query(sql, params)]
 
-    return execute_query(sql, params)
 
-
-def _derive_plan_status(plan_id):
-    rows = execute_query(
-        "SELECT status, COUNT(*) AS cnt FROM task_steps WHERE plan_id = %s GROUP BY status",
-        (plan_id,)
-    )
-    if not rows:
-        return 'PENDING'
-
-    counts = {r['status']: r['cnt'] for r in rows}
-    total = sum(counts.values())
-
-    if total == 0:
-        return 'PENDING'
-
-    done = counts.get('COMPLETED', 0) + counts.get('SKIPPED', 0)
-    failed = counts.get('FAILED', 0)
-    active = counts.get('IN_PROGRESS', 0) + counts.get('ACTIVE', 0) + counts.get('BLOCKED', 0)
-
-    if done == total:
-        return 'COMPLETED'
-    if failed > 0:
-        return 'FAILED'
-    if active > 0:
-        return 'ACTIVE'
-    if done > 0:
-        return 'ACTIVE'
-
-    return 'PENDING'
+def delete_plan(plan_id: str) -> bool:
+    execute("DELETE FROM task_tool_calls WHERE plan_id = %s", (plan_id,))
+    execute("DELETE FROM task_context_snapshots WHERE plan_id = %s", (plan_id,))
+    execute("DELETE FROM task_steps WHERE plan_id = %s", (plan_id,))
+    execute("DELETE FROM task_dependencies WHERE source_plan_id = %s OR target_plan_id = %s",
+            (plan_id, plan_id))
+    return execute("DELETE FROM task_plans WHERE plan_id = %s", (plan_id,)) > 0

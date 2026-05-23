@@ -1,6 +1,6 @@
 {
   "database": {
-    "host": "localhost",
+    "host": "10.10.10.131",
     "port": 5432,
     "database": "memory_graph",
     "user": "pgsql",

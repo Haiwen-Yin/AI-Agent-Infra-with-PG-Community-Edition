@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.0.0 - Connection Pool Manager"""
+"""PostgreSQL Memory System v2.2.0 - Connection Pool Manager"""
 
 import logging
 import threading
@@ -7,7 +7,7 @@ from contextlib import contextmanager
 import psycopg2
 import psycopg2.pool
 
-from .config import get_config, DatabaseConfig
+from .config import get_config
 
 logger = logging.getLogger(__name__)
 

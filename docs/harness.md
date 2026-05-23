@@ -1,30 +1,38 @@
-# Harness Templates — PostgreSQL Memory System v2.0.0
+# Harness Templates — PostgreSQL Memory System v2.2.0
 
 ## Architecture
 
 Harness templates are reusable agent execution blueprints stored as ENTITIES
 with `entity_type='HARNESS_TEMPLATE'`. The `harness_meta` table stores
-template-specific metadata (version, status, variables, changelog).
+template-specific metadata: `input_schema` (JSONB), `output_schema` (JSONB),
+and `execution_mode` (VARCHAR).
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    ENTITIES                          │
 │  entity_type = 'HARNESS_TEMPLATE'                   │
-│  metadata → {prompt_templates, tool_bindings, ...}  │
+│  title, summary, importance, workspace_id           │
 ├─────────────────────────────────────────────────────┤
 │                  HARNESS_META                        │
-│  template_version, template_status,                 │
-│  variables (JSONB schema), changelog (JSONB array)  │
+│  input_schema (JSONB), output_schema (JSONB),       │
+│  execution_mode (VARCHAR)                           │
 ├─────────────────────────────────────────────────────┤
 │                ENTITY_EDGES                          │
 │  edge_type = 'DERIVES_FROM' → parent template       │
 │  (enables template inheritance/lineage)             │
+│  source_type, metadata (JSONB)                      │
 └─────────────────────────────────────────────────────┘
 ```
 
 ## Template Structure
 
-Templates store their configuration in the `entities.metadata` JSONB column:
+Templates store their configuration in the `entities` columns and `harness_meta`
+companion table. The `harness_meta.input_schema` and `harness_meta.output_schema`
+define the expected data contracts, while `harness_meta.execution_mode` specifies
+how the template runs (e.g., `SEQUENTIAL`, `PARALLEL`, `INTERACTIVE`).
+
+Template content (prompt_templates, tool_bindings, guardrails, etc.) is stored
+in the `entities.content` column as structured JSON:
 
 ```json
 {
@@ -57,21 +65,18 @@ Templates store their configuration in the `entities.metadata` JSONB column:
 }
 ```
 
-### Metadata Fields
+### harness_meta Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `prompt_templates` | `object` | Named prompt strings with `{{variable}}` slots |
-| `tool_bindings` | `array` | Tools the agent can invoke; each entry has `name` and `access` |
-| `variables` | `object` | Schema of configurable variables: `type`, `required`, `enum`, `default` |
-| `guardrails` | `object` | Execution limits: `max_iterations`, `max_execution_time`, content moderation flags |
-| `memory_access` | `object` | Entity types the agent can read/write, and whether sharing is allowed |
-| `evaluation` | `object` | Scoring criteria and minimum score threshold |
+| `input_schema` | `JSONB` | JSON Schema defining expected input variables and their types |
+| `output_schema` | `JSONB` | JSON Schema defining the structure of template output |
+| `execution_mode` | `VARCHAR` | Execution strategy: `SEQUENTIAL`, `PARALLEL`, or `INTERACTIVE` |
 
 ## Built-in Tool Sets
 
 Tool sets are pre-defined bundles that can be referenced by name in
-`create_template(tool_sets=[...])`:
+`create_harness_template(tool_sets=[...])`:
 
 ### memory_tools
 
@@ -122,16 +127,16 @@ Tool sets are pre-defined bundles that can be referenced by name in
 | `balanced` | 15 | 300s | summarize | true | true | 3 |
 | `aggressive` | 50 | 900s | truncate | false | false | 5 |
 
-Usage: `create_template(name="...", guardrail_preset="conservative")`
+Usage: `create_harness_template(name="...", guardrail_preset="conservative")`
 
 ## Python API — 12 Functions
 
-### create_template
+### create_harness_template
 
 ```python
-entity_id = create_template(
-    name="My Agent",
-    description="Custom agent template",
+entity_id = create_harness_template(
+    title="My Agent",
+    summary="Custom agent template",
     prompt_templates={"system": "You are {{role}}.", "task": "Do: {{task}}"},
     tool_bindings=[{"name": "custom_tool", "access": "read"}],
     tool_sets=["memory_tools", "knowledge_tools"],
@@ -140,50 +145,53 @@ entity_id = create_template(
     category="custom",
     visibility="SHARED",
     parent_template_id=None,
+    input_schema={"type": "object", "properties": {"role": {"type": "string"}}},
+    output_schema={"type": "object", "properties": {"result": {"type": "string"}}},
+    execution_mode="SEQUENTIAL",
 )
 ```
 
-### get_template
+### get_harness_template
 
 ```python
-tpl = get_template(entity_id)
-# Returns dict with name, description, metadata fields, template_version, template_status
+tpl = get_harness_template(entity_id)
+# Returns dict with title, summary, content fields, input_schema, output_schema, execution_mode
 ```
 
-### list_templates
+### list_harness_templates
 
 ```python
-templates = list_templates(category="research", status="PUBLISHED", limit=50)
+templates = list_harness_templates(category="research", status="PUBLISHED", limit=50)
 ```
 
-### update_template
+### update_harness_template
 
 ```python
-update_template(entity_id, name="Updated Name", template_status="PUBLISHED")
+update_harness_template(entity_id, title="Updated Title", execution_mode="PARALLEL")
 ```
 
-### delete_template
+### delete_harness_template
 
 ```python
-delete_template(entity_id)  # cascades to harness_meta and edges
+delete_harness_template(entity_id)  # cascades to harness_meta and edges
 ```
 
-### resolve_template
+### get_template_with_variables
 
 Merges the template with its parent chain (via `DERIVES_FROM` edges) using
 deep-merge semantics. Child values override parent values.
 
 ```python
-resolved = resolve_template(entity_id)
+resolved = get_template_with_variables(entity_id)
 ```
 
-### instantiate_template
+### instantiate_harness_template
 
 Resolves the template, substitutes `{{variables}}` in prompt_templates, and
 applies runtime overrides:
 
 ```python
-instance = instantiate_template(
+instance = instantiate_harness_template(
     template_id,
     variables={"role": "analyst", "task": "review data"},
     overrides={"guardrails": {"max_iterations": 20}},
@@ -191,42 +199,51 @@ instance = instantiate_template(
 )
 ```
 
-### derive_template
+### Derive from Parent Template
+
+> **Note**: `derive_template` is not a separate function. Use `create_harness_template` with `parent_template_id` parameter to create a child template that inherits from a parent.
+
 
 Creates a child template that inherits from a parent via a `DERIVES_FROM` edge:
 
 ```python
-child_id = derive_template(
+child_id = create_harness_template(
     parent_id,
-    name="Specialized Analyst",
+    title="Specialized Analyst",
     overrides={"prompt_templates": {"system": "You are a {{role}} specialist."}},
     category="research",
 )
 ```
 
-### validate_template
+### Validate Template (via get_harness_template)
+
+> **Note**: There is no standalone `validate_template` function. Use `get_harness_template` to retrieve and inspect the template structure.
+
 
 Checks for: missing `system` prompt, undefined variables in prompts, duplicate
 tool bindings, invalid guardrails, and no memory access configured.
 
 ```python
-result = validate_template(entity_id)
+result = get_harness_template(entity_id)
 # {"valid": True/False, "errors": [...], "warnings": [...]}
 ```
 
-### publish_template / deprecate_template
+### Publish / Deprecate (via update_harness_template)
+
+> **Note**: There are no standalone `publish_template` or `deprecate_template` functions. Use `update_harness_template(entity_id, status="PUBLISHED")` or `update_harness_template(entity_id, status="DEPRECATED")` instead.
+
 
 ```python
-publish_template(entity_id)           # DRAFT → PUBLISHED
-deprecate_template(entity_id, reason="Superseded by v2")
+update_harness_template(entity_id)           # DRAFT → PUBLISHED
+update_harness_template(entity_id, reason="Superseded by v2")
 ```
 
-### get_template_lineage
+### Template Lineage (via get_harness_template + edges)
 
 Returns the chain of parent templates via `DERIVES_FROM` edges:
 
 ```python
-lineage = get_template_lineage(entity_id)
+lineage = get_harness_template_lineage(entity_id)
 ```
 
 ## Workflow Examples
@@ -236,9 +253,9 @@ lineage = get_template_lineage(entity_id)
 ```python
 from scripts.lib import harness_api
 
-tid = harness_api.create_template(
-    name="Document Summarizer",
-    description="Summarizes documents with configurable length",
+tid = harness_api.create_harness_template(
+    title="Document Summarizer",
+    summary="Summarizes documents with configurable length",
     prompt_templates={
         "system": "You summarize documents. Target length: {{length}}.",
         "summarize": "Summarize: {{document}}",
@@ -252,17 +269,17 @@ tid = harness_api.create_template(
     category="productivity",
 )
 
-report = harness_api.validate_template(tid)
+report = harness_api.get_harness_template(tid)
 if report["valid"]:
-    harness_api.publish_template(tid)
+    harness_api.update_harness_template(tid)
 ```
 
 ### Derive a Specialized Template
 
 ```python
-child_id = harness_api.derive_template(
+child_id = harness_api.create_harness_template(
     parent_id=tid,
-    name="Legal Document Summarizer",
+    title="Legal Document Summarizer",
     overrides={
         "prompt_templates": {
             "system": "You summarize legal documents. Target length: {{length}}. Flag risks.",
@@ -276,7 +293,7 @@ child_id = harness_api.derive_template(
 ### Instantiate at Runtime
 
 ```python
-instance = harness_api.instantiate_template(
+instance = harness_api.instantiate_harness_template(
     template_id=child_id,
     variables={"length": "detailed", "document": "Contract text..."},
     agent_id="legal-agent-01",
@@ -286,7 +303,8 @@ instance = harness_api.instantiate_template(
 
 ## Built-in Templates
 
-5 templates are seeded by `scripts/deploy/4_harness_templates.sql`:
+5 templates are seeded by `scripts/deploy/4_harness_templates.sql` (deployed in
+Phase 4 of the 4-phase deployment process):
 
 ### 1. Research Analyst
 

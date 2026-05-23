@@ -1,7 +1,7 @@
-"""PostgreSQL Memory System v2.0.0 - Knowledge API
+"""PostgreSQL Memory System v2.2.0 - Knowledge API
 
-CRUD + graph operations on entities (entity_type='KNOWLEDGE'),
-knowledge_meta, and entity_edges.
+Knowledge CRUD, graph edges, spaced-review, and tagging.
+Operates on entities (entity_type='KNOWLEDGE') + knowledge_meta + entity_edges.
 """
 
 import json
@@ -13,69 +13,71 @@ from .connection import execute, execute_query, execute_query_one, execute_inser
 logger = logging.getLogger(__name__)
 
 
-def create_concept(name, concept_type, description=None, category=None,
-                   content=None, source_type='MANUAL', source_entity_ids=None,
-                   confidence=0.8, tags=None, metadata=None,
-                   owned_by_agent=None, visibility='SHARED'):
+def create_knowledge(
+    title: str,
+    content: str,
+    domain: Optional[str] = None,
+    topic: Optional[str] = None,
+    difficulty: str = "INTERMEDIATE",
+    category: Optional[str] = None,
+    importance: int = 5,
+    summary: Optional[str] = None,
+    owned_by_agent: Optional[str] = None,
+    visibility: str = "PRIVATE",
+    workspace_id: Optional[str] = None,
+) -> str:
     entity_sql = """
-        INSERT INTO entities (entity_type, name, description, content, category,
-                              priority, status, tags, metadata,
-                              owned_by_agent, visibility)
-        VALUES ('KNOWLEDGE', %s, %s, %s, %s, 1, 'ACTIVE', %s, %s, %s, %s)
+        INSERT INTO entities (entity_type, title, content, summary, category,
+                              importance, status, owned_by_agent, source_agent,
+                              visibility, retrieval_count, workspace_id)
+        VALUES ('KNOWLEDGE', %s, %s, %s, %s, %s, 'ACTIVE', %s, %s,
+                %s, 0, %s)
         RETURNING entity_id
     """
-    entity_params = (
-        name[:500],
-        description,
+    params = (
+        title[:500],
         content,
+        summary,
         category,
-        json.dumps(tags or []),
-        json.dumps(metadata or {}),
+        importance,
+        owned_by_agent,
         owned_by_agent,
         visibility,
+        workspace_id,
     )
-    entity_id = execute_insert_returning_id(entity_sql, entity_params, id_column='entity_id')
+    entity_id = execute_insert_returning_id(entity_sql, params)
 
     meta_sql = """
-        INSERT INTO knowledge_meta (entity_id, source_type,
-                                    source_entity_ids, confidence, validation_status)
-        VALUES (%s, %s, %s, %s, 'PENDING')
+        INSERT INTO knowledge_meta (entity_id, entity_type, domain, topic, difficulty,
+                                    review_count, next_review)
+        VALUES (%s, 'KNOWLEDGE', %s, %s, %s, 0, NOW() + INTERVAL '7 days')
     """
-    execute(meta_sql, (
-        entity_id,
-        source_type,
-        json.dumps(source_entity_ids or []),
-        confidence,
-    ))
-
+    execute(meta_sql, (entity_id, domain, topic, difficulty))
     return entity_id
 
 
-def get_concept(entity_id):
+def get_knowledge(entity_id: str) -> Optional[Dict[str, Any]]:
     sql = """
-        SELECT e.entity_id, e.entity_type, e.name, e.description, e.content,
-               e.category, e.status, e.tags, e.metadata,
-               e.owned_by_agent, e.visibility,
-               e.created_at, e.updated_at,
-                km.source_type, km.source_entity_ids,
-                km.confidence, km.validation_status, km.validated_at
+        SELECT e.entity_id, e.entity_type, e.title, e.content, e.summary, e.category,
+               e.importance, e.status, e.owned_by_agent, e.source_agent, e.visibility,
+               e.retrieval_count, e.expires_at, e.created_at, e.updated_at,
+               km.domain, km.topic, km.difficulty, km.review_count,
+               km.last_reviewed, km.next_review
         FROM entities e
-        LEFT JOIN knowledge_meta km ON km.entity_id = e.entity_id
+        JOIN knowledge_meta km ON km.entity_id = e.entity_id
+                               AND km.entity_type = 'KNOWLEDGE'
         WHERE e.entity_id = %s AND e.entity_type = 'KNOWLEDGE'
     """
     row = execute_query_one(sql, (entity_id,))
     if row is None:
         return None
-    return _decorate_concept(row)
+    return _row_to_dict(row)
 
 
-def update_concept(entity_id, **kwargs):
-    entity_fields = {'name', 'description', 'content', 'category', 'status',
-                     'tags', 'metadata', 'visibility'}
-    jsonb_entity = {'tags', 'metadata'}
-    meta_fields = {'source_type', 'source_entity_ids',
-                   'confidence', 'validation_status'}
-    jsonb_meta = {'source_entity_ids'}
+def update_knowledge(entity_id: str, **kwargs) -> bool:
+    entity_fields = {"title", "content", "summary", "category", "importance",
+                     "status", "visibility", "expires_at"}
+    meta_fields = {"domain", "topic", "difficulty"}
 
     entity_updates = {}
     meta_updates = {}
@@ -83,15 +85,12 @@ def update_concept(entity_id, **kwargs):
     for k, v in kwargs.items():
         lk = k.lower()
         if lk in entity_fields:
-            if lk in jsonb_entity and isinstance(v, (list, dict)):
-                v = json.dumps(v)
             entity_updates[lk] = v
         elif lk in meta_fields:
-            if lk in jsonb_meta and isinstance(v, (list, dict)):
-                v = json.dumps(v)
             meta_updates[lk] = v
 
     affected = 0
+
     if entity_updates:
         set_parts = ["{} = %s".format(k) for k in entity_updates]
         set_parts.append("updated_at = NOW()")
@@ -106,194 +105,267 @@ def update_concept(entity_id, **kwargs):
         set_clause = ", ".join("{} = %s".format(k) for k in meta_updates)
         values = list(meta_updates.values())
         values.append(entity_id)
-        sql = "UPDATE knowledge_meta SET {} WHERE entity_id = %s".format(set_clause)
+        sql = "UPDATE knowledge_meta SET {} WHERE entity_id = %s AND entity_type = 'KNOWLEDGE'".format(set_clause)
         affected += execute(sql, values)
 
     return affected > 0
 
 
-def delete_concept(entity_id):
-    execute("DELETE FROM knowledge_meta WHERE entity_id = %s", (entity_id,))
-    execute("DELETE FROM entity_edges WHERE source_id = %s OR target_id = %s",
-            (entity_id, entity_id))
+def delete_knowledge(entity_id: str) -> bool:
+    execute("DELETE FROM entity_tags WHERE entity_id = %s AND entity_type = 'KNOWLEDGE'", (entity_id,))
+    execute("DELETE FROM knowledge_meta WHERE entity_id = %s AND entity_type = 'KNOWLEDGE'", (entity_id,))
+    execute("DELETE FROM entity_edges WHERE source_id = %s OR target_id = %s", (entity_id, entity_id))
+    execute("DELETE FROM entity_embeddings WHERE entity_id = %s AND entity_type = 'KNOWLEDGE'", (entity_id,))
     sql = "DELETE FROM entities WHERE entity_id = %s AND entity_type = 'KNOWLEDGE'"
     return execute(sql, (entity_id,)) > 0
 
 
-def create_relationship(source_id, target_id, edge_type, strength=1.0,
-                        confidence=0.8, properties=None):
+def search_knowledge(
+    domain: Optional[str] = None,
+    topic: Optional[str] = None,
+    keyword: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    isolation_mode: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    conditions = ["e.entity_type = 'KNOWLEDGE'"]
+    params: List[Any] = []
+
+    if domain:
+        conditions.append("km.domain = %s")
+        params.append(domain)
+    if topic:
+        conditions.append("km.topic = %s")
+        params.append(topic)
+    if difficulty:
+        conditions.append("km.difficulty = %s")
+        params.append(difficulty)
+    if keyword:
+        conditions.append("(UPPER(e.title) LIKE UPPER(%s) OR UPPER(e.content) LIKE UPPER(%s))")
+        like_val = '%' + keyword + '%'
+        params.extend([like_val, like_val])
+    if isolation_mode == 'SHARED':
+        conditions.append("e.workspace_id IS NULL")
+    elif isolation_mode == 'ISOLATED' and workspace_id:
+        conditions.append("e.workspace_id = %s")
+        params.append(workspace_id)
+    elif workspace_id:
+        conditions.append("e.workspace_id = %s")
+        params.append(workspace_id)
+
+    where = ' AND '.join(conditions)
+    params.extend([limit, offset])
+
     sql = """
-        INSERT INTO entity_edges (source_id, target_id, edge_type, strength,
-                                  confidence, properties)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        SELECT e.entity_id, e.entity_type, e.title, e.content, e.summary, e.category,
+               e.importance, e.status, e.owned_by_agent, e.source_agent, e.visibility,
+               e.retrieval_count, e.created_at, e.updated_at,
+               km.domain, km.topic, km.difficulty, km.review_count,
+               km.last_reviewed, km.next_review
+        FROM entities e
+        JOIN knowledge_meta km ON km.entity_id = e.entity_id
+                               AND km.entity_type = 'KNOWLEDGE'
+        WHERE {}
+        ORDER BY e.created_at DESC
+        LIMIT %s OFFSET %s
+    """.format(where)
+
+    return [_row_to_dict(r) for r in execute_query(sql, params)]
+
+
+def get_due_reviews(limit: int = 50) -> List[Dict[str, Any]]:
+    sql = """
+        SELECT e.entity_id, e.entity_type, e.title, e.content, e.summary, e.category,
+               e.importance, e.status, e.owned_by_agent, e.source_agent, e.visibility,
+               e.retrieval_count, e.created_at, e.updated_at,
+               km.domain, km.topic, km.difficulty, km.review_count,
+               km.last_reviewed, km.next_review
+        FROM entities e
+        JOIN knowledge_meta km ON km.entity_id = e.entity_id
+                               AND km.entity_type = 'KNOWLEDGE'
+        WHERE km.next_review <= NOW() AND e.status = 'ACTIVE'
+        ORDER BY km.next_review ASC
+        LIMIT %s
+    """
+    return [_row_to_dict(r) for r in execute_query(sql, (limit,))]
+
+
+def record_review(entity_id: str) -> bool:
+    sql = """
+        UPDATE knowledge_meta
+        SET review_count = review_count + 1,
+            last_reviewed = NOW(),
+            next_review = NOW() + LEAST(POWER(2, review_count + 1), 30) * INTERVAL '1 day'
+        WHERE entity_id = %s AND entity_type = 'KNOWLEDGE'
+    """
+    return execute(sql, (entity_id,)) > 0
+
+
+def add_edge(
+    source_id: str,
+    source_type: str,
+    target_id: str,
+    edge_type: str,
+    strength: float = 1.0,
+    confidence: float = 1.0,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> str:
+    sql = """
+        INSERT INTO entity_edges (source_id, source_type, target_id, edge_type,
+                                  strength, confidence, metadata)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING edge_id
     """
     return execute_insert_returning_id(sql, (
-        source_id, target_id, edge_type, strength, confidence,
-        json.dumps(properties or {}),
-    ), id_column='edge_id')
+        source_id, source_type, target_id, edge_type,
+        strength, confidence,
+        json.dumps(metadata) if metadata else None,
+    ), id_column="edge_id")
 
 
-def get_relationships(entity_id, direction='both'):
-    if direction == 'outgoing':
+def get_edges(entity_id: str, direction: str = "both") -> List[Dict[str, Any]]:
+    if direction == "outgoing":
         sql = """
-            SELECT e.edge_id, e.source_id, e.target_id, e.edge_type,
-                   e.strength, e.confidence, e.properties, e.created_at,
-                   'outgoing' AS direction
-            FROM entity_edges e
-            WHERE e.source_id = %s
-            ORDER BY e.created_at DESC
+            SELECT edge_id, source_id, source_type, target_id, edge_type,
+                   strength, confidence, metadata, created_at
+            FROM entity_edges
+            WHERE source_id = %s
+            ORDER BY created_at DESC
         """
-        return execute_query(sql, (entity_id,))
-    elif direction == 'incoming':
+    elif direction == "incoming":
         sql = """
-            SELECT e.edge_id, e.source_id, e.target_id, e.edge_type,
-                   e.strength, e.confidence, e.properties, e.created_at,
-                   'incoming' AS direction
-            FROM entity_edges e
-            WHERE e.target_id = %s
-            ORDER BY e.created_at DESC
+            SELECT edge_id, source_id, source_type, target_id, edge_type,
+                   strength, confidence, metadata, created_at
+            FROM entity_edges
+            WHERE target_id = %s
+            ORDER BY created_at DESC
         """
-        return execute_query(sql, (entity_id,))
     else:
         sql = """
-            SELECT e.edge_id, e.source_id, e.target_id, e.edge_type,
-                   e.strength, e.confidence, e.properties, e.created_at,
-                   CASE
-                       WHEN e.source_id = %s THEN 'outgoing'
-                       ELSE 'incoming'
-                   END AS direction
-            FROM entity_edges e
-            WHERE e.source_id = %s OR e.target_id = %s
-            ORDER BY e.created_at DESC
-        """
-        return execute_query(sql, (entity_id, entity_id, entity_id))
-
-
-def delete_relationship(edge_id):
-    sql = "DELETE FROM entity_edges WHERE edge_id = %s"
-    return execute(sql, (edge_id,)) > 0
-
-
-def search_concepts(keyword=None, concept_type=None, category=None,
-                    validation_status=None, limit=100):
-    conditions = ["e.entity_type = 'KNOWLEDGE'"]
-    params = []
-
-    if keyword:
-        conditions.append("(UPPER(e.name) LIKE UPPER(%s) OR UPPER(e.description) LIKE UPPER(%s))")
-        like_val = '%' + keyword + '%'
-        params.extend([like_val, like_val])
-
-    if concept_type:
-        conditions.append("e.category = %s")
-        params.append(concept_type)
-
-    if category:
-        conditions.append("e.category = %s")
-        params.append(category)
-
-    if validation_status:
-        conditions.append("km.validation_status = %s")
-        params.append(validation_status)
-
-    where = ' AND '.join(conditions)
-    params.append(limit)
-
-    sql = """
-        SELECT e.entity_id, e.name, e.description, e.content, e.category,
-               e.status, e.tags, e.metadata, e.owned_by_agent, e.visibility,
-               e.created_at, e.updated_at,
-               km.source_type, km.confidence,
-               km.validation_status
-        FROM entities e
-        LEFT JOIN knowledge_meta km ON km.entity_id = e.entity_id
-        WHERE {}
-        ORDER BY e.created_at DESC
-        LIMIT %s
-    """.format(where)
-
-    rows = execute_query(sql, params)
-    return [_decorate_concept(r) for r in rows]
-
-
-def get_statistics():
-    entity_count_row = execute_query_one(
-        "SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'KNOWLEDGE'"
-    )
-    edge_count_row = execute_query_one(
-        "SELECT COUNT(*) AS cnt FROM entity_edges"
-    )
-    type_rows = execute_query(
-        """SELECT e.category, COUNT(*) AS cnt
-           FROM entities e
-           WHERE e.entity_type = 'KNOWLEDGE'
-           GROUP BY e.category
-           ORDER BY cnt DESC"""
-    )
-    status_rows = execute_query(
-        """SELECT validation_status, COUNT(*) AS cnt
-           FROM knowledge_meta
-           GROUP BY validation_status
-           ORDER BY cnt DESC"""
-    )
-
-    return {
-        'total_concepts': entity_count_row['cnt'] if entity_count_row else 0,
-        'total_edges': edge_count_row['cnt'] if edge_count_row else 0,
-        'by_concept_type': {r['category']: r['cnt'] for r in type_rows},
-        'by_validation_status': {r['validation_status']: r['cnt'] for r in status_rows},
-    }
-
-
-def get_concept_neighbors(entity_id, max_depth=2):
-    sql = """
-        WITH RECURSIVE neighbors AS (
-            SELECT e.entity_id, e.name, e.category,
-                   eg.edge_type, eg.strength,
-                   1 AS depth
-            FROM entity_edges eg
-            JOIN entities e ON (e.entity_id = CASE
-                WHEN eg.source_id = %s THEN eg.target_id
-                ELSE eg.source_id END)
-            WHERE (eg.source_id = %s OR eg.target_id = %s)
-              AND e.entity_type = 'KNOWLEDGE'
-
+            SELECT edge_id, source_id, source_type, target_id, edge_type,
+                   strength, confidence, metadata, created_at,
+                   'outgoing' AS direction
+            FROM entity_edges
+            WHERE source_id = %s
             UNION ALL
-
-            SELECT e2.entity_id, e2.name, e2.category,
-                   eg2.edge_type, eg2.strength,
-                   n.depth + 1
-            FROM neighbors n
-            JOIN entity_edges eg2 ON (eg2.source_id = n.entity_id OR eg2.target_id = n.entity_id)
-            JOIN entities e2 ON (e2.entity_id = CASE
-                WHEN eg2.source_id = n.entity_id THEN eg2.target_id
-                ELSE eg2.source_id END)
-            WHERE n.depth < %s
-              AND e2.entity_type = 'KNOWLEDGE'
-              AND e2.entity_id != %s
-        )
-        SELECT DISTINCT ON (entity_id) entity_id, name, category,
-               edge_type, strength, depth
-        FROM neighbors
-        ORDER BY entity_id, depth ASC
-    """
-    return execute_query(sql, (entity_id, entity_id, entity_id, max_depth, entity_id))
-
-
-def _decorate_concept(row):
-    for col in ('tags', 'metadata', 'source_entity_ids'):
-        val = row.get(col)
-        if isinstance(val, str):
+            SELECT edge_id, source_id, source_type, target_id, edge_type,
+                   strength, confidence, metadata, created_at,
+                   'incoming' AS direction
+            FROM entity_edges
+            WHERE target_id = %s
+            ORDER BY created_at DESC
+        """
+    if direction == "both":
+        rows = execute_query(sql, (entity_id, entity_id))
+    else:
+        rows = execute_query(sql, (entity_id,))
+    result = []
+    for r in rows:
+        edge = {
+            "edge_id": r.get("edge_id"),
+            "source_id": r.get("source_id"),
+            "source_type": r.get("source_type"),
+            "target_id": r.get("target_id"),
+            "edge_type": r.get("edge_type"),
+            "strength": r.get("strength"),
+            "confidence": r.get("confidence"),
+            "metadata": r.get("metadata"),
+            "created_at": r.get("created_at"),
+        }
+        if direction == "both":
+            edge["direction"] = r.get("direction")
+        if isinstance(edge["metadata"], str):
             try:
-                row[col] = json.loads(val)
+                edge["metadata"] = json.loads(edge["metadata"])
             except (json.JSONDecodeError, TypeError):
                 pass
-        elif val is None:
-            if col == 'tags':
-                row[col] = []
-            elif col == 'metadata':
-                row[col] = {}
-            elif col == 'source_entity_ids':
-                row[col] = []
-    return row
+        result.append(edge)
+    return result
+
+
+def add_knowledge_tags(entity_id: str, tag_names: List[str]) -> int:
+    added = 0
+    for tag_name in tag_names:
+        execute(
+            "INSERT INTO tags (tag_name, usage_count) VALUES (%s, 0) ON CONFLICT (tag_name) DO NOTHING",
+            (tag_name,)
+        )
+        tag_row = execute_query_one(
+            "SELECT tag_id FROM tags WHERE tag_name = %s",
+            (tag_name,),
+        )
+        if tag_row is None:
+            continue
+        tag_id = tag_row["tag_id"]
+        affected = execute(
+            "INSERT INTO entity_tags (entity_id, entity_type, tag_id) VALUES (%s, 'KNOWLEDGE', %s) ON CONFLICT DO NOTHING",
+            (entity_id, tag_id)
+        )
+        if affected > 0:
+            added += 1
+    return added
+
+
+def get_knowledge_tags(entity_id: str) -> List[Dict[str, Any]]:
+    sql = """
+        SELECT t.tag_id, t.tag_name, t.tag_group
+        FROM entity_tags et
+        JOIN tags t ON et.tag_id = t.tag_id
+        WHERE et.entity_id = %s AND et.entity_type = 'KNOWLEDGE'
+    """
+    rows = execute_query(sql, (entity_id,))
+    return [
+        {"tag_id": r["tag_id"], "tag_name": r["tag_name"], "tag_group": r.get("tag_group")}
+        for r in rows
+    ]
+
+
+def remove_knowledge_tag(entity_id: str, tag_id: int) -> bool:
+    sql = """
+        DELETE FROM entity_tags
+        WHERE entity_id = %s AND entity_type = 'KNOWLEDGE' AND tag_id = %s
+    """
+    return execute(sql, (entity_id, tag_id)) > 0
+
+
+def count_knowledge(domain: Optional[str] = None) -> int:
+    if domain:
+        sql = """
+            SELECT COUNT(*) AS cnt
+            FROM entities e
+            JOIN knowledge_meta km ON km.entity_id = e.entity_id AND km.entity_type = 'KNOWLEDGE'
+            WHERE e.entity_type = 'KNOWLEDGE' AND km.domain = %s
+        """
+        row = execute_query_one(sql, (domain,))
+    else:
+        sql = "SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'KNOWLEDGE'"
+        row = execute_query_one(sql)
+    return row['cnt'] if row else 0
+
+
+def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "entity_id": row.get("entity_id"),
+        "entity_type": row.get("entity_type"),
+        "title": row.get("title"),
+        "content": row.get("content"),
+        "summary": row.get("summary"),
+        "category": row.get("category"),
+        "importance": row.get("importance"),
+        "status": row.get("status"),
+        "owned_by_agent": row.get("owned_by_agent"),
+        "source_agent": row.get("source_agent"),
+        "visibility": row.get("visibility"),
+        "retrieval_count": row.get("retrieval_count"),
+        "expires_at": row.get("expires_at"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "domain": row.get("domain"),
+        "topic": row.get("topic"),
+        "difficulty": row.get("difficulty"),
+        "review_count": row.get("review_count"),
+        "last_reviewed": row.get("last_reviewed"),
+        "next_review": row.get("next_review"),
+    }

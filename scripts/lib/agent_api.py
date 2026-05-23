@@ -1,236 +1,290 @@
-"""PostgreSQL Memory System v2.0.0 - Agent API
+"""PostgreSQL Memory System v2.2.0 - Agent API
 
-Agent management, sessions, access logging, and collaboration.
+Agent registration, session management, access audit logging,
+and collaboration tracking.
 """
 
 import json
 import logging
-import time
 from typing import Any, Dict, List, Optional
 
 from .connection import execute, execute_query, execute_query_one, execute_insert_returning_id
 
 logger = logging.getLogger(__name__)
 
+_JSON_COLUMNS = {"capabilities", "config", "context"}
 
-def register_agent(agent_id, agent_name, agent_type='general',
-                   capabilities=None, description='', permission_level='READ_WRITE'):
+_ALLOWED_UPDATE_FIELDS = {
+    "agent_name", "agent_type", "description",
+    "capabilities", "config", "status",
+}
+
+
+def _row_to_dict(row: Any) -> Dict[str, Any]:
+    if row is None:
+        return {}
+    result = dict(row)
+    for key in result:
+        if key.lower() in _JSON_COLUMNS and isinstance(result[key], str):
+            try:
+                result[key] = json.loads(result[key])
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return result
+
+
+def register_agent(
+    agent_id: str,
+    agent_name: str,
+    agent_type: Optional[str] = None,
+    description: Optional[str] = None,
+    capabilities: Optional[Any] = None,
+    config: Optional[Any] = None,
+) -> str:
+    caps_val = json.dumps(capabilities) if isinstance(capabilities, (dict, list)) else capabilities
+    cfg_val = json.dumps(config) if isinstance(config, (dict, list)) else config
     sql = """
-        INSERT INTO agent_registry (agent_id, agent_name, agent_type, capabilities,
-                                    description, permission_level, status)
-        VALUES (%s, %s, %s, %s, %s, %s, 'ACTIVE')
+        INSERT INTO agent_registry (agent_id, agent_name, agent_type, description,
+                                    capabilities, config, status, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, 'ACTIVE', NOW(), NOW())
         ON CONFLICT (agent_id) DO NOTHING
     """
-    affected = execute(sql, (
-        agent_id,
-        agent_name,
-        agent_type,
-        json.dumps(capabilities or []),
-        description,
-        permission_level,
-    ))
-    return affected > 0
+    execute(sql, (agent_id, agent_name, agent_type, description, caps_val, cfg_val))
+    return agent_id
 
 
-def get_agent(agent_id):
+def get_agent(agent_id: str) -> Optional[Dict[str, Any]]:
     sql = """
-        SELECT agent_id, agent_name, agent_type, capabilities, description,
-               permission_level, status, pending_recovery, recovered_count,
-               created_at, updated_at
+        SELECT agent_id, agent_name, agent_type, description,
+               capabilities, config, status,
+               last_seen_at, created_at, updated_at
         FROM agent_registry
         WHERE agent_id = %s
     """
     row = execute_query_one(sql, (agent_id,))
-    if row is None:
-        return None
-    if isinstance(row.get('capabilities'), str):
-        try:
-            row['capabilities'] = json.loads(row['capabilities'])
-        except (json.JSONDecodeError, TypeError):
-            pass
-    return row
+    return _row_to_dict(row) if row else None
 
 
-def list_agents(agent_type=None, status='ACTIVE'):
-    conditions = []
-    params = []
+def update_agent(agent_id: str, **kwargs: Any) -> bool:
+    updates = {}
+    values: List[Any] = []
+    for key, value in kwargs.items():
+        col = key.lower()
+        if col not in _ALLOWED_UPDATE_FIELDS:
+            continue
+        if col in ("capabilities", "config") and isinstance(value, (dict, list)):
+            updates[col] = "%s"
+            values.append(json.dumps(value))
+        else:
+            updates[col] = "%s"
+            values.append(value)
+    if not updates:
+        return False
+    set_parts = ["{} = {}".format(k, v) for k, v in updates.items()]
+    set_parts.append("updated_at = NOW()")
+    values.append(agent_id)
+    sql = "UPDATE agent_registry SET {} WHERE agent_id = %s".format(', '.join(set_parts))
+    return execute(sql, values) > 0
 
-    if status:
-        conditions.append("status = %s")
-        params.append(status)
 
-    if agent_type:
-        conditions.append("agent_type = %s")
-        params.append(agent_type)
-
-    where = ' AND '.join(conditions) if conditions else '1=1'
-
+def decommission_agent(agent_id: str) -> bool:
     sql = """
-        SELECT agent_id, agent_name, agent_type, capabilities,
-               permission_level, status, created_at
-        FROM agent_registry
-        WHERE {}
-        ORDER BY created_at
-    """.format(where)
-
-    rows = execute_query(sql, params)
-    for r in rows:
-        if isinstance(r.get('capabilities'), str):
-            try:
-                r['capabilities'] = json.loads(r['capabilities'])
-            except (json.JSONDecodeError, TypeError):
-                pass
-    return rows
-
-
-def disable_agent(agent_id, reason=''):
-    affected = execute(
-        "UPDATE agent_registry SET status = 'DISABLED', updated_at = now(), pending_recovery = TRUE WHERE agent_id = %s AND status != 'DISABLED'",
-        (agent_id,)
-    )
-    if affected > 0:
-        execute(
-            """INSERT INTO agent_permission_log (agent_id, old_status, new_status, change_reason, status)
-               VALUES (%s, 'ACTIVE', 'DISABLED', %s, 'COMPLETED')""",
-            (agent_id, reason)
-        )
-    return affected > 0
-
-
-def enable_agent(agent_id):
-    affected = execute(
-        """UPDATE agent_registry
-           SET status = 'ACTIVE', updated_at = now(), pending_recovery = FALSE,
-               recovered_count = recovered_count + 1
-           WHERE agent_id = %s AND status = 'DISABLED'""",
-        (agent_id,)
-    )
-    if affected > 0:
-        execute(
-            """INSERT INTO agent_permission_log (agent_id, old_status, new_status, change_reason, status)
-               VALUES (%s, 'DISABLED', 'ACTIVE', 'Agent re-enabled', 'COMPLETED')""",
-            (agent_id,)
-        )
-    return affected > 0
-
-
-def create_session(agent_id, working_memory_id=None):
-    session_id = "session-{}-{}".format(agent_id, int(time.time()))
-    sql = """
-        INSERT INTO agent_session (session_id, agent_id, is_active, context_snapshot, working_memory_id)
-        VALUES (%s, %s, TRUE, %s, %s)
+        UPDATE agent_registry
+        SET status = 'DECOMMISSIONED', updated_at = NOW()
+        WHERE agent_id = %s
     """
-    try:
-        execute(sql, (session_id, agent_id, json.dumps({}), working_memory_id))
-        return session_id
-    except Exception as e:
-        logger.error("Failed to create session: %s", e)
-        return None
+    return execute(sql, (agent_id,)) > 0
 
 
-def update_session_context(session_id, context):
-    if isinstance(context, dict):
-        context = json.dumps(context)
-    sql = "UPDATE agent_session SET context_snapshot = %s, last_activity = now() WHERE session_id = %s AND is_active = TRUE"
-    return execute(sql, (context, session_id)) > 0
+def heartbeat(agent_id: str) -> bool:
+    sql = """
+        UPDATE agent_registry
+        SET last_seen_at = NOW()
+        WHERE agent_id = %s
+    """
+    return execute(sql, (agent_id,)) > 0
 
 
-def close_session(session_id):
-    sql = "UPDATE agent_session SET is_active = FALSE, end_time = now() WHERE session_id = %s"
+def create_session(
+    agent_id: str,
+    owner_user_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    predecessor_session_id: Optional[str] = None,
+    context: Optional[Any] = None,
+) -> str:
+    import time
+    session_id = "session-{}-{}".format(agent_id, int(time.time() * 1000))
+    ctx_val = json.dumps(context) if isinstance(context, (dict, list)) else context
+    sql = """
+        INSERT INTO agent_session (session_id, agent_id, owner_user_id, workspace_id,
+                                    predecessor_session_id, is_active,
+                                    start_time, context)
+        VALUES (%s, %s, %s, %s, %s, TRUE, NOW(), %s)
+        RETURNING session_id
+    """
+    return execute_insert_returning_id(sql, (
+        session_id, agent_id, owner_user_id, workspace_id,
+        predecessor_session_id, ctx_val,
+    ), id_column="session_id")
+
+
+def end_session(session_id: str) -> bool:
+    sql = """
+        UPDATE agent_session
+        SET is_active = FALSE, end_time = NOW()
+        WHERE session_id = %s AND is_active = TRUE
+    """
     return execute(sql, (session_id,)) > 0
 
 
-def get_active_sessions(agent_id=None):
+def checkpoint_session(session_id: str, context_data: Any) -> bool:
+    sql = """
+        SELECT workspace_id, agent_id
+        FROM agent_session
+        WHERE session_id = %s
+    """
+    row = execute_query_one(sql, (session_id,))
+    if not row or not row.get("workspace_id"):
+        return False
+    from .workspace_api import save_context
+    save_context(
+        workspace_id=row["workspace_id"],
+        agent_id=row["agent_id"],
+        context_type="CHECKPOINT",
+        context_data=context_data,
+        session_id=session_id,
+    )
+    return True
+
+
+def get_session_chain(session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    chain = []
+    current_id = session_id
+    visited = set()
+    while current_id and current_id not in visited and len(chain) < limit:
+        visited.add(current_id)
+        sql = """
+            SELECT session_id, agent_id, workspace_id, predecessor_session_id,
+                   is_active, start_time, end_time, context
+            FROM agent_session
+            WHERE session_id = %s
+        """
+        row = execute_query_one(sql, (current_id,))
+        if not row:
+            break
+        chain.append(_row_to_dict(row))
+        current_id = row.get("predecessor_session_id")
+    return chain
+
+
+def get_active_sessions(agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
     if agent_id:
         sql = """
-            SELECT s.session_id, s.agent_id, a.agent_name,
-                   s.working_memory_id, s.start_time, s.last_activity
-            FROM agent_session s
-            LEFT JOIN agent_registry a ON a.agent_id = s.agent_id
-            WHERE s.is_active = TRUE AND s.agent_id = %s
-            ORDER BY s.start_time DESC
+            SELECT session_id, agent_id, workspace_id, owner_user_id,
+                   is_active, start_time, context
+            FROM agent_session
+            WHERE is_active = TRUE AND agent_id = %s
+            ORDER BY start_time DESC
         """
-        return execute_query(sql, (agent_id,))
+        rows = execute_query(sql, (agent_id,))
     else:
         sql = """
-            SELECT s.session_id, s.agent_id, a.agent_name,
-                   s.working_memory_id, s.start_time, s.last_activity
-            FROM agent_session s
-            LEFT JOIN agent_registry a ON a.agent_id = s.agent_id
-            WHERE s.is_active = TRUE
-            ORDER BY s.start_time DESC
+            SELECT session_id, agent_id, workspace_id, owner_user_id,
+                   is_active, start_time, context
+            FROM agent_session
+            WHERE is_active = TRUE
+            ORDER BY start_time DESC
         """
-        return execute_query(sql)
+        rows = execute_query(sql)
+    return [_row_to_dict(r) for r in rows]
 
 
-def log_access(agent_id, entity_id, access_type='READ'):
+def log_access(
+    agent_id: str,
+    entity_id: str,
+    access_type: str,
+    session_id: Optional[str] = None,
+) -> str:
     sql = """
-        INSERT INTO entity_access_log (agent_id, entity_id, access_type)
-        VALUES (%s, %s, %s)
+        INSERT INTO entity_access_log (entity_id, agent_id, access_type, access_time, session_id)
+        VALUES (%s, %s, %s, NOW(), %s)
+        RETURNING log_id
     """
-    execute(sql, (agent_id, entity_id, access_type))
+    return execute_insert_returning_id(sql, (
+        entity_id, agent_id, access_type, session_id,
+    ), id_column="log_id")
 
 
-def get_access_history(agent_id, limit=50):
+def get_access_log(
+    entity_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    conditions = []
+    params: List[Any] = []
+    if entity_id:
+        conditions.append("entity_id = %s")
+        params.append(entity_id)
+    if agent_id:
+        conditions.append("agent_id = %s")
+        params.append(agent_id)
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    params.append(limit)
     sql = """
-        SELECT log_id, agent_id, entity_id, access_type, access_time
+        SELECT log_id, entity_id, agent_id, access_type, session_id,
+               access_time
         FROM entity_access_log
-        WHERE agent_id = %s
+        {}
         ORDER BY access_time DESC
         LIMIT %s
-    """
-    return execute_query(sql, (agent_id, limit))
+    """.format(where)
+    rows = execute_query(sql, params)
+    return [_row_to_dict(r) for r in rows]
 
 
-def request_collaboration(sharing_agent, receiving_agent, entity_id, reason=''):
+def create_collaboration(
+    source_agent_id: str,
+    target_agent_id: str,
+    col_type: str,
+    entity_id: Optional[str] = None,
+    context: Optional[Any] = None,
+    strength: float = 1.0,
+) -> str:
+    ctx_val = json.dumps(context) if isinstance(context, (dict, list)) else context
     sql = """
-        INSERT INTO agent_collaboration (sharing_agent, receiving_agent,
-                                         memory_id, share_reason, status)
-        VALUES (%s, %s, %s, %s, 'PENDING')
+        INSERT INTO agent_collaboration (source_agent_id, target_agent_id,
+                                          col_type, entity_id, context, strength,
+                                          created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
         RETURNING collab_id
     """
-    try:
-        return execute_insert_returning_id(sql, (
-            sharing_agent, receiving_agent, entity_id, reason,
-        ), id_column='collab_id')
-    except Exception as e:
-        logger.error("Failed to request collaboration: %s", e)
-        return None
+    return execute_insert_returning_id(sql, (
+        source_agent_id, target_agent_id, col_type,
+        entity_id, ctx_val, strength,
+    ), id_column="collab_id")
 
 
-def approve_collaboration(collab_id):
-    sql = """
-        UPDATE agent_collaboration
-        SET status = 'APPROVED', approved_at = now()
-        WHERE collab_id = %s AND status = 'PENDING'
-    """
-    return execute(sql, (collab_id,)) > 0
-
-
-def reject_collaboration(collab_id):
-    sql = """
-        UPDATE agent_collaboration
-        SET status = 'REJECTED'
-        WHERE collab_id = %s AND status = 'PENDING'
-    """
-    return execute(sql, (collab_id,)) > 0
-
-
-def get_pending_requests(agent_id, role='receiving'):
-    if role == 'receiving':
+def get_collaborations(
+    agent_id: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    if agent_id:
         sql = """
-            SELECT collab_id, sharing_agent, receiving_agent, memory_id,
-                   share_reason, status, created_at
+            SELECT collab_id, source_agent_id, target_agent_id, col_type,
+                   entity_id, context, strength, created_at, updated_at
             FROM agent_collaboration
-            WHERE receiving_agent = %s AND status = 'PENDING'
+            WHERE source_agent_id = %s OR target_agent_id = %s
             ORDER BY created_at DESC
+            LIMIT %s
         """
+        rows = execute_query(sql, (agent_id, agent_id, limit))
     else:
         sql = """
-            SELECT collab_id, sharing_agent, receiving_agent, memory_id,
-                   share_reason, status, created_at
+            SELECT collab_id, source_agent_id, target_agent_id, col_type,
+                   entity_id, context, strength, created_at, updated_at
             FROM agent_collaboration
-            WHERE sharing_agent = %s AND status = 'PENDING'
             ORDER BY created_at DESC
+            LIMIT %s
         """
-    return execute_query(sql, (agent_id,))
+        rows = execute_query(sql, (limit,))
+    return [_row_to_dict(r) for r in rows]
