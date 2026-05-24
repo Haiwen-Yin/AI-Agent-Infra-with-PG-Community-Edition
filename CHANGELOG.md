@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.2.1] - 2026-05-24
+
+### Summary
+
+**UI bug fixes: language persistence and text contrast.** Backward-compatible with v2.2.0 — no database or API changes.
+
+### Fixed
+
+- **Language toggle persistence**: Bilingual (zh/en) toggle now saves preference to `localStorage`; language is restored on every page load, persisting across navigation between pages
+- **Tasks page text contrast**: Step table cell text and Plan Details values changed to white (`color:#fff`) for readability on dark backgrounds
+- **All 7 HTML pages**: Added `localStorage.getItem('lang')` restore on page init and `localStorage.setItem('lang', n)` in `toggleLang()`
+
+### Changed
+
+- **server.py**: Version string updated from 2.2.0 to 2.2.1
+
+---
+
 ## [2.2.0] - 2026-05-23
 
 ### Summary
@@ -43,7 +61,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **docs/workspace.md** — Workspace & context continuity guide
 - **docs/minimum-privileges.md** — PG18 minimum database privileges
 - **docs/visualization.md** — Visualization architecture and API docs
-- **docs/introduction_v2.2.0_zh.md** — Chinese introduction for v2.2.0 (with visualization section)
+- **docs/introduction_v2.2.1_zh.md** — Chinese introduction for v2.2.0 (with visualization section)
 
 ### Changed
 
@@ -313,7 +331,8 @@ This is a **major breakthrough for Production AI Agents** - v1.0.0 brings Postgr
 
 | Version | Release Date | Major Features | Status |
 |---------|--------------|----------------|--------|
-| v2.2.0 | 2026-05-23 | Workspace management, web visualization, context continuity, bug fixes | Current |
+| v2.2.1 | 2026-05-24 | UI fixes: language persistence, text contrast | Current |
+| v2.2.0 | 2026-05-23 | Workspace management, web visualization, context continuity, bug fixes | Stable |
 | v2.1.0 | 2026-05-20 | Normalized tags, property graph API, column renames, simplified visibility | Stable |
 | v2.0.0 | 2026-05-18 | Complete rewrite: unified entities, psycopg2, PL/pgSQL API, harness, security | Stable |
 | v1.0.0 | 2026-05-10 | Knowledge Base, Enhanced API, Production-Ready | Stable |

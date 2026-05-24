@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.0 - Memory API
+"""PostgreSQL Memory System v2.2.1 - Memory API
 
 CRUD operations on entities with entity_type='MEMORY'.
 """

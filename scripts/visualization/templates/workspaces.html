@@ -32,7 +32,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 .content-area{flex:1;overflow-y:auto;padding:20px;position:relative}
 .data-table{width:100%;border-collapse:collapse;font-size:.88rem}
 .data-table thead th{color:var(--text-secondary);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;border-bottom:1px solid var(--border-color);text-align:left;font-weight:600;white-space:nowrap}
-.data-table tbody td{padding:10px 12px;border-bottom:1px solid rgba(42,42,74,.4);vertical-align:middle}
+.data-table tbody td{color:#fff;padding:10px 12px;border-bottom:1px solid rgba(42,42,74,.4);vertical-align:middle}
 .data-table tbody tr:hover{background:rgba(233,69,96,.05)}
 .data-table tbody tr.ws-row{cursor:pointer}
 .badge-status{display:inline-block;border-radius:12px;padding:3px 12px;font-size:.75rem;font-weight:600;letter-spacing:.3px}
@@ -117,7 +117,9 @@ var workspacesData = [];
 function toggleLang() {
   var h = document.documentElement;
   var c = h.getAttribute('data-lang');
-  h.setAttribute('data-lang', c === 'en' ? 'zh' : 'en');
+  var n = c === 'en' ? 'zh' : 'en';
+  h.setAttribute('data-lang', n);
+  localStorage.setItem('lang', n);
 }
 
 function escapeHtml(s) {
@@ -237,6 +239,7 @@ async function loadData() {
   }
 }
 
+(function(){var sl=localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl}})();
 loadData();
 
 var _aloSec=300,_aloInt=null;

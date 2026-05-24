@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.0 - Security Module
+"""PostgreSQL Memory System v2.2.1 - Security Module
 
 Data masking, context-aware masking, and reversible encryption.
 """

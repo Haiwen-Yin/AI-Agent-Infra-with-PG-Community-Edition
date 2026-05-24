@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.0 - Knowledge API Tests"""
+"""PostgreSQL Memory System v2.2.1 - Knowledge API Tests"""
 import sys
 import os
 import uuid

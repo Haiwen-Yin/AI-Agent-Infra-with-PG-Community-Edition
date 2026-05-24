@@ -1,4 +1,4 @@
-# Deployment Guide — PostgreSQL Memory System v2.2.0
+# Deployment Guide — PostgreSQL Memory System v2.2.1
 
 ## Prerequisites
 

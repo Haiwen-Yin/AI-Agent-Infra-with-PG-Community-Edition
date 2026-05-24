@@ -1,11 +1,17 @@
-# memory-pg18-by-yhw - PostgreSQL AI Database Memory System v2.2.0
+# memory-pg18-by-yhw - PostgreSQL AI Database Memory System v2.2.1
 
 **Author**: Haiwen Yin (胖头鱼)
-**Version**: v2.2.0 - 2026-05-23
+**Version**: v2.2.1 - 2026-05-24
 **License**: Apache License 2.0
 **Database**: PostgreSQL 18.3 + pgvector 0.8.2 + Apache AGE 1.7.0 + pg_cron 1.6 + [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)
 
-**[中文介绍 (Chinese Introduction)](docs/introduction_v2.2.0_zh.md)**
+**[中文介绍 (Chinese Introduction)](docs/introduction_v2.2.1_zh.md)**
+
+## What's New in v2.2.1
+
+- **Language Persistence**: Bilingual (zh/en) toggle now persists across page navigation via `localStorage`
+- **UI Text Contrast Fix**: Tasks page step table and Plan Details values now use white text for readability on dark backgrounds
+- **115/115 API Tests Passing**: Verified on Python 3.14 (local) + Python 3.6 (remote)
 
 ## What's New in v2.2.0
 

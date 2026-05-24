@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.0 - Web Visualization Server
+"""PostgreSQL Memory System v2.2.1 - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -20,7 +20,7 @@ from lib import connection, memory_api, knowledge_api, agent_api
 from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import security, config
 
-VERSION = "2.2.0"
+VERSION = "2.2.1"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')

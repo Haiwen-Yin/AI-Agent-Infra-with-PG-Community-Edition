@@ -55,7 +55,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 .badge-cancelled{background:rgba(160,160,176,.15);color:#a0a0b0}
 .data-table{width:100%;border-collapse:collapse;font-size:.85rem}
 .data-table thead th{color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:1px solid var(--border-color);text-align:left;font-weight:600;white-space:nowrap}
-.data-table tbody td{padding:8px 10px;border-bottom:1px solid rgba(42,42,74,.3);vertical-align:middle}
+.data-table tbody td{padding:8px 10px;border-bottom:1px solid rgba(42,42,74,.3);vertical-align:middle;color:#fff}
 .data-table tbody tr:hover{background:rgba(233,69,96,.04)}
 .truncate-id{font-family:'Courier New',monospace;font-size:.8rem;color:var(--text-secondary);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle}
 .steps-label{color:var(--text-secondary);font-size:.8rem;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
@@ -118,7 +118,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 <script>
 var allPlans=[];
 
-function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');h.setAttribute('data-lang',c==='en'?'zh':'en');applyLangPlaceholders()}
+function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');var n=c==='en'?'zh':'en';h.setAttribute('data-lang',n);localStorage.setItem('lang',n);applyLangPlaceholders()}
 
 function toggleStepDetail(id){var el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'table-row':'none'}
 
@@ -190,8 +190,8 @@ function renderPlans(plans){
         if(hasDetail){
           h+='<tr id="step-detail-'+pid+'-'+j+'" style="display:none"><td colspan="6" style="padding:0">';
           h+='<div style="background:var(--bg-card);padding:12px 16px;border-left:3px solid var(--accent)">';
-          if(s.tool_input){h+='<div style="margin-bottom:8px"><div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"><span data-zh>工具输入</span><span data-en>Tool Input</span></div><pre style="margin:0;color:var(--text-primary);font-size:.82rem;white-space:pre-wrap;word-break:break-word">'+escapeHtml(typeof s.tool_input==='object'?JSON.stringify(s.tool_input,null,2):s.tool_input)+'</pre></div>'}
-          if(s.tool_output){h+='<div><div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"><span data-zh>工具输出</span><span data-en>Tool Output</span></div><pre style="margin:0;color:var(--text-primary);font-size:.82rem;white-space:pre-wrap;word-break:break-word">'+escapeHtml(typeof s.tool_output==='object'?JSON.stringify(s.tool_output,null,2):s.tool_output)+'</pre></div>'}
+          if(s.tool_input){h+='<div style="margin-bottom:8px"><div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"><span data-zh>工具输入</span><span data-en>Tool Input</span></div><pre style="margin:0;color:#fff;font-size:.82rem;white-space:pre-wrap;word-break:break-word">'+escapeHtml(typeof s.tool_input==='object'?JSON.stringify(s.tool_input,null,2):s.tool_input)+'</pre></div>'}
+          if(s.tool_output){h+='<div><div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"><span data-zh>工具输出</span><span data-en>Tool Output</span></div><pre style="margin:0;color:#fff;font-size:.82rem;white-space:pre-wrap;word-break:break-word">'+escapeHtml(typeof s.tool_output==='object'?JSON.stringify(s.tool_output,null,2):s.tool_output)+'</pre></div>'}
           h+='</div></td></tr>';
         }
       }
@@ -201,7 +201,7 @@ function renderPlans(plans){
     }
     h+='<div style="margin-top:12px;padding:12px 16px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border-color)">';
     h+='<div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px"><span data-zh>计划详情</span><span data-en>Plan Details</span></div>';
-    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.85rem">';
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.85rem;color:#fff">';
     h+='<div><span style="color:var(--text-secondary)"><span data-zh>计划ID</span><span data-en>Plan ID</span>: </span>'+escapeHtml(p.plan_id)+'</div>';
     h+='<div><span style="color:var(--text-secondary)"><span data-zh>状态</span><span data-en>Status</span>: </span>'+statusBadge(p.status)+'</div>';
     h+='<div><span style="color:var(--text-secondary)"><span data-zh>智能体</span><span data-en>Agent</span>: </span>'+truncId(p.agent_id)+'</div>';
@@ -237,6 +237,7 @@ async function loadData(){
   }
 }
 
+(function(){var sl=localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl}})();
 applyLangPlaceholders();
 loadData();
 

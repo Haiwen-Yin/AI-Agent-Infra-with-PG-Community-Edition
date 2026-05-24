@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.0 - Connection Pool Tests"""
+"""PostgreSQL Memory System v2.2.1 - Connection Pool Tests"""
 import sys
 import os
 

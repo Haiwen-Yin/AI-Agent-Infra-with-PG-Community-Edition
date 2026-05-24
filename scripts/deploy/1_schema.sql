@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Memory System v2.2.0 - Unified Schema
+-- PostgreSQL Memory System v2.2.1 - Unified Schema
 -- Workspace & Context Continuity
 -- ============================================================================
 
@@ -424,7 +424,7 @@ $$;
 -- ============================================================================
 
 INSERT INTO system_config (config_key, config_value, description)
-VALUES ('system.version', '2.2.0', 'PostgreSQL Memory System version')
+VALUES ('system.version', '2.2.1', 'PostgreSQL Memory System version')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = now();
 
 INSERT INTO system_config (config_key, config_value, description)

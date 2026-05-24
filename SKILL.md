@@ -1,15 +1,15 @@
 ---
 name: memory-pg18-by-yhw
-version: v2.2.0
+version: v2.2.1
 author: Haiwen Yin
-description: "PostgreSQL AI Database Memory System v2.2.0 - Workspace & context continuity, agent handoff, Apache AGE property graph, pgvector HNSW, pg-embedding-gen-by-yhw, psycopg2 driver, 4-phase SQL deployment, normalized tags, 22 tables, 5 PL/pgSQL schemas"
+description: "PostgreSQL AI Database Memory System v2.2.1 - Workspace & context continuity, agent handoff, Apache AGE property graph, pgvector HNSW, pg-embedding-gen-by-yhw, psycopg2 driver, 4-phase SQL deployment, normalized tags, 22 tables, 5 PL/pgSQL schemas"
 tags: [postgresql, memory-system, knowledge-base, vector-search, psycopg2, property-graph, multi-agent, pg18, age, pg-embedding-gen-by-yhw, workspace, context-continuity, handoff, normalized-tags, jsonb]
 ---
 
-# PostgreSQL AI Database Memory System v2.2.0
+# PostgreSQL AI Database Memory System v2.2.1
 
 **Author**: Haiwen Yin
-**Version**: v2.2.0 - 2026-05-23
+**Version**: v2.2.1 - 2026-05-24
 **License**: Apache License 2.0
 
 ---
@@ -150,7 +150,7 @@ docs/
   workspace.md
   minimum-privileges.md
   visualization.md
-  introduction_v2.2.0_zh.md
+  introduction_v2.2.1_zh.md
 config.json         # Database, server, embedding, security config
 ```
 

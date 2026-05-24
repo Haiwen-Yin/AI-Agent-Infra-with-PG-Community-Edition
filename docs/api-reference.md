@@ -1,4 +1,4 @@
-# API Reference — PostgreSQL Memory System v2.2.0
+# API Reference — PostgreSQL Memory System v2.2.1
 
 **Python requirement**: 3.14+ recommended, 3.6+ minimum. Verified with `psycopg2-binary` 2.9.12.
 

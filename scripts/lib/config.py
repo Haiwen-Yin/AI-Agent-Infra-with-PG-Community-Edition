@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.0 - Configuration"""
+"""PostgreSQL Memory System v2.2.1 - Configuration"""
 
 import json
 import os

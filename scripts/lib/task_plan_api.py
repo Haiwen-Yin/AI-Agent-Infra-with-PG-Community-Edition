@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.0 - Task Plan API
+"""PostgreSQL Memory System v2.2.1 - Task Plan API
 
 Task plan creation, step management, breakpoint recovery,
 tool call auditing, and dependency tracking.

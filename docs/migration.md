@@ -1,4 +1,4 @@
-# Migration Guide — v1.x → v2.0 → v2.2.0
+# Migration Guide — v1.x → v2.0 → v2.2.1
 
 ## v2.0.0 → v2.2.0 Breaking Changes
 

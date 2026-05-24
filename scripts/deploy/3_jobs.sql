@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Memory System v2.2.0 - Scheduled Jobs
+-- PostgreSQL Memory System v2.2.1 - Scheduled Jobs
 -- ============================================================================
 -- NOTE: pg_cron must be installed and configured before running this script.
 -- See deployment.md for pg_cron setup instructions.

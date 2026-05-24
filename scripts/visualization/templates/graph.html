@@ -128,7 +128,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 var network=null;
 var typeColors={MEMORY:'#4fc3f7',KNOWLEDGE:'#81c784',TASK_OUTPUT:'#ffb74d',EXPERIENCE:'#e57373',HARNESS_TEMPLATE:'#ba68c8'};
 
-function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');h.setAttribute('data-lang',c==='zh'?'en':'zh')}
+function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');var n=c==='zh'?'en':'zh';h.setAttribute('data-lang',n);localStorage.setItem('lang',n)}
 
 function loadStats(){
   fetch('/api/graph/stats').then(function(r){return r.json()}).then(function(d){
@@ -235,6 +235,7 @@ function showNodeDetail(nd){
 }
 
 loadStats();
+(function(){var sl=localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl}})();
 loadAllGraph();
 
 var _aloSec=300,_aloInt=null;

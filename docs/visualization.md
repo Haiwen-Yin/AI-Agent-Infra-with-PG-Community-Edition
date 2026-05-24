@@ -1,4 +1,4 @@
-# Web Visualization - PostgreSQL Memory System v2.2.0
+# Web Visualization - PostgreSQL Memory System v2.2.1
 
 ## Status
 
@@ -41,7 +41,7 @@ python3.14 scripts/visualization/server.py
 
 | Route | Method | Auth | Description |
 |-------|--------|------|-------------|
-| `/api/health` | GET | No | `{status: "ok", version: "2.2.0"}` |
+| `/api/health` | GET | No | `{status: "ok", version: "2.2.1"}` |
 | `/api/login` | POST | No | `{username, password}` → `{success, session_id}` |
 | `/api/logout` | GET | Yes | Clear session cookie |
 | `/api/knowledge` | GET | Yes | `{nodes: [...], edges: [...]}` for vis.js |

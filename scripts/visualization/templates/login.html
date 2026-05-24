@@ -162,6 +162,7 @@ function toggleLang() {
   const html = document.documentElement;
   const current = html.getAttribute('data-lang');
   const next = current === 'en' ? 'zh' : 'en';
+  localStorage.setItem('lang', next);
   html.setAttribute('data-lang', next);
   applyLang(next);
 }
@@ -220,6 +221,7 @@ async function handleLogin(e) {
   }
 }
 
+(function(){var sl=localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl}})();
 applyLang(document.documentElement.getAttribute('data-lang') || 'en');
 </script>
 </body>

@@ -1,4 +1,4 @@
-# Minimum Database Privileges - PostgreSQL Memory System v2.2.0
+# Minimum Database Privileges - PostgreSQL Memory System v2.2.1
 
 ## Required Permissions by Deploy Phase
 

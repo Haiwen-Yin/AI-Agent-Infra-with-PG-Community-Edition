@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.0 - Connection Pool Manager"""
+"""PostgreSQL Memory System v2.2.1 - Connection Pool Manager"""
 
 import logging
 import threading

@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Memory System v2.2.0 - Built-in Harness Templates
+-- PostgreSQL Memory System v2.2.1 - Built-in Harness Templates
 -- ============================================================================
 
 -- Research Analyst

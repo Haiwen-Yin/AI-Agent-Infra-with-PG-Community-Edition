@@ -148,7 +148,9 @@ var edgeTypeColors = {
 function toggleLang() {
   var html = document.documentElement;
   var cur = html.getAttribute('data-lang');
-  html.setAttribute('data-lang', cur === 'en' ? 'zh' : 'en');
+  var next = cur === 'en' ? 'zh' : 'en';
+  html.setAttribute('data-lang', next);
+  localStorage.setItem('lang', next);
   applyLangPlaceholders();
 }
 
@@ -373,6 +375,7 @@ document.addEventListener('keydown',_resetAutoLogout);
 document.addEventListener('click',_resetAutoLogout);
 _resetAutoLogout();
 
+(function(){var sl=localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl}})();
 applyLangPlaceholders();
 loadData();
 var _aloSec=300,_aloInt=null;

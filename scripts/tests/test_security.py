@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.0 - Security Module Tests"""
+"""PostgreSQL Memory System v2.2.1 - Security Module Tests"""
 import sys
 import os
 
