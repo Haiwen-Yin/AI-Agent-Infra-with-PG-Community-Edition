@@ -1,6 +1,6 @@
 -- ============================================================================
--- PostgreSQL Memory System v2.2.1 - Unified Schema
--- Workspace & Context Continuity
+-- PostgreSQL Memory System v2.3.0 - Unified Schema
+-- Spec Driven Development, Agent Elastic Management, Collaboration Groups
 -- ============================================================================
 
 -- Extensions
@@ -13,7 +13,7 @@ CREATE EXTENSION IF NOT EXISTS age;
 
 CREATE TABLE IF NOT EXISTS entities (
     entity_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    entity_type     VARCHAR(32) NOT NULL CHECK (entity_type IN ('MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE')),
+    entity_type     VARCHAR(32) NOT NULL CHECK (entity_type IN ('MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE','SPEC')),
     title           VARCHAR(500) NOT NULL,
     content         TEXT,
     summary         VARCHAR(2000),
@@ -92,20 +92,92 @@ CREATE TABLE IF NOT EXISTS entity_tags (
 );
 
 -- ============================================================================
+-- ALTER TABLE: v2.3.0 column additions for existing tables
+-- ============================================================================
+
+DO $$
+BEGIN
+    -- agent_registry: +5 columns
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_registry' AND column_name='created_by_agent_id') THEN
+        ALTER TABLE agent_registry ADD COLUMN created_by_agent_id VARCHAR(64) REFERENCES agent_registry(agent_id) ON DELETE SET NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_registry' AND column_name='agent_role') THEN
+        ALTER TABLE agent_registry ADD COLUMN agent_role VARCHAR(32) DEFAULT 'WORKER' CHECK (agent_role IN ('WORKER','COORDINATOR','SYSTEM'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_registry' AND column_name='current_user_id') THEN
+        ALTER TABLE agent_registry ADD COLUMN current_user_id VARCHAR(64);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_registry' AND column_name='pool_config') THEN
+        ALTER TABLE agent_registry ADD COLUMN pool_config JSONB;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_registry' AND column_name='last_active_at') THEN
+        ALTER TABLE agent_registry ADD COLUMN last_active_at TIMESTAMPTZ DEFAULT now();
+    END IF;
+
+    -- agent_session: +1 column
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_session' AND column_name='last_active_at') THEN
+        ALTER TABLE agent_session ADD COLUMN last_active_at TIMESTAMPTZ DEFAULT now();
+    END IF;
+
+    -- agent_registry: update status CHECK constraint to include DORMANT/POOL
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='agent_registry_status_check' AND conrelid='agent_registry'::regclass) THEN
+        ALTER TABLE agent_registry DROP CONSTRAINT agent_registry_status_check;
+    END IF;
+    ALTER TABLE agent_registry ADD CONSTRAINT agent_registry_status_check CHECK (status IN ('ACTIVE','INACTIVE','SUSPENDED','DECOMMISSIONED','DORMANT','POOL'));
+
+    -- workspaces: update workspace_type CHECK constraint to include COLLAB_GROUP/PERSONAL_IN_GROUP
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='workspaces_workspace_type_check' AND conrelid='workspaces'::regclass) THEN
+        ALTER TABLE workspaces DROP CONSTRAINT workspaces_workspace_type_check;
+    END IF;
+    ALTER TABLE workspaces ADD CONSTRAINT workspaces_workspace_type_check CHECK (workspace_type IN ('CONVERSATION','AUTONOMOUS','PIPELINE','COLLAB_GROUP','PERSONAL_IN_GROUP'));
+
+    -- entities: update entity_type CHECK constraint to include SPEC
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='entities_entity_type_check' AND conrelid='entities'::regclass) THEN
+        ALTER TABLE entities DROP CONSTRAINT entities_entity_type_check;
+    END IF;
+    ALTER TABLE entities ADD CONSTRAINT entities_entity_type_check CHECK (entity_type IN ('MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE','SPEC'));
+
+    -- collab_groups: update status CHECK to include SUSPENDED
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='collab_groups_status_check' AND conrelid='collab_groups'::regclass) THEN
+        ALTER TABLE collab_groups DROP CONSTRAINT collab_groups_status_check;
+    END IF;
+    ALTER TABLE collab_groups ADD CONSTRAINT collab_groups_status_check CHECK (status IN ('ACTIVE','PAUSED','ARCHIVED','SUSPENDED'));
+
+    -- agent_credentials: update credential_type CHECK
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='agent_credentials_credential_type_check' AND conrelid='agent_credentials'::regclass) THEN
+        ALTER TABLE agent_credentials DROP CONSTRAINT agent_credentials_credential_type_check;
+    END IF;
+    ALTER TABLE agent_credentials ADD CONSTRAINT agent_credentials_credential_type_check CHECK (credential_type IN ('ACCESS_TOKEN','SESSION_KEY','PASSWORD_HASH','API_KEY','SESSION','TEMP','assignment'));
+
+    -- agent_collaboration: make target_agent_id nullable
+    ALTER TABLE agent_collaboration ALTER COLUMN target_agent_id DROP NOT NULL;
+
+    -- system_config: v2.3.0 seed entries
+    INSERT INTO system_config (config_key, config_value, description)
+    ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = now();
+END
+$$;
+
+-- ============================================================================
 -- Agent Tables
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS agent_registry (
-    agent_id     VARCHAR(64) PRIMARY KEY,
-    agent_name   VARCHAR(200) NOT NULL,
-    agent_type   VARCHAR(50) DEFAULT 'general',
-    description  TEXT,
-    capabilities JSONB DEFAULT '[]',
-    config       JSONB DEFAULT '{}',
-    status       VARCHAR(32) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE','SUSPENDED','DECOMMISSIONED')),
-    last_seen_at TIMESTAMPTZ DEFAULT now(),
-    created_at   TIMESTAMPTZ DEFAULT now(),
-    updated_at   TIMESTAMPTZ DEFAULT now()
+    agent_id             VARCHAR(64) PRIMARY KEY,
+    agent_name           VARCHAR(200) NOT NULL,
+    agent_type           VARCHAR(50) DEFAULT 'general',
+    description          TEXT,
+    capabilities         JSONB DEFAULT '[]',
+    config               JSONB DEFAULT '{}',
+    status               VARCHAR(32) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE','SUSPENDED','DECOMMISSIONED','DORMANT','POOL')),
+    last_seen_at         TIMESTAMPTZ DEFAULT now(),
+    created_at           TIMESTAMPTZ DEFAULT now(),
+    updated_at           TIMESTAMPTZ DEFAULT now(),
+    created_by_agent_id  VARCHAR(64) REFERENCES agent_registry(agent_id) ON DELETE SET NULL,
+    agent_role           VARCHAR(32) DEFAULT 'WORKER' CHECK (agent_role IN ('WORKER','COORDINATOR','SYSTEM')),
+    current_user_id      VARCHAR(64),
+    pool_config          JSONB,
+    last_active_at       TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS agent_session (
@@ -118,7 +190,8 @@ CREATE TABLE IF NOT EXISTS agent_session (
     context                 JSONB DEFAULT '{}',
     start_time              TIMESTAMPTZ DEFAULT now(),
     end_time                TIMESTAMPTZ,
-    last_activity           TIMESTAMPTZ DEFAULT now()
+    last_activity           TIMESTAMPTZ DEFAULT now(),
+    last_active_at          TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS entity_access_log (
@@ -133,7 +206,7 @@ CREATE TABLE IF NOT EXISTS entity_access_log (
 CREATE TABLE IF NOT EXISTS agent_collaboration (
     collab_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     source_agent_id VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
-    target_agent_id VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
+    target_agent_id VARCHAR(64) REFERENCES agent_registry(agent_id) ON DELETE SET NULL,
     col_type        VARCHAR(32) DEFAULT 'SHARE',
     entity_id       BIGINT REFERENCES entities(entity_id) ON DELETE SET NULL,
     context         JSONB,
@@ -149,7 +222,7 @@ CREATE TABLE IF NOT EXISTS agent_collaboration (
 CREATE TABLE IF NOT EXISTS workspaces (
     workspace_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     workspace_name     VARCHAR(200),
-    workspace_type     VARCHAR(32) DEFAULT 'CONVERSATION' CHECK (workspace_type IN ('CONVERSATION','AUTONOMOUS','PIPELINE')),
+    workspace_type     VARCHAR(32) DEFAULT 'CONVERSATION' CHECK (workspace_type IN ('CONVERSATION','AUTONOMOUS','PIPELINE','COLLAB_GROUP','PERSONAL_IN_GROUP')),
     isolation_mode     VARCHAR(16) DEFAULT 'SHARED' CHECK (isolation_mode IN ('SHARED','ISOLATED')),
     owner_user_id      VARCHAR(64),
     current_agent_id   VARCHAR(64),
@@ -177,6 +250,76 @@ CREATE TABLE IF NOT EXISTS workspace_tasks (
     plan_id      BIGINT NOT NULL,
     assigned_at  TIMESTAMPTZ DEFAULT now(),
     PRIMARY KEY (workspace_id, plan_id)
+);
+
+-- ============================================================================
+-- Agent Credentials (v2.3.0)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS agent_credentials (
+    credential_id    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    agent_id         VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
+    user_id          VARCHAR(64) NOT NULL ,
+    credential_type  VARCHAR(32) NOT NULL CHECK (credential_type IN ('ACCESS_TOKEN','SESSION_KEY','PASSWORD_HASH','API_KEY','SESSION','TEMP','assignment')),
+    credential_value TEXT NOT NULL,
+    scope            JSONB NOT NULL DEFAULT '{}',
+    expires_at       TIMESTAMPTZ,
+    is_active        BOOLEAN DEFAULT TRUE NOT NULL,
+    created_at       TIMESTAMPTZ DEFAULT now()
+);
+
+-- ============================================================================
+-- Spec Tables (v2.3.0)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS spec_meta (
+    entity_id           BIGINT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE PRIMARY KEY,
+    spec_version        INT DEFAULT 1 NOT NULL,
+    spec_status         VARCHAR(32) DEFAULT 'DRAFT' NOT NULL CHECK (spec_status IN ('DRAFT','REVIEWED','APPROVED','IMPLEMENTED','DEPRECATED')),
+    acceptance_criteria JSONB,
+    spec_constraints    JSONB,
+    spec_scope          VARCHAR(64),
+    complexity          VARCHAR(16) DEFAULT 'MEDIUM' NOT NULL CHECK (complexity IN ('LOW','MEDIUM','HIGH','CRITICAL')),
+    parent_spec_id      BIGINT REFERENCES entities(entity_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS spec_plan_links (
+    link_id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    spec_id        BIGINT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
+    plan_id        BIGINT NOT NULL,
+    link_type      VARCHAR(32) NOT NULL CHECK (link_type IN ('DRIVES','VALIDATES','CONSTRAINS','EXTENDS')),
+    link_strength  NUMERIC(5,4) DEFAULT 1.0000 NOT NULL CHECK (link_strength BETWEEN 0 AND 1),
+    created_at     TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (spec_id, plan_id, link_type)
+);
+
+-- ============================================================================
+-- Collaboration Tables (v2.3.0)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS collab_groups (
+    group_id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    group_name           VARCHAR(256) NOT NULL,
+    group_type           VARCHAR(32) NOT NULL CHECK (group_type IN ('PROJECT','TEAM','AD_HOC','PIPELINE')),
+    description          TEXT,
+    workspace_id         BIGINT REFERENCES workspaces(workspace_id) ON DELETE SET NULL,
+    coordinator_agent_id VARCHAR(64) REFERENCES agent_registry(agent_id) ON DELETE SET NULL,
+    sharing_policy       VARCHAR(32) DEFAULT 'OPEN' NOT NULL CHECK (sharing_policy IN ('OPEN','MODERATED','RESTRICTED')),
+    status               VARCHAR(32) DEFAULT 'ACTIVE' NOT NULL CHECK (status IN ('ACTIVE','PAUSED','ARCHIVED','SUSPENDED')),
+    metadata             JSONB DEFAULT '{}',
+    created_at           TIMESTAMPTZ DEFAULT now(),
+    updated_at           TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS collab_group_members (
+    member_id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    group_id               BIGINT NOT NULL REFERENCES collab_groups(group_id) ON DELETE CASCADE,
+    agent_id               VARCHAR(64) NOT NULL REFERENCES agent_registry(agent_id) ON DELETE CASCADE,
+    role                   VARCHAR(32) DEFAULT 'CONTRIBUTOR' NOT NULL CHECK (role IN ('LEAD','MEMBER','OBSERVER','CONTRIBUTOR')),
+    personal_workspace_id  BIGINT REFERENCES workspaces(workspace_id) ON DELETE SET NULL,
+    joined_at              TIMESTAMPTZ DEFAULT now(),
+    status                 VARCHAR(16) DEFAULT 'ACTIVE' NOT NULL CHECK (status IN ('ACTIVE','LEFT','REMOVED')),
+    UNIQUE (group_id, agent_id)
 );
 
 -- ============================================================================
@@ -294,6 +437,23 @@ CREATE INDEX IF NOT EXISTS idx_wctx_workspace ON workspace_context(workspace_id)
 CREATE INDEX IF NOT EXISTS idx_wctx_type ON workspace_context(context_type);
 CREATE INDEX IF NOT EXISTS idx_plan_status ON task_plans(status);
 CREATE INDEX IF NOT EXISTS idx_step_plan ON task_steps(plan_id);
+
+-- v2.3.0 indexes
+CREATE INDEX IF NOT EXISTS idx_sm_scope ON spec_meta(spec_scope);
+CREATE INDEX IF NOT EXISTS idx_sm_status ON spec_meta(spec_status);
+CREATE INDEX IF NOT EXISTS idx_sm_parent ON spec_meta(parent_spec_id);
+CREATE INDEX IF NOT EXISTS idx_spl_spec ON spec_plan_links(spec_id);
+CREATE INDEX IF NOT EXISTS idx_spl_plan ON spec_plan_links(plan_id);
+CREATE INDEX IF NOT EXISTS idx_ac_agent ON agent_credentials(agent_id);
+CREATE INDEX IF NOT EXISTS idx_ac_user ON agent_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_ac_active ON agent_credentials(is_active);
+CREATE INDEX IF NOT EXISTS idx_cg_workspace ON collab_groups(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_cg_status ON collab_groups(status);
+CREATE INDEX IF NOT EXISTS idx_cg_type ON collab_groups(group_type);
+CREATE INDEX IF NOT EXISTS idx_cgm_group ON collab_group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_cgm_agent ON collab_group_members(agent_id);
+CREATE INDEX IF NOT EXISTS idx_ar_role ON agent_registry(agent_role);
+CREATE INDEX IF NOT EXISTS idx_ar_last_active ON agent_registry(last_active_at);
 
 -- ============================================================================
 -- Apache AGE Graph
@@ -424,7 +584,7 @@ $$;
 -- ============================================================================
 
 INSERT INTO system_config (config_key, config_value, description)
-VALUES ('system.version', '2.2.1', 'PostgreSQL Memory System version')
+VALUES ('system.version', '2.3.0', 'PostgreSQL Memory System version')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = now();
 
 INSERT INTO system_config (config_key, config_value, description)

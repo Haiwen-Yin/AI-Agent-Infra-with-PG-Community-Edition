@@ -1,4 +1,4 @@
-# Architecture — PostgreSQL Memory System v2.2.1
+# Architecture — PostgreSQL Memory System v2.3.0
 
 ## Overview
 

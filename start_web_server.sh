@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# PostgreSQL Memory System v2.2.0 - Web Server Control Script
+# PostgreSQL Memory System v2.3.0 - Web Server Control Script
 # Usage: ./start_web_server.sh {start|stop|restart|status|log}
 # ============================================================================
 
@@ -62,7 +62,7 @@ is_running() { local pid=$(get_pid); [ -n "$pid" ]; }
 do_status() {
     load_env
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  PostgreSQL Memory System v2.2.0${NC}"
+    echo -e "${BLUE}  PostgreSQL Memory System v2.3.0${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     if is_running; then
@@ -172,7 +172,7 @@ case "${1:-}" in
     status)  do_status ;;
     log)     do_log ;;
     *)
-        echo "PostgreSQL Memory System v2.2.0 - Web Server Control"
+        echo "PostgreSQL Memory System v2.3.0 - Web Server Control"
         echo ""
         echo "Usage: ${0##*/} {start|stop|restart|status|log}"
         echo ""

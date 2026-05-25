@@ -1,4 +1,4 @@
-# Security — PostgreSQL Memory System v2.2.1
+# Security — PostgreSQL Memory System v2.3.0
 
 ## Data Masking
 

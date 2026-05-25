@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.1 - Workspace API
+"""PostgreSQL Memory System v2.3.0 - Workspace API
 
 Workspace lifecycle management, context chains, agent handoff sessions,
 workspace recovery, and task linking.

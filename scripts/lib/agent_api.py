@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.1 - Agent API
+"""PostgreSQL Memory System v2.3.0 - Agent API
 
 Agent registration, session management, access audit logging,
 and collaboration tracking.
@@ -288,3 +288,141 @@ def get_collaborations(
         """
         rows = execute_query(sql, (limit,))
     return [_row_to_dict(r) for r in rows]
+
+
+def issue_credential(agent_id: str, user_id: str, cred_type: str, scope: Any, expires_hours: int = 24) -> int:
+    import uuid
+    credential_value = uuid.uuid4().hex
+    scope_val = json.dumps(scope) if isinstance(scope, (dict, list)) else scope
+    sql = """
+        INSERT INTO agent_credentials (agent_id, user_id, credential_type,
+                                        credential_value, scope, is_active,
+                                        expires_at, created_at)
+        VALUES (%s, %s, %s, %s, %s, TRUE,
+                NOW() + %s * INTERVAL '1 hour', NOW())
+        RETURNING credential_id
+    """
+    cid = execute_insert_returning_id(sql, (
+        agent_id, user_id, cred_type,
+        credential_value, scope_val, expires_hours,
+    ), id_column='credential_id')
+    return cid
+
+
+def verify_credential(credential_id: int) -> Optional[Dict[str, Any]]:
+    sql = """
+        SELECT credential_id, agent_id, user_id, credential_type,
+               credential_value, scope, is_active, expires_at, created_at
+        FROM agent_credentials
+        WHERE credential_id = %s AND is_active = TRUE
+              AND (expires_at IS NULL OR expires_at > NOW())
+    """
+    row = execute_query_one(sql, (credential_id,))
+    if row:
+        return _row_to_dict(row)
+    expire_sql = """
+        UPDATE agent_credentials SET is_active = FALSE
+        WHERE credential_id = %s AND is_active = TRUE AND expires_at IS NOT NULL AND expires_at <= NOW()
+    """
+    execute(expire_sql, (credential_id,))
+    return None
+
+
+def get_credentials_for_user(user_id: str) -> List[Dict[str, Any]]:
+    sql = """
+        SELECT credential_id, agent_id, user_id, credential_type,
+               credential_value, scope, is_active, expires_at, created_at
+        FROM agent_credentials
+        WHERE user_id = %s AND is_active = TRUE
+              AND (expires_at IS NULL OR expires_at > NOW())
+        ORDER BY created_at DESC
+    """
+    rows = execute_query(sql, (user_id,))
+    return [_row_to_dict(r) for r in rows]
+
+
+def revoke_credential(credential_id: int) -> bool:
+    sql = """
+        UPDATE agent_credentials SET is_active = FALSE
+        WHERE credential_id = %s
+    """
+    return execute(sql, (credential_id,)) > 0
+
+
+def hibernate_agent(agent_id: str) -> bool:
+    sql = """
+        UPDATE agent_registry SET status = 'DORMANT', updated_at = NOW()
+        WHERE agent_id = %s AND status IN ('ACTIVE', 'INACTIVE')
+    """
+    result = execute(sql, (agent_id,)) > 0
+    cred_sql = """
+        UPDATE agent_credentials SET is_active = FALSE
+        WHERE agent_id = %s AND is_active = TRUE
+    """
+    execute(cred_sql, (agent_id,))
+    return result
+
+
+def wake_agent(agent_id: str) -> bool:
+    sql = """
+        UPDATE agent_registry SET status = 'ACTIVE', last_active_at = NOW(), updated_at = NOW()
+        WHERE agent_id = %s AND status = 'DORMANT'
+    """
+    return execute(sql, (agent_id,)) > 0
+
+
+def register_pool_agent(agent_name: str, capabilities: Optional[Any] = None, skills_tags: Optional[List[str]] = None) -> str:
+    import uuid
+    agent_id = "pool-{}".format(uuid.uuid4().hex[:8])
+    caps_val = json.dumps(capabilities) if isinstance(capabilities, (dict, list)) else capabilities
+    pool_config = json.dumps({"skills_tags": skills_tags or []})
+    sql = """
+        INSERT INTO agent_registry (agent_id, agent_name, agent_type, capabilities,
+                                     status, pool_config, created_at, updated_at)
+        VALUES (%s, %s, 'pool', %s, 'POOL', %s, NOW(), NOW())
+        RETURNING agent_id
+    """
+    return execute_insert_returning_id(sql, (
+        agent_id, agent_name, caps_val, pool_config,
+    ), id_column="agent_id")
+
+
+def assign_pool_agent(user_id: str, required_skills: Optional[List[str]] = None) -> Optional[str]:
+    if not required_skills:
+        sql = """
+            SELECT agent_id FROM agent_registry
+            WHERE status = 'POOL'
+            ORDER BY created_at ASC
+            LIMIT 1
+        """
+        row = execute_query_one(sql)
+    else:
+        sql = """
+            SELECT agent_id FROM agent_registry
+            WHERE status = 'POOL'
+            ORDER BY (
+                SELECT COUNT(*)
+                FROM jsonb_array_elements_text(
+                    COALESCE(pool_config->'skills_tags', '[]'::jsonb)
+                ) AS tag
+                WHERE tag = ANY(%s)
+            ) DESC, created_at ASC
+            LIMIT 1
+        """
+        row = execute_query_one(sql, (required_skills,))
+    if not row:
+        return None
+    agent_id = row["agent_id"]
+    update_sql = """
+        UPDATE agent_registry
+        SET status = 'ACTIVE', current_user_id = %s, last_active_at = NOW(), updated_at = NOW()
+        WHERE agent_id = %s AND status = 'POOL'
+    """
+    updated = execute(update_sql, (user_id, agent_id)) > 0
+    if not updated:
+        return None
+    issue_credential(
+        agent_id, user_id, 'assignment',
+        {"access_level": "FULL", "restricted_domains": [], "max_clearance": "CONFIDENTIAL"},
+    )
+    return agent_id

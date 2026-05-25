@@ -1,15 +1,15 @@
 ---
 name: memory-pg18-by-yhw
-version: v2.2.1
+version: v2.3.0
 author: Haiwen Yin
-description: "PostgreSQL AI Database Memory System v2.2.1 - Workspace & context continuity, agent handoff, Apache AGE property graph, pgvector HNSW, pg-embedding-gen-by-yhw, psycopg2 driver, 4-phase SQL deployment, normalized tags, 22 tables, 5 PL/pgSQL schemas"
-tags: [postgresql, memory-system, knowledge-base, vector-search, psycopg2, property-graph, multi-agent, pg18, age, pg-embedding-gen-by-yhw, workspace, context-continuity, handoff, normalized-tags, jsonb]
+description: "PostgreSQL AI Database Memory System v2.3.0 - Spec Driven Development, Agent Elastic Management, Collaboration Groups, Workspace & context continuity, Apache AGE property graph, pgvector HNSW, pg-embedding-gen-by-yhw, psycopg2 driver, 4-phase SQL deployment, normalized tags, 27 tables, 7 PL/pgSQL schemas"
+tags: [postgresql, memory-system, knowledge-base, vector-search, psycopg2, property-graph, multi-agent, pg18, age, pg-embedding-gen-by-yhw, workspace, context-continuity, handoff, normalized-tags, jsonb, sdd, elastic-agents, collab-groups]
 ---
 
-# PostgreSQL AI Database Memory System v2.2.1
+# PostgreSQL AI Database Memory System v2.3.0
 
 **Author**: Haiwen Yin
-**Version**: v2.2.1 - 2026-05-24
+**Version**: v2.3.0 - 2026-05-24
 **License**: Apache License 2.0
 
 ---
@@ -74,6 +74,19 @@ Installation: `sudo bash scripts/install.sh` then `psql -d your_db -f sql/instal
 +------------------------------------------------------------------+
 ```
 
+## v2.3.0 Key Additions: SDD, Elastic Agents, Collaboration Groups
+
+| Feature | Description |
+|---------|-------------|
+| **Spec Driven Development (SDD)** | spec_meta + spec_plan_links tables, SPEC entity type, spec_api.py (10 functions), spec_manager PL/pgSQL schema (6 functions) |
+| **Agent Elastic Management** | agent_credentials table, DORMANT/POOL agent states, 8 new agent_api functions (hibernate/wake/pool), dormant_agent_job, credential_cleanup_job |
+| **Collaboration Groups** | collab_groups + collab_group_members tables, collab_api.py (10 functions), collab_group_manager PL/pgSQL schema (7 functions), auto-created shared/personal workspaces, collab_group_cleanup_job |
+| **5 New Tables** | spec_meta, spec_plan_links, agent_credentials, collab_groups, collab_group_members |
+| **agent_registry Expanded** | +5 columns (created_by_agent_id, agent_role, current_user_id, pool_config, last_active_at), DORMANT/POOL status |
+| **workspaces Expanded** | +2 workspace types (COLLAB_GROUP, PERSONAL_IN_GROUP) |
+| **entities Expanded** | +SPEC entity_type |
+| **143 Tests** | 143/143 passing, 11 test suites |
+
 ## v2.2.0 Key Addition: Workspace & Context Continuity
 
 | Feature | Description |
@@ -116,8 +129,8 @@ cd scripts && python3 -m tests.test_all
 scripts/
   deploy/
     1_schema.sql    # Tables, indexes, AGE graph, views, helper functions
-    2_api.sql       # PL/pgSQL functions (5 schemas, 31+ functions)
-    3_jobs.sql      # pg_cron jobs (9 automated jobs)
+    2_api.sql       # PL/pgSQL functions (7 schemas, 44+ functions)
+    3_jobs.sql      # pg_cron jobs (12 automated jobs)
     4_harness_templates.sql  # HARNESS_META + 5 built-in harness templates
   lib/
     config.py       # Unified Config with env var overrides
@@ -128,6 +141,8 @@ scripts/
     task_plan_api.py # Task plans, steps, snapshots, tool calls, dependencies
     security.py     # DataMaskingService, ReversibleEncryption, password hashing
     harness_api.py  # Harness template CRUD, instantiate, variable extraction
+    spec_api.py    # Spec Driven Development: spec CRUD, plan linking, status management (10 functions)
+    collab_api.py  # Collaboration groups: group CRUD, membership, shared workspaces (10 functions)
     graph_api.py    # Property graph traversal via Apache AGE Cypher + SQL fallback (9 functions)
     workspace_api.py # Workspace lifecycle, context chain, handoff, recovery (11 functions)
   tests/
@@ -139,6 +154,8 @@ scripts/
     test_harness.py
     test_security.py
     test_workspace.py
+    test_spec.py
+    test_collab.py
     test_all.py
 docs/
   architecture.md
@@ -150,17 +167,17 @@ docs/
   workspace.md
   minimum-privileges.md
   visualization.md
-  introduction_v2.2.1_zh.md
+  introduction_v2.3.0_zh.md
 config.json         # Database, server, embedding, security config
 ```
 
-## Database Schema (22 Tables)
+## Database Schema (27 Tables)
 
 ### Core Tables (8)
 
 | Table | Purpose |
 |-------|---------|
-| entities | Unified store: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE |
+| entities | Unified store: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE, SPEC |
 | entity_edges | Unified directed edges with strength/confidence |
 | knowledge_meta | Domain, topic, difficulty, review scheduling, validation, versioning |
 | harness_meta | Template versioning, input/output schema, execution mode |
@@ -169,12 +186,13 @@ config.json         # Database, server, embedding, security config
 | entity_tags | Entity-tag associations (composite PK: entity_id + entity_type + tag_id) |
 | agent_permission_log | Permission change audit |
 
-### Agent Tables (4)
+### Agent Tables (5)
 
 | Table | Purpose |
 |-------|---------|
-| agent_registry | Agent identity, capabilities, permissions |
+| agent_registry | Agent identity, capabilities, permissions, elastic states (ACTIVE/DORMANT/POOL) |
 | agent_session | Session tracking with context snapshots, handoff chain (PREDECESSOR_SESSION_ID) |
+| agent_credentials | Agent credential store for hibernate/wake lifecycle |
 | entity_access_log | Audit trail for all entity access |
 | agent_collaboration | Cross-agent sharing requests |
 
@@ -188,13 +206,27 @@ config.json         # Database, server, embedding, security config
 | task_tool_calls | Tool invocation audit |
 | task_dependencies | Inter-plan dependency graph |
 
-### Workspace Tables (3 NEW)
+### Workspace Tables (3)
 
 | Table | Purpose |
 |-------|---------|
-| workspaces | Workspace lifecycle (ACTIVE/PAUSED/ARCHIVED), isolation mode, ownership |
+| workspaces | Workspace lifecycle (ACTIVE/PAUSED/ARCHIVED), isolation mode, ownership (incl. COLLAB_GROUP, PERSONAL_IN_GROUP) |
 | workspace_context | Append-only context chain (CHECKPOINT, HANDOFF, SUMMARY, ERROR_STATE, AUTO_SAVE) |
 | workspace_tasks | Junction: workspace <-> task plans |
+
+### Spec Tables (2 NEW)
+
+| Table | Purpose |
+|-------|---------|
+| spec_meta | Spec metadata for Spec Driven Development (spec_type, status, priority) |
+| spec_plan_links | Spec-to-plan linking for SDD traceability |
+
+### Collaboration Tables (2 NEW)
+
+| Table | Purpose |
+|-------|---------|
+| collab_groups | Collaboration group definitions (name, owner, settings) |
+| collab_group_members | Collaboration group membership (agent_id, role, joined_at) |
 
 ### System Tables (2)
 
@@ -203,7 +235,7 @@ config.json         # Database, server, embedding, security config
 | system_config | System configuration key-value store |
 | system_users | System user accounts with roles |
 
-## PL/pgSQL API (5 Schemas, 31+ Functions)
+## PL/pgSQL API (7 Schemas, 44+ Functions)
 
 | Schema | Function | Purpose |
 |--------|----------|---------|
@@ -240,8 +272,21 @@ config.json         # Database, server, embedding, security config
 | workspace_manager | recover_to_checkpoint() | Recover workspace to checkpoint |
 | workspace_manager | get_workspace_summary() | Get workspace summary as JSONB |
 | workspace_manager | cleanup_abandoned() | Archive abandoned workspaces |
+| spec_manager | create_spec() | Create a new spec |
+| spec_manager | get_spec() | Get spec details as JSONB |
+| spec_manager | update_spec_status() | Update spec lifecycle status |
+| spec_manager | link_spec_to_plan() | Link spec to a task plan |
+| spec_manager | get_spec_plans() | Get all plans linked to a spec |
+| spec_manager | cleanup_orphaned_specs() | Clean up specs with no linked plans |
+| collab_group_manager | create_collab_group() | Create a collaboration group |
+| collab_group_manager | get_collab_group() | Get group details as JSONB |
+| collab_group_manager | add_member() | Add agent to group |
+| collab_group_manager | remove_member() | Remove agent from group |
+| collab_group_manager | get_group_members() | Get all members of a group |
+| collab_group_manager | get_agent_groups() | Get all groups for an agent |
+| collab_group_manager | cleanup_empty_groups() | Remove groups with no members |
 
-## Python API (10 Modules)
+## Python API (12 Modules)
 
 | Module | Functions | Purpose |
 |--------|-----------|---------|
@@ -249,14 +294,16 @@ config.json         # Database, server, embedding, security config
 | connection.py | 8 | psycopg2 ThreadedConnectionPool, Unix socket support |
 | memory_api.py | 10 | Memory CRUD + tags + count on ENTITIES (entity_type='MEMORY') |
 | knowledge_api.py | 13 | Knowledge CRUD + edges + reviews + tags + count |
-| agent_api.py | 14 | Agent registration, sessions, collaboration, access log |
+| agent_api.py | 22 | Agent registration, sessions, collaboration, access log, hibernate/wake/pool |
 | task_plan_api.py | 12 | Task plans, steps, snapshots, tool calls, dependencies |
 | security.py | 2 | Password hashing and verification (hash_password, verify_password) |
 | harness_api.py | 8 | Template CRUD, instantiate, variable extraction, count |
 | graph_api.py | 9 | Property graph traversal via Apache AGE Cypher + SQL fallback |
 | workspace_api.py | 11 | Workspace lifecycle, context chain, handoff, recovery |
+| spec_api.py | 10 | Spec CRUD, plan linking, status management (SDD) |
+| collab_api.py | 10 | Collaboration group CRUD, membership, shared workspaces |
 
-## Scheduled Jobs (9)
+## Scheduled Jobs (12)
 
 | Job | Schedule | Action |
 |-----|----------|--------|
@@ -269,6 +316,9 @@ config.json         # Database, server, embedding, security config
 | collab_expiry_job | Daily 00:30 | Expire stale collaboration requests |
 | workspace_cleanup_job | Daily 01:00 | Archive abandoned workspaces |
 | stale_workspace_detect_job | Hourly | Pause workspaces inactive >7 days |
+| dormant_agent_job | Daily 04:00 | Hibernate agents inactive >30 days |
+| credential_cleanup_job | Weekly Sun 06:00 | Purge expired agent credentials |
+| collab_group_cleanup_job | Daily 05:00 | Remove empty collaboration groups |
 
 **Note**: pg_cron is not installed on the target server; jobs are defined but will not run automatically until pg_cron is installed.
 
@@ -339,15 +389,19 @@ config.json         # Database, server, embedding, security config
 - **Database**: PostgreSQL 18 on 10.10.10.131, user=`pgsql`, trust auth, Unix socket at `/tmp`
 - **Connection**: When config `host` is `localhost` or empty, connect via Unix socket (`host='/tmp'`), not TCP
 - **AGE graph name**: Cannot start with `pg_` (reserved); use `memory_graph`
-- **pg_cron**: Installed and configured on 10.10.10.131 (`cron.database_name = 'memory_graph'`). 9 scheduled jobs defined in `3_jobs.sql`.
+- **pg_cron**: Installed and configured on 10.10.10.131 (`cron.database_name = 'memory_graph'`). 12 scheduled jobs defined in `3_jobs.sql`.
 - **Embedding API**: http://10.10.10.1:12345/v1, model `text-embedding-bge-m3`, 1024 dimensions
 - **Python**: 3.14 on local machine (primary); 3.6 on remote server. psycopg2-binary 2.9+ on local, 2.8.6 on remote.
-- **Web Visualization**: `./start_web_server.sh start` — runs locally, connects to remote DB. Port 8000. Session auth via system_users table. 7 pages: Knowledge, Memory, Agents, Tasks, Workspaces, Graph Explorer, Login. 14 REST API endpoints.
-- **Entity types**: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE — stored in `entities.entity_type`
+- **Web Visualization**: `./start_web_server.sh start` — runs locally, connects to remote DB. Port 8000. Session auth via system_users table. 9 pages: Knowledge, Memory, Agents, Tasks, Workspaces, Graph Explorer, Specs, Collab, Login. 16 REST API endpoints.
+- **Entity types**: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE, SPEC — stored in `entities.entity_type`
 - **Knowledge category**: Stored in `entities.category`, NOT in `knowledge_meta` (no concept_type column there)
 - **Task status mapping**: Python API maps SUCCESS→COMPLETED, IN_PROGRESS→ACTIVE to match schema CHECK constraints
 - **Visibility**: PRIVATE (owner only), SHARED (all agents), PUBLIC (unrestricted) — COLLABORATIVE removed in v2.1
 - **Edge strength**: 0.0–1.0 (v2.1 normalized from v2.0's 0–2 range); confidence: 0.0–1.0
+- **Knowledge difficulty**: BEGINNER / INTERMEDIATE / ADVANCED / EXPERT (CHECK constraint on knowledge_meta.difficulty)
+- **Spec plan link types**: DRIVES / VALIDATES / CONSTRAINS / EXTENDS (CHECK constraint on spec_plan_links.link_type)
+- **Collab member roles**: LEAD / CONTRIBUTOR / OBSERVER (LEAD/CONTRIBUTOR get auto-created PERSONAL_IN_GROUP workspaces)
+- **API signatures**: `create_spec(entity_data=dict, spec_meta=dict)` — two dict params, NOT positional args; `create_plan(agent_id, goal, priority)` — agent_id first; `add_step(plan_id, plan_status, description, step_order, tool_name)` — plan_status and step_order required
 
 ## PostgreSQL-Specific Features
 
@@ -373,3 +427,6 @@ config.json         # Database, server, embedding, security config
 | 10 | ON DELETE CASCADE | All child FKs use CASCADE for clean workspace/entity deletion; PostgreSQL supports this natively |
 | 11 | Local-first Skill | Skill runs locally (Agent side), connects to remote DB via TCP; visualization server runs locally too |
 | 12 | Web Visualization | Standard library HTTP server + local vis-network.min.js; no Flask/Django; bilingual (zh/en); session auth via system_users; 5-min auto-logout |
+| 13 | Spec Driven Development | SPEC entity type + spec_meta table unify spec lifecycle with entity model; spec_plan_links provides traceability from spec to implementation |
+| 14 | Agent Elastic Management | DORMANT/POOL states in agent_registry enable resource-efficient agent hibernation; agent_credentials table stores encrypted credentials for wake/resume |
+| 15 | Collaboration Groups | collab_groups + collab_group_members decouple group logic from agent_registry; auto-created COLLAB_GROUP/PERSONAL_IN_GROUP workspaces provide isolated execution |

@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Memory System v2.2.1 - Scheduled Jobs
+-- PostgreSQL Memory System v2.3.0 - Scheduled Jobs
 -- ============================================================================
 -- NOTE: pg_cron must be installed and configured before running this script.
 -- See deployment.md for pg_cron setup instructions.
@@ -74,3 +74,67 @@ SELECT cron.schedule(
     '0 * * * *',
     $$UPDATE workspaces SET status = 'PAUSED', updated_at = now() WHERE status = 'ACTIVE' AND updated_at < now() - INTERVAL '7 days' AND workspace_id NOT IN (SELECT DISTINCT workspace_id FROM agent_session WHERE workspace_id IS NOT NULL AND is_active = TRUE)$$
 );
+
+
+-- ============================================================================
+-- v2.3.0 New Jobs (scheduled via pg_cron)
+-- ============================================================================
+
+-- Dormant Agent Job: auto-hibernate agents inactive beyond dormant_timeout_min
+-- Schedule: Every 30 minutes
+DO $$
+BEGIN
+    PERFORM cron.schedule(
+        'dormant_agent_job',
+        '*/30 * * * *',
+        $JOB$
+        UPDATE agent_registry
+        SET status = 'DORMANT', updated_at = now()
+        WHERE status = 'ACTIVE'
+          AND last_active_at < now() - (SELECT config_value::INT FROM system_config WHERE config_key = 'dormant_timeout_min') * interval '1 minute';
+        UPDATE agent_credentials
+        SET is_active = FALSE
+        WHERE agent_id IN (SELECT agent_id FROM agent_registry WHERE status = 'DORMANT')
+          AND is_active = TRUE;
+        $JOB$
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'dormant_agent_job already exists or cannot be scheduled: %', SQLERRM;
+END;
+$$;
+
+-- Credential Cleanup Job: purge expired and revoked credentials daily
+-- Schedule: Daily at 02:00
+DO $$
+BEGIN
+    PERFORM cron.schedule(
+        'credential_cleanup_job',
+        '0 2 * * *',
+        $JOB$
+        DELETE FROM agent_credentials
+        WHERE (expires_at IS NOT NULL AND expires_at < now())
+           OR (is_active = FALSE AND created_at < now() - interval '7 days');
+        $JOB$
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'credential_cleanup_job already exists or cannot be scheduled: %', SQLERRM;
+END;
+$$;
+
+-- Collab Group Cleanup Job: archive groups with no active members
+-- Schedule: Daily at 03:00
+DO $$
+BEGIN
+    PERFORM cron.schedule(
+        'collab_group_cleanup_job',
+        '0 3 * * *',
+        $JOB$
+        UPDATE collab_groups SET status = 'ARCHIVED', updated_at = now()
+        WHERE status = 'ACTIVE'
+          AND group_id NOT IN (SELECT DISTINCT group_id FROM collab_group_members WHERE status = 'ACTIVE');
+        $JOB$
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'collab_group_cleanup_job already exists or cannot be scheduled: %', SQLERRM;
+END;
+$$;

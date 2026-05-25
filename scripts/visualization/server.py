@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.2.1 - Web Visualization Server
+"""PostgreSQL Memory System v2.3.0 - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -20,7 +20,7 @@ from lib import connection, memory_api, knowledge_api, agent_api
 from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import security, config
 
-VERSION = "2.2.1"
+VERSION = "2.3.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -32,8 +32,10 @@ PAGE_ROUTES = {
     '/memory': 'memory.html',
     '/agents': 'agents.html',
     '/tasks': 'tasks.html',
-    '/workspaces': 'workspaces.html',
-    '/graph': 'graph.html',
+'/workspaces': 'workspaces.html',
+     '/graph': 'graph.html',
+     '/specs': 'specs.html',
+     '/collab': 'collab.html',
 }
 
 PUBLIC_API = {'/api/health', '/api/login'}
@@ -117,7 +119,7 @@ def _graph_all():
     )
     type_colors = {
         'KNOWLEDGE': '#4a90d9', 'MEMORY': '#4fc3f7', 'TASK_OUTPUT': '#ffb74d',
-        'EXPERIENCE': '#e57373', 'HARNESS_TEMPLATE': '#ba68c8',
+        'EXPERIENCE': '#e57373', 'HARNESS_TEMPLATE': '#ba68c8', 'SPEC': '#81c784',
     }
     nodes = []
     for item in all_items:
@@ -141,6 +143,34 @@ def _graph_all():
             'label': e.get('edge_type', ''),
         })
     return {'nodes': nodes, 'edges': edges}
+
+
+def _api_specs():
+    from lib import spec_api
+    specs = spec_api.list_specs()
+    result = []
+    for s in specs:
+        links = spec_api.get_spec_plan_links(s['entity_id'])
+        s['plan_links'] = [_clean_row(l) for l in links]
+        result.append(_clean_row(s))
+    return {'specs': result}
+
+
+def _api_collab():
+    from lib import collab_api
+    groups = connection.execute_query(
+        "SELECT cg.group_id, cg.group_name, cg.group_type, cg.description, "
+        "cg.workspace_id, cg.coordinator_agent_id, cg.sharing_policy, cg.status, "
+        "cg.created_at, cg.updated_at, "
+        "(SELECT COUNT(*) FROM collab_group_members WHERE group_id = cg.group_id AND status = 'ACTIVE') AS member_count "
+        "FROM collab_groups cg ORDER BY cg.created_at DESC"
+    )
+    result = []
+    for g in groups:
+        members = collab_api.list_group_members(g['group_id'])
+        g['members'] = [_clean_row(m) for m in members]
+        result.append(_clean_row(g))
+    return {'groups': result}
 
 
 def _get_tags_for_entities(entity_ids):
@@ -393,6 +423,10 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._send_json(graph_api.graph_search(keyword=q if q else None, entity_type=et))
             elif path == '/api/graph/all':
                 self._send_json(_graph_all())
+            elif path == '/api/specs':
+                self._send_json(_api_specs())
+            elif path == '/api/collab':
+                self._send_json(_api_collab())
             else:
                 self._send_error(404, 'API endpoint not found')
         except Exception as e:
@@ -441,11 +475,15 @@ class VisHandler(BaseHTTPRequestHandler):
         edge_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entity_edges")
         ws_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM workspaces")
         agent_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM agent_registry")
+        spec_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM spec_meta")
+        collab_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM collab_groups WHERE status = 'ACTIVE'")
         self._send_json({
             'entity_counts': entity_counts,
             'edge_count': edge_row['cnt'] if edge_row else 0,
             'workspace_count': ws_row['cnt'] if ws_row else 0,
             'agent_count': agent_row['cnt'] if agent_row else 0,
+            'spec_count': spec_row['cnt'] if spec_row else 0,
+            'collab_count': collab_row['cnt'] if collab_row else 0,
         })
 
     def _serve_template(self, filename):

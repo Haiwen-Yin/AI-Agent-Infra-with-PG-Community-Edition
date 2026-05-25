@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Memory System v2.2.1 - API Functions
+-- PostgreSQL Memory System v2.3.0 - API Functions
 -- ============================================================================
 
 -- ============================================================================
@@ -846,3 +846,244 @@ BEGIN
     RETURN v_affected;
 END;
 $$;
+
+-- ============================================================================
+-- Schema: spec_manager (v2.3.0)
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION spec_manager.create_spec(
+    p_title VARCHAR,
+    p_content TEXT DEFAULT NULL,
+    p_summary TEXT DEFAULT NULL,
+    p_spec_scope VARCHAR DEFAULT NULL,
+    p_complexity VARCHAR DEFAULT 'MEDIUM',
+    p_acceptance_criteria JSONB DEFAULT NULL,
+    p_spec_constraints JSONB DEFAULT NULL,
+    p_importance INT DEFAULT 5,
+    p_owned_by_agent VARCHAR DEFAULT NULL,
+    p_visibility VARCHAR DEFAULT 'SHARED',
+    p_workspace_id BIGINT DEFAULT NULL,
+    p_parent_spec_id BIGINT DEFAULT NULL
+) RETURNS BIGINT AS $$
+DECLARE
+    v_entity_id BIGINT;
+BEGIN
+    INSERT INTO entities (entity_type, title, content, summary, importance, owned_by_agent, visibility, workspace_id)
+    VALUES ('SPEC', p_title, p_content, p_summary, p_importance, p_owned_by_agent, p_visibility, p_workspace_id)
+    RETURNING entity_id INTO v_entity_id;
+
+    INSERT INTO spec_meta (entity_id, spec_scope, complexity, acceptance_criteria, spec_constraints, parent_spec_id)
+    VALUES (v_entity_id, p_spec_scope, p_complexity, p_acceptance_criteria, p_spec_constraints, p_parent_spec_id);
+
+    RETURN v_entity_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION spec_manager.get_spec(p_entity_id BIGINT) RETURNS JSONB AS $$
+DECLARE
+    v_result JSONB;
+BEGIN
+    SELECT jsonb_build_object(
+        'entity_id', e.entity_id,
+        'title', e.title,
+        'content', e.content,
+        'summary', e.summary,
+        'importance', e.importance,
+        'visibility', e.visibility,
+        'owned_by_agent', e.owned_by_agent,
+        'workspace_id', e.workspace_id,
+        'spec_version', sm.spec_version,
+        'spec_status', sm.spec_status,
+        'spec_scope', sm.spec_scope,
+        'complexity', sm.complexity,
+        'acceptance_criteria', sm.acceptance_criteria,
+        'spec_constraints', sm.spec_constraints,
+        'parent_spec_id', sm.parent_spec_id
+    ) INTO v_result
+    FROM entities e
+    JOIN spec_meta sm ON sm.entity_id = e.entity_id
+    WHERE e.entity_id = p_entity_id AND e.entity_type = 'SPEC';
+
+    RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION spec_manager.update_spec_status(p_entity_id BIGINT, p_new_status VARCHAR) RETURNS BOOLEAN AS $$
+BEGIN
+    UPDATE spec_meta SET spec_status = p_new_status WHERE entity_id = p_entity_id;
+    UPDATE entities SET updated_at = now() WHERE entity_id = p_entity_id;
+    RETURN FOUND;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION spec_manager.validate_spec(p_entity_id BIGINT) RETURNS JSONB AS $$
+DECLARE
+    v_spec JSONB;
+    v_errors TEXT[] := '{}';
+    v_warnings TEXT[] := '{}';
+BEGIN
+    SELECT jsonb_build_object('title', e.title, 'acceptance_criteria', sm.acceptance_criteria, 'spec_constraints', sm.spec_constraints)
+    INTO v_spec
+    FROM entities e JOIN spec_meta sm ON sm.entity_id = e.entity_id
+    WHERE e.entity_id = p_entity_id AND e.entity_type = 'SPEC';
+
+    IF v_spec IS NULL THEN RETURN jsonb_build_object('valid', false, 'errors', ARRAY['Spec not found']); END IF;
+    IF v_spec->>'acceptance_criteria' IS NULL OR v_spec->>'acceptance_criteria' = 'null' THEN
+        v_errors := array_append(v_errors, 'No acceptance criteria defined');
+    END IF;
+
+    RETURN jsonb_build_object('valid', array_length(v_errors, 1) IS NULL, 'errors', v_errors, 'warnings', v_warnings);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION spec_manager.link_spec_to_plan(
+    p_spec_id BIGINT, p_plan_id BIGINT, p_link_type VARCHAR DEFAULT 'DRIVES', p_link_strength NUMERIC DEFAULT 1.0
+) RETURNS BIGINT AS $$
+DECLARE
+    v_link_id BIGINT;
+BEGIN
+    INSERT INTO spec_plan_links (spec_id, plan_id, link_type, link_strength)
+    VALUES (p_spec_id, p_plan_id, p_link_type, p_link_strength)
+    ON CONFLICT (spec_id, plan_id, link_type) DO NOTHING
+    RETURNING link_id INTO v_link_id;
+    RETURN v_link_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION spec_manager.get_spec_plan_links(p_spec_id BIGINT) RETURNS JSONB AS $$
+DECLARE
+    v_result JSONB;
+BEGIN
+    SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'link_id', spl.link_id,
+        'plan_id', spl.plan_id,
+        'link_type', spl.link_type,
+        'link_strength', spl.link_strength,
+        'goal', tp.goal,
+        'status', tp.status
+    )), '[]'::jsonb) INTO v_result
+    FROM spec_plan_links spl
+    LEFT JOIN task_plans tp ON tp.plan_id = spl.plan_id
+    WHERE spl.spec_id = p_spec_id;
+    RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- Schema: collab_group_manager (v2.3.0)
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION collab_group_manager.create_group(
+    p_group_name VARCHAR,
+    p_group_type VARCHAR DEFAULT 'TEAM',
+    p_description TEXT DEFAULT NULL,
+    p_sharing_policy VARCHAR DEFAULT 'OPEN',
+    p_coordinator_agent_id VARCHAR DEFAULT NULL
+) RETURNS BIGINT AS $$
+DECLARE
+    v_group_id BIGINT;
+    v_workspace_id BIGINT;
+BEGIN
+    INSERT INTO workspaces (workspace_name, workspace_type, isolation_mode)
+    VALUES (p_group_name || ' (Shared)', 'COLLAB_GROUP', 'SHARED')
+    RETURNING workspace_id INTO v_workspace_id;
+
+    INSERT INTO collab_groups (group_name, group_type, description, workspace_id, coordinator_agent_id, sharing_policy)
+    VALUES (p_group_name, p_group_type, p_description, v_workspace_id, p_coordinator_agent_id, p_sharing_policy)
+    RETURNING group_id INTO v_group_id;
+
+    RETURN v_group_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION collab_group_manager.get_group(p_group_id BIGINT) RETURNS JSONB AS $$
+DECLARE
+    v_result JSONB;
+BEGIN
+    SELECT jsonb_build_object(
+        'group_id', cg.group_id,
+        'group_name', cg.group_name,
+        'group_type', cg.group_type,
+        'description', cg.description,
+        'workspace_id', cg.workspace_id,
+        'coordinator_agent_id', cg.coordinator_agent_id,
+        'sharing_policy', cg.sharing_policy,
+        'status', cg.status,
+        'member_count', (SELECT COUNT(*) FROM collab_group_members WHERE group_id = p_group_id AND status = 'ACTIVE')
+    ) INTO v_result
+    FROM collab_groups cg
+    WHERE cg.group_id = p_group_id;
+
+    RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION collab_group_manager.update_group(p_group_id BIGINT, p_status VARCHAR DEFAULT NULL, p_sharing_policy VARCHAR DEFAULT NULL) RETURNS BOOLEAN AS $$
+BEGIN
+    UPDATE collab_groups SET
+        status = COALESCE(p_status, status),
+        sharing_policy = COALESCE(p_sharing_policy, sharing_policy),
+        updated_at = now()
+    WHERE group_id = p_group_id;
+    RETURN FOUND;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION collab_group_manager.add_member(
+    p_group_id BIGINT, p_agent_id VARCHAR, p_role VARCHAR DEFAULT 'CONTRIBUTOR'
+) RETURNS BIGINT AS $$
+DECLARE
+    v_member_id BIGINT;
+    v_ws_id BIGINT;
+BEGIN
+    IF p_role IN ('LEAD', 'CONTRIBUTOR') THEN
+        INSERT INTO workspaces (workspace_name, workspace_type, isolation_mode)
+        VALUES ((SELECT group_name FROM collab_groups WHERE group_id = p_group_id) || ' - ' || p_agent_id, 'PERSONAL_IN_GROUP', 'ISOLATED')
+        RETURNING workspace_id INTO v_ws_id;
+    END IF;
+
+    INSERT INTO collab_group_members (group_id, agent_id, role, personal_workspace_id)
+    VALUES (p_group_id, p_agent_id, p_role, v_ws_id)
+    ON CONFLICT (group_id, agent_id) DO UPDATE SET status = 'ACTIVE', role = EXCLUDED.role, personal_workspace_id = COALESCE(collab_group_members.personal_workspace_id, EXCLUDED.personal_workspace_id)
+    RETURNING member_id INTO v_member_id;
+
+    RETURN v_member_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION collab_group_manager.remove_member(p_group_id BIGINT, p_agent_id VARCHAR) RETURNS BOOLEAN AS $$
+BEGIN
+    UPDATE collab_group_members SET status = 'REMOVED' WHERE group_id = p_group_id AND agent_id = p_agent_id;
+    RETURN FOUND;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION collab_group_manager.get_group_members(p_group_id BIGINT) RETURNS JSONB AS $$
+DECLARE
+    v_result JSONB;
+BEGIN
+    SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'member_id', cgm.member_id,
+        'agent_id', cgm.agent_id,
+        'role', cgm.role,
+        'personal_workspace_id', cgm.personal_workspace_id,
+        'joined_at', cgm.joined_at,
+        'status', cgm.status
+    )), '[]'::jsonb) INTO v_result
+    FROM collab_group_members cgm
+    WHERE cgm.group_id = p_group_id AND cgm.status = 'ACTIVE';
+    RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION collab_group_manager.cleanup_groups() RETURNS INT AS $$
+DECLARE
+    v_affected INT;
+BEGIN
+    UPDATE collab_groups SET status = 'ARCHIVED', updated_at = now()
+    WHERE status = 'ACTIVE'
+      AND group_id NOT IN (SELECT DISTINCT group_id FROM collab_group_members WHERE status = 'ACTIVE');
+    GET DIAGNOSTICS v_affected = ROW_COUNT;
+    RETURN v_affected;
+END;
+$$ LANGUAGE plpgsql;

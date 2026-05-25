@@ -1,4 +1,4 @@
-# Workspace & Context Continuity - PostgreSQL Memory System v2.2.1
+# Workspace & Context Continuity - PostgreSQL Memory System v2.3.0
 
 ## Design Philosophy
 

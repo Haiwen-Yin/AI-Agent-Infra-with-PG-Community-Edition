@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.3.0] - 2026-05-24
+
+### Summary
+
+**Spec Driven Development, Agent Elastic Management, Collaboration Groups.** Backward-compatible schema expansion — 5 new tables, 2 new PL/pgSQL schemas, 2 new Python modules, 3 new pg_cron jobs.
+
+### Added
+
+- **Spec Driven Development (SDD)** — spec_meta table, spec_plan_links table, SPEC entity type, spec_api.py (10 functions), spec_manager PL/pgSQL schema (6 functions)
+- **Agent Elastic Management** — agent_credentials table, DORMANT/POOL agent states, 8 new agent_api functions (hibernate_agent, wake_agent, pool_agent, get_dormant_agents, get_pool_agents, update_agent_role, get_agent_credentials, cleanup_credentials), dormant_agent_job, credential_cleanup_job
+- **Collaboration Groups** — collab_groups table, collab_group_members table, collab_api.py (10 functions), collab_group_manager PL/pgSQL schema (7 functions), auto-created COLLAB_GROUP and PERSONAL_IN_GROUP workspaces, collab_group_cleanup_job
+- **agent_registry: 5 new columns** — created_by_agent_id, agent_role, current_user_id, pool_config, last_active_at; status expanded with DORMANT and POOL states
+- **agent_session: 1 new column** — last_active_at
+- **workspaces: 2 new types** — COLLAB_GROUP, PERSONAL_IN_GROUP
+- **entities: SPEC entity_type** — Spec entities alongside MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE
+- **12 new indexes** for spec, credential, and collab group tables
+- **3 new pg_cron jobs** — dormant_agent_job (Daily 04:00), credential_cleanup_job (Weekly Sun 06:00), collab_group_cleanup_job (Daily 05:00)
+- **spec_api.py** — 10 Python functions: create_spec, get_spec, update_spec, delete_spec, list_specs, link_spec_to_plan, unlink_spec_from_plan, get_spec_plans, get_plan_specs, update_spec_status
+- **collab_api.py** — 10 Python functions: create_collab_group, get_collab_group, update_collab_group, delete_collab_group, add_group_member, remove_group_member, get_group_members, get_agent_groups, get_group_workspace, list_collab_groups
+- **spec_manager PL/pgSQL schema** — 6 functions: create_spec, get_spec, update_spec_status, link_spec_to_plan, get_spec_plans, cleanup_orphaned_specs
+- **collab_group_manager PL/pgSQL schema** — 7 functions: create_collab_group, get_collab_group, add_member, remove_member, get_group_members, get_agent_groups, cleanup_empty_groups
+- **docs/introduction_v2.3.0_zh.md** — Chinese introduction updated for v2.3.0
+- **RELEASE_NOTES_v2.3.0.md** — Comprehensive release notes
+
+### Changed
+
+- **1_schema.sql**: 27 tables (5 new), 69 indexes (12 new), 5 views, AGE graph
+- **2_api.sql**: 7 PL/pgSQL schemas (spec_manager, collab_group_manager added), 44+ functions
+- **3_jobs.sql**: 12 pg_cron jobs (3 new: dormant_agent_job, credential_cleanup_job, collab_group_cleanup_job)
+- **agent_api.py**: 22 functions (was 14); added hibernate/wake/pool/credential management
+- **Test suite expanded**: 143 tests (from 115): Connection 6, Memory 16, Knowledge 19, Agent 22, Graph 12, Harness 12, Security 19, Workspace 14, Spec 10, Collab 10, Task Plan 4
+
+### Fixed
+
+- Various edge cases in agent state transitions (DORMANT↔ACTIVE, POOL↔ACTIVE)
+- Collaboration group workspace auto-creation on member join
+- Spec-to-plan linking integrity constraints
+
+---
+
 ## [2.2.1] - 2026-05-24
 
 ### Summary
@@ -331,8 +371,8 @@ This is a **major breakthrough for Production AI Agents** - v1.0.0 brings Postgr
 
 | Version | Release Date | Major Features | Status |
 |---------|--------------|----------------|--------|
-| v2.2.1 | 2026-05-24 | UI fixes: language persistence, text contrast | Current |
-| v2.2.0 | 2026-05-23 | Workspace management, web visualization, context continuity, bug fixes | Stable |
+| v2.3.0 | 2026-05-24 | Spec Driven Development, Agent Elastic Management, Collaboration Groups | Current |
+| v2.2.1 | 2026-05-24 | UI fixes: language persistence, text contrast | Stable |
 | v2.1.0 | 2026-05-20 | Normalized tags, property graph API, column renames, simplified visibility | Stable |
 | v2.0.0 | 2026-05-18 | Complete rewrite: unified entities, psycopg2, PL/pgSQL API, harness, security | Stable |
 | v1.0.0 | 2026-05-10 | Knowledge Base, Enhanced API, Production-Ready | Stable |
