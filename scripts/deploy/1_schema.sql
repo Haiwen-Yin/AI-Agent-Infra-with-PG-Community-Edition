@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Memory System v2.3.0 - Unified Schema
+-- PostgreSQL Memory System v2.3.1 - Unified Schema
 -- Spec Driven Development, Agent Elastic Management, Collaboration Groups
 -- ============================================================================
 
@@ -584,7 +584,7 @@ $$;
 -- ============================================================================
 
 INSERT INTO system_config (config_key, config_value, description)
-VALUES ('system.version', '2.3.0', 'PostgreSQL Memory System version')
+VALUES ('system.version', '2.3.1', 'PostgreSQL Memory System version')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = now();
 
 INSERT INTO system_config (config_key, config_value, description)

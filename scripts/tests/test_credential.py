@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.3.0 - Credential & Pool Agent API Tests"""
+"""PostgreSQL Memory System v2.3.1 - Credential & Pool Agent API Tests"""
 import sys
 import os
 import uuid

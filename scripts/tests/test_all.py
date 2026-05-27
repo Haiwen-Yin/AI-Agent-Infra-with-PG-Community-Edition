@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.3.0 - Master Test Runner"""
+"""PostgreSQL Memory System v2.3.1 - Master Test Runner"""
 import sys
 import os
 
@@ -15,11 +15,12 @@ from tests.test_workspace import run_all as run_workspace
 from tests.test_spec import run_all as run_spec
 from tests.test_collab import run_all as run_collab
 from tests.test_credential import run_all as run_credential
+from tests.test_embedding import run_all as run_embedding
 
 
 def main():
     print("=" * 60)
-    print("PostgreSQL Memory System v2.3.0 - Full Test Suite")
+    print("PostgreSQL Memory System v2.3.1 - Full Test Suite")
     print("=" * 60)
 
     suites = [
@@ -34,6 +35,7 @@ def main():
         ("Spec", run_spec),
         ("Collab", run_collab),
         ("Credential", run_credential),
+        ("Embedding", run_embedding),
     ]
 
     results = {}

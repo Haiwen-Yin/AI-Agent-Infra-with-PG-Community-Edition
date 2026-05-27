@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.3.0 - Property Graph API
+"""PostgreSQL Memory System v2.3.1 - Property Graph API
 
 Core graph operations using Apache AGE Cypher queries via psycopg2.
 Provides neighbor traversal, path finding, community detection, and graph analytics.

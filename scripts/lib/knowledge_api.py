@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.3.0 - Knowledge API
+"""PostgreSQL Memory System v2.3.1 - Knowledge API
 
 Knowledge CRUD, graph edges, spaced-review, and tagging.
 Operates on entities (entity_type='KNOWLEDGE') + knowledge_meta + entity_edges.

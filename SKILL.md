@@ -1,15 +1,15 @@
 ---
 name: memory-pg18-by-yhw
-version: v2.3.0
+version: v2.3.1
 author: Haiwen Yin
-description: "PostgreSQL AI Database Memory System v2.3.0 - Spec Driven Development, Agent Elastic Management, Collaboration Groups, Workspace & context continuity, Apache AGE property graph, pgvector HNSW, pg-embedding-gen-by-yhw, psycopg2 driver, 4-phase SQL deployment, normalized tags, 27 tables, 7 PL/pgSQL schemas"
+description: "PostgreSQL AI Database Memory System v2.3.1 - Embedding Python API, Spec Driven Development, Agent Elastic Management, Collaboration Groups, Workspace & context continuity, Apache AGE property graph, pgvector HNSW, pg-embedding-gen-by-yhw, psycopg2 driver, 4-phase SQL deployment, normalized tags, 27 tables, 7 PL/pgSQL schemas"
 tags: [postgresql, memory-system, knowledge-base, vector-search, psycopg2, property-graph, multi-agent, pg18, age, pg-embedding-gen-by-yhw, workspace, context-continuity, handoff, normalized-tags, jsonb, sdd, elastic-agents, collab-groups]
 ---
 
-# PostgreSQL AI Database Memory System v2.3.0
+# PostgreSQL AI Database Memory System v2.3.1
 
 **Author**: Haiwen Yin
-**Version**: v2.3.0 - 2026-05-24
+**Version**: v2.3.1 - 2026-05-26
 **License**: Apache License 2.0
 
 ---
@@ -74,6 +74,14 @@ Installation: `sudo bash scripts/install.sh` then `psql -d your_db -f sql/instal
 +------------------------------------------------------------------+
 ```
 
+## v2.3.1 Key Addition: Embedding Python API
+
+| Feature | Description |
+|---------|-------------|
+| **Embedding Python API** | embedding_api.py (12 functions): generate, store, search, batch, stats via pgvector + pg-embedding-gen-by-yhw |
+| **EMBEDDING_GENERATION_JOB** | pg_cron job every 2 hours for MEMORY/KNOWLEDGE entity embedding generation |
+| **19 New Embedding Tests** | 162/162 tests passing, 12 test suites |
+
 ## v2.3.0 Key Additions: SDD, Elastic Agents, Collaboration Groups
 
 | Feature | Description |
@@ -85,7 +93,7 @@ Installation: `sudo bash scripts/install.sh` then `psql -d your_db -f sql/instal
 | **agent_registry Expanded** | +5 columns (created_by_agent_id, agent_role, current_user_id, pool_config, last_active_at), DORMANT/POOL status |
 | **workspaces Expanded** | +2 workspace types (COLLAB_GROUP, PERSONAL_IN_GROUP) |
 | **entities Expanded** | +SPEC entity_type |
-| **143 Tests** | 143/143 passing, 11 test suites |
+| **162 Tests** | 162/162 passing, 12 test suites |
 
 ## v2.2.0 Key Addition: Workspace & Context Continuity
 
@@ -130,7 +138,7 @@ scripts/
   deploy/
     1_schema.sql    # Tables, indexes, AGE graph, views, helper functions
     2_api.sql       # PL/pgSQL functions (7 schemas, 44+ functions)
-    3_jobs.sql      # pg_cron jobs (12 automated jobs)
+    3_jobs.sql      # pg_cron jobs (13 automated jobs)
     4_harness_templates.sql  # HARNESS_META + 5 built-in harness templates
   lib/
     config.py       # Unified Config with env var overrides
@@ -143,6 +151,7 @@ scripts/
     harness_api.py  # Harness template CRUD, instantiate, variable extraction
     spec_api.py    # Spec Driven Development: spec CRUD, plan linking, status management (10 functions)
     collab_api.py  # Collaboration groups: group CRUD, membership, shared workspaces (10 functions)
+    embedding_api.py # Embedding generation, storage, search, batch, stats (12 functions)
     graph_api.py    # Property graph traversal via Apache AGE Cypher + SQL fallback (9 functions)
     workspace_api.py # Workspace lifecycle, context chain, handoff, recovery (11 functions)
   tests/
@@ -156,6 +165,7 @@ scripts/
     test_workspace.py
     test_spec.py
     test_collab.py
+    test_embedding.py
     test_all.py
 docs/
   architecture.md
@@ -167,7 +177,7 @@ docs/
   workspace.md
   minimum-privileges.md
   visualization.md
-  introduction_v2.3.0_zh.md
+  introduction_v2.3.1_zh.md
 config.json         # Database, server, embedding, security config
 ```
 
@@ -286,7 +296,7 @@ config.json         # Database, server, embedding, security config
 | collab_group_manager | get_agent_groups() | Get all groups for an agent |
 | collab_group_manager | cleanup_empty_groups() | Remove groups with no members |
 
-## Python API (12 Modules)
+## Python API (13 Modules)
 
 | Module | Functions | Purpose |
 |--------|-----------|---------|
@@ -302,8 +312,9 @@ config.json         # Database, server, embedding, security config
 | workspace_api.py | 11 | Workspace lifecycle, context chain, handoff, recovery |
 | spec_api.py | 10 | Spec CRUD, plan linking, status management (SDD) |
 | collab_api.py | 10 | Collaboration group CRUD, membership, shared workspaces |
+| embedding_api.py | 12 | Embedding generation, storage, search, batch, stats (pgvector + pg-embedding-gen-by-yhw) |
 
-## Scheduled Jobs (12)
+## Scheduled Jobs (13)
 
 | Job | Schedule | Action |
 |-----|----------|--------|
@@ -319,6 +330,7 @@ config.json         # Database, server, embedding, security config
 | dormant_agent_job | Daily 04:00 | Hibernate agents inactive >30 days |
 | credential_cleanup_job | Weekly Sun 06:00 | Purge expired agent credentials |
 | collab_group_cleanup_job | Daily 05:00 | Remove empty collaboration groups |
+| embedding_generation_job | Every 2 hours | Generate embeddings for MEMORY/KNOWLEDGE entities |
 
 **Note**: pg_cron is not installed on the target server; jobs are defined but will not run automatically until pg_cron is installed.
 
@@ -389,7 +401,7 @@ config.json         # Database, server, embedding, security config
 - **Database**: PostgreSQL 18 on 10.10.10.131, user=`pgsql`, trust auth, Unix socket at `/tmp`
 - **Connection**: When config `host` is `localhost` or empty, connect via Unix socket (`host='/tmp'`), not TCP
 - **AGE graph name**: Cannot start with `pg_` (reserved); use `memory_graph`
-- **pg_cron**: Installed and configured on 10.10.10.131 (`cron.database_name = 'memory_graph'`). 12 scheduled jobs defined in `3_jobs.sql`.
+- **pg_cron**: Installed and configured on 10.10.10.131 (`cron.database_name = 'memory_graph'`). 13 scheduled jobs defined in `3_jobs.sql`.
 - **Embedding API**: http://10.10.10.1:12345/v1, model `text-embedding-bge-m3`, 1024 dimensions
 - **Python**: 3.14 on local machine (primary); 3.6 on remote server. psycopg2-binary 2.9+ on local, 2.8.6 on remote.
 - **Web Visualization**: `./start_web_server.sh start` — runs locally, connects to remote DB. Port 8000. Session auth via system_users table. 9 pages: Knowledge, Memory, Agents, Tasks, Workspaces, Graph Explorer, Specs, Collab, Login. 16 REST API endpoints.

@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.3.0 - Collaboration Group API
+"""PostgreSQL Memory System v2.3.1 - Collaboration Group API
 
 Collaboration group lifecycle management, membership, and group memory sharing.
 """

@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.3.1] - 2026-05-26
+
+### Summary
+
+**Embedding Python API and EMBEDDING_GENERATION_JOB.** Backward-compatible — 1 new Python module, 1 new pg_cron job, 19 new embedding tests.
+
+### Added
+
+- **embedding_api.py** — 12 Python functions: generate_embedding, store_embedding, store_embedding_vector, get_embedding, delete_embedding, search_similar, search_by_entity_id, search_hybrid, search_multi_type, generate_embeddings_batch, get_embedding_stats, get_model_dimension
+- **EMBEDDING_GENERATION_JOB** — pg_cron job every 2 hours for MEMORY/KNOWLEDGE entity embedding generation
+- **19 embedding tests** — test_embedding.py: generate, store, search, batch, stats, hybrid, multi-type
+- Uses pgvector cosine distance (`<=>` operator), `%s` positional binds, `::vector` cast, `ILIKE`, `LIMIT`
+- Leverages existing `memory.generate_embedding()` PL/pgSQL and pg-embedding-gen-by-yhw extension
+
+### Changed
+
+- **3_jobs.sql**: 13 pg_cron jobs (1 new: embedding_generation_job)
+- **Test suite expanded**: 162 tests (from 143): Connection 6, Memory 16, Knowledge 19, Agent 22, Graph 12, Harness 12, Security 19, Workspace 14, Spec 10, Collab 10, Embedding 19, Task Plan 4
+
+### Fixed
+
+- **List scrolling**: All 7 list pages now support mouse wheel scrolling — `body` changed from `min-height:100vh` to `height:100vh`; `.content-area` added `min-height:0`; `#listView` given explicit `height:calc(100vh - 120px)`
+- **Sticky table headers**: All 7 list pages have fixed table headers on scroll — `border-collapse:collapse` changed to `separate;border-spacing:0`; `thead th` added `position:sticky;top:0;z-index:2;background;box-shadow`; scroll containers changed to `padding:0 20px` (no top/bottom padding to prevent content leaking behind sticky header)
+- **Pagination**: All 7 list pages support pagination (30 items/page) with Prev/Next buttons and page numbers
+- **Knowledge content**: 16 original knowledge entries updated with full content; 15 new knowledge entries added (total 42)
+- **Memory data**: 26 new memory entries added (total 35) for pagination testing
+- **Demo data fix**: Missing `knowledge_meta` row for entity 1009 inserted
+
+---
+
 ## [2.3.0] - 2026-05-24
 
 ### Summary
@@ -371,7 +401,8 @@ This is a **major breakthrough for Production AI Agents** - v1.0.0 brings Postgr
 
 | Version | Release Date | Major Features | Status |
 |---------|--------------|----------------|--------|
-| v2.3.0 | 2026-05-24 | Spec Driven Development, Agent Elastic Management, Collaboration Groups | Current |
+| v2.3.1 | 2026-05-26 | Embedding Python API, EMBEDDING_GENERATION_JOB, 19 embedding tests | Current |
+| v2.3.0 | 2026-05-24 | Spec Driven Development, Agent Elastic Management, Collaboration Groups | Stable |
 | v2.2.1 | 2026-05-24 | UI fixes: language persistence, text contrast | Stable |
 | v2.1.0 | 2026-05-20 | Normalized tags, property graph API, column renames, simplified visibility | Stable |
 | v2.0.0 | 2026-05-18 | Complete rewrite: unified entities, psycopg2, PL/pgSQL API, harness, security | Stable |

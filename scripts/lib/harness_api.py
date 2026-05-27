@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.3.0 - Harness API
+"""PostgreSQL Memory System v2.3.1 - Harness API
 
 Templates are reusable agent execution blueprints stored as ENTITIES
 with ENTITY_TYPE='HARNESS_TEMPLATE' and extended via HARNESS_META.

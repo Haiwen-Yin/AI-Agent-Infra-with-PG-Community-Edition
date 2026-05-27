@@ -1,1 +1,1 @@
-"""PostgreSQL Memory System v2.3.0 - Python API Library"""
+"""PostgreSQL Memory System v2.3.1 - Python API Library"""

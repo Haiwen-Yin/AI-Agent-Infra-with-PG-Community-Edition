@@ -1,4 +1,4 @@
-"""PostgreSQL Memory System v2.3.0 - Spec API
+"""PostgreSQL Memory System v2.3.1 - Spec API
 
 Spec Driven Development: spec CRUD, plan derivation, spec-plan linking,
 validation, and spec derivation chains.

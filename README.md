@@ -1,11 +1,18 @@
-# memory-pg18-by-yhw - PostgreSQL AI Database Memory System v2.3.0
+# memory-pg18-by-yhw - PostgreSQL AI Database Memory System v2.3.1
 
 **Author**: Haiwen Yin (胖头鱼)
-**Version**: v2.3.0 - 2026-05-24
+**Version**: v2.3.1 - 2026-05-26
 **License**: Apache License 2.0
 **Database**: PostgreSQL 18.3 + pgvector 0.8.2 + Apache AGE 1.7.0 + pg_cron 1.6 + [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)
 
-**[中文介绍 (Chinese Introduction)](docs/introduction_v2.3.0_zh.md)**
+**[中文介绍 (Chinese Introduction)](docs/introduction_v2.3.1_zh.md)**
+
+## What's New in v2.3.1
+
+- **Embedding Python API**: embedding_api.py (12 functions) — generate_embedding, store_embedding, store_embedding_vector, get_embedding, delete_embedding, search_similar, search_by_entity_id, search_hybrid, search_multi_type, generate_embeddings_batch, get_embedding_stats, get_model_dimension; uses pgvector cosine distance (<=> operator), %s positional binds, ::vector cast, ILIKE, LIMIT
+- **EMBEDDING_GENERATION_JOB**: pg_cron job every 2 hours for MEMORY/KNOWLEDGE entity embedding generation
+- **19 New Embedding Tests**: 162/162 API Tests Passing (from 143)
+- Leverages existing memory.generate_embedding() PL/pgSQL and pg-embedding-gen-by-yhw extension
 
 ## What's New in v2.3.0
 
@@ -13,7 +20,7 @@
 - **Agent Elastic Management**: agent_credentials table, DORMANT/POOL agent states, hibernate/wake/pool functions (8 new agent_api functions), dormant_agent_job, credential_cleanup_job
 - **Collaboration Groups**: collab_groups table, collab_group_members table, collab_api.py (10 functions), collab_group_manager PL/pgSQL schema (7 functions), auto-created shared/personal workspaces, collab_group_cleanup_job
 - **Web Visualization Expanded**: 9 HTML pages (new: Specs, Collab), 16 REST API endpoints
-- **143/143 API Tests Passing**: Verified on Python 3.14 (local) + Python 3.6 (remote)
+- **162/162 API Tests Passing**: Verified on Python 3.14 (local) + Python 3.6 (remote)
 
 ### Previous Releases
 
@@ -46,7 +53,7 @@ pip install psycopg2-binary   # Python 3.14+ recommended, 3.6+ minimum
 ```bash
 cd /root/memory-pg18-by-yhw
 python3.14 -m scripts.tests.test_all
-# 143 tests, 100% pass rate
+# 162 tests, 100% pass rate
 ```
 
 ### 4. Start Visualization Server (optional)
@@ -160,7 +167,7 @@ ENTITY_EMBEDDINGS -- vector(1024) via pg-embedding-gen-by-yhw
 - `spec_manager` (6 functions): create_spec, get_spec, update_spec_status, link_spec_to_plan, get_spec_plans, cleanup_orphaned_specs
 - `collab_group_manager` (7 functions): create_collab_group, get_collab_group, add_member, remove_member, get_group_members, get_agent_groups, cleanup_empty_groups
 
-## Python API (12 modules)
+## Python API (13 modules)
 
 | Module | Functions | Purpose |
 |--------|-----------|---------|
@@ -173,6 +180,7 @@ ENTITY_EMBEDDINGS -- vector(1024) via pg-embedding-gen-by-yhw
 | harness_api | 8 | Template CRUD, instantiation, variable extraction |
 | spec_api | 10 | Spec CRUD, plan linking, status management (SDD) |
 | collab_api | 10 | Collaboration group CRUD, membership, shared workspaces |
+| embedding_api | 12 | Embedding generation, storage, search, batch, stats (pgvector + pg-embedding-gen-by-yhw) |
 | security | 2 | Password hashing and verification |
 | config | 1 | Unified configuration with env var overrides |
 | connection | 8 | psycopg2 ThreadedConnectionPool management |
@@ -270,7 +278,7 @@ Environment variables: `MEMORY_DB_HOST`, `MEMORY_DB_PORT`, `MEMORY_DB_NAME`, `ME
 
 ## Testing
 
-115 tests across 8 test suites → 143 tests across 11 test suites, 100% pass rate (Python 3.14 local + Python 3.6 remote):
+115 tests across 8 test suites → 162 tests across 12 test suites, 100% pass rate (Python 3.14 local + Python 3.6 remote):
 
 | Suite | Tests | Coverage |
 |-------|-------|----------|
@@ -284,6 +292,7 @@ Environment variables: `MEMORY_DB_HOST`, `MEMORY_DB_PORT`, `MEMORY_DB_NAME`, `ME
 | Workspace | 14 | CRUD, context chains, handoff, recovery, tasks |
 | Spec | 10 | CRUD, plan linking, status management |
 | Collab | 10 | Group CRUD, membership, shared workspaces |
+| Embedding | 19 | Generate, store, search, batch, stats, hybrid, multi-type |
 | Task Plan | 4 | Plans, steps, dependencies |
 
 ## Directory Structure
@@ -304,8 +313,8 @@ memory-pg18-by-yhw/
   start_web_server.sh
   scripts/
     deploy/ (4 SQL files)
-    lib/ (12 Python modules)
-    tests/ (12 test files)
+    lib/ (13 Python modules)
+    tests/ (13 test files)
     visualization/ (server.py, 9 HTML pages, style.css, vis-network.min.js)
   docs/ (10 documentation files)
 ```

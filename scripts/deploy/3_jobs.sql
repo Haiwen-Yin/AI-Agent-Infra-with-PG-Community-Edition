@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Memory System v2.3.0 - Scheduled Jobs
+-- PostgreSQL Memory System v2.3.1 - Scheduled Jobs
 -- ============================================================================
 -- NOTE: pg_cron must be installed and configured before running this script.
 -- See deployment.md for pg_cron setup instructions.
@@ -136,5 +136,38 @@ BEGIN
     );
 EXCEPTION WHEN OTHERS THEN
     RAISE NOTICE 'collab_group_cleanup_job already exists or cannot be scheduled: %', SQLERRM;
+END;
+$$;
+
+-- ============================================================================
+-- v2.3.1 New Jobs
+-- ============================================================================
+
+-- Embedding Generation Job: auto-generate embeddings for new MEMORY/KNOWLEDGE entities
+-- Schedule: Every 2 hours
+DO $$
+BEGIN
+    PERFORM cron.schedule(
+        'embedding_generation_job',
+        '0 */2 * * *',
+        $JOB$
+        INSERT INTO entity_embeddings (entity_id, entity_type, embedding, embed_model, embedded_at)
+        SELECT e.entity_id, e.entity_type,
+               memory.generate_embedding(COALESCE(e.title, '') || ' ' || COALESCE(e.content, '')),
+               'text-embedding-bge-m3',
+               NOW()
+        FROM entities e
+        WHERE e.entity_type IN ('MEMORY', 'KNOWLEDGE')
+          AND e.status = 'ACTIVE'
+          AND e.title IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM entity_embeddings em
+            WHERE em.entity_id = e.entity_id AND em.entity_type = e.entity_type
+          )
+        LIMIT 100;
+        $JOB$
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'embedding_generation_job already exists or cannot be scheduled: %', SQLERRM;
 END;
 $$;
