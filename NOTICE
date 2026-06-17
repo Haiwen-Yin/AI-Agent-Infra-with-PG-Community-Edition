@@ -1,102 +1,30 @@
-memory-pg18-by-yhw — PostgreSQL AI Database Memory System
-==========================================================
+AI Agent Infra with PostgreSQL - Community Edition
+Copyright (c) 2026 Haiwen Yin. All rights reserved.
 
-Copyright (c) 2026 Haiwen Yin (尹海文 / 胖头鱼 🐟)
+Website: https://db4agent.top
 
-Licensed under the Apache License, Version 2.0.
+This product is licensed under the Apache License, Version 2.0 (the "License").
+You may not use this product except in compliance with the License.
+You may obtain a copy of the License at
 
-This product includes software developed at
-Apache Software Foundation (http://www.apache.org/).
+    http://www.apache.org/licenses/LICENSE-2.0
 
----
-
-## Third-Party Components
-
-This project depends on the following open-source components:
-
-### PostgreSQL
-- **URL**: https://www.postgresql.org/
-- **License**: PostgreSQL License (MIT-style)
-- **Version**: 18+
-- **Usage**: Core database engine
-
-### pgvector — Vector Similarity Search for PostgreSQL
-- **GitHub**: https://github.com/pgvector/pgvector
-- **License**: Apache License 2.0
-- **Version**: 0.8.2+
-- **Usage**: VECTOR type, HNSW index, cosine similarity operators
-
-### Apache AGE — Apache Graph Extension
-- **URL**: https://age.apache.org/
-- **License**: Apache License 2.0
-- **Version**: 1.7.0+
-- **Usage**: Property graph support, Cypher query language, graph traversal
-
-### pg-embedding-gen-by-yhw — In-Database Embedding Generation
-- **Author**: Haiwen Yin (尹海文)
-- **GitHub**: https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw
-- **License**: Apache License 2.0
-- **Version**: 0.2.0+
-- **Usage**: Custom PG18 extension for SQL-callable embedding generation via COPY FROM PROGRAM + Python proxy; calls any OpenAI-compatible /v1/embeddings API
-- **Note**: NOT a built-in PostgreSQL feature; requires separate installation
-
-### psycopg2 — PostgreSQL Adapter for Python
-- **URL**: https://www.psycopg.org/
-- **License**: GNU LGPL v3 (psycopg2) / Apache License 2.0 (psycopg2-binary)
-- **Version**: 2.8.6+
-- **Usage**: Python database driver, ThreadedConnectionPool
-
-### BGE-M3 Embedding Model (FlagEmbedding)
-- **GitHub**: https://github.com/FlagOpen/FlagEmbedding
-- **License**: Apache License 2.0 (MIT-style for model weights)
-- **Model**: BAAI/bge-m3
-- **Usage**: Text embedding generation (1024 dimensions), served via vLLM / LM Studio
-
-### Python `requests` Library
-- **URL**: https://docs.python-requests.org/
-- **License**: Apache License 2.0
-- **Usage**: HTTP client for pg-embedding-gen-by-yhw proxy
-
-### HNSW Algorithm
-- **Paper**: Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs
-- **Authors**: Yuivii A. Malkov, Dmitry A. Yashunin
-- **URL**: https://arxiv.org/abs/1603.09320
-- **Usage**: Algorithm reference for pgvector HNSW index implementation
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 
 ---
 
-## Trademark Notices
+This product uses PostgreSQL and related extensions, including but not limited to:
+- PostgreSQL 18.3
+- pgvector (Vector similarity search)
+- Apache AGE (Property Graph)
+- pgcrypto (In-database encryption)
+- pg_cron (Scheduled jobs)
+- PL/Python3u (Python stored procedures)
 
-- **PostgreSQL** is a registered trademark of the PostgreSQL Community Association of Canada
-- **Apache**, **Apache AGE** are registered trademarks or trademarks of the Apache Software Foundation
-- **BGE-M3** is developed by BAAI (北京智源人工智能研究院)
-- **Python** is a registered trademark of the Python Software Foundation
-
-Use of these trademarks does not imply endorsement by the trademark holders.
-
----
-
-## Legal Notice
-
-Under Apache License 2.0:
-
-1. This software is provided "AS IS", without warranty of any kind
-2. Contributors shall not be liable for any damages arising from the use of this software
-3. Redistributions must retain the full license and copyright notices
-4. Modified files must carry prominent notices stating that You changed the files
-5. If this product includes a NOTICE file, derivative works must include a readable copy of the attribution notices
-
----
-
-## Contact
-
-- **Author**: Haiwen Yin (尹海文 / 胖头鱼 🐟)
-- **Blog**: https://blog.csdn.net/yhw1809
-- **GitHub**: https://github.com/Haiwen-Yin
-- **Location**: Chengdu, Sichuan, China
-
----
-
-The full text of the Apache License 2.0 is available in the LICENSE file of this repository.
-
-https://www.apache.org/licenses/LICENSE-2.0
+PostgreSQL is a registered trademark of the PostgreSQL Community Association of Canada.
+Other names may be trademarks of their respective owners.
+Use of these trademarks does not imply endorsement by the PostgreSQL Global Development Group.
