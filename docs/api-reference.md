@@ -1,223 +1,291 @@
-# API Reference — PostgreSQL Memory System v2.3.0
+# API Reference - AI Agent Infra v3.6.2 (2026-06-18) - PG Community Edition
 
-**Python requirement**: 3.14+ recommended, 3.6+ minimum. Verified with `psycopg2-binary` 2.9.12.
+## Python API (scripts/lib/)
 
-## Python API
+### memory_api.py
 
-All modules live under `scripts/lib/` and use a shared connection pool
-(`scripts/lib/connection.py`).
+```python
+create_memory(title, content, category, importance, summary, source_agent, owned_by_agent, visibility) -> str
+get_memory(entity_id) -> dict | None
+update_memory(entity_id, **kwargs) -> bool
+delete_memory(entity_id) -> bool
+search_memories(keyword, category, visibility, owned_by_agent, limit, offset) -> list
+get_agent_memories(agent_id, limit) -> list
+count_memories(category) -> int
+add_memory_tags(entity_id, tag_names) -> int
+get_memory_tags(entity_id) -> list
+remove_memory_tag(entity_id, tag_id) -> bool
+```
 
-### memory_api — 10 functions
+### knowledge_api.py
 
-| Function | Signature | Returns |
-|----------|-----------|---------|
-| `create_memory` | `(title, content, category='general', importance=5, tags=None, owned_by_agent=None, visibility='PRIVATE', source_agent=None, workspace_id=None)` | `entity_id` |
-| `get_memory` | `(entity_id)` | `dict or None` |
-| `update_memory` | `(entity_id, **kwargs)` | `bool` |
-| `delete_memory` | `(entity_id)` | `bool` |
-| `search_memories` | `(keyword=None, category=None, visibility=None, owned_by_agent=None, workspace_id=None, limit=100, offset=0)` | `list[dict]` |
-| `get_agent_memories` | `(agent_id, limit=100)` | `list[dict]` |
-| `count_memories` | `(category=None)` | `int` |
-| `add_memory_tags` | `(entity_id, tag_names)` | `int` |
-| `get_memory_tags` | `(entity_id)` | `list[str]` |
-| `remove_memory_tag` | `(entity_id, tag_name)` | `bool` |
+```python
+create_knowledge(title, content, domain, topic, difficulty, category, importance, summary, owned_by_agent, visibility) -> str
+get_knowledge(entity_id) -> dict | None
+update_knowledge(entity_id, **kwargs) -> bool
+delete_knowledge(entity_id) -> bool
+search_knowledge(domain, topic, keyword, difficulty, limit, offset) -> list
+get_due_reviews(limit) -> list
+record_review(entity_id) -> bool
+add_edge(source_id, source_type, target_id, edge_type, strength, confidence, metadata) -> str
+get_edges(entity_id, direction) -> list
+count_knowledge(domain) -> int
+add_knowledge_tags(entity_id, tag_names) -> int
+get_knowledge_tags(entity_id) -> list
+remove_knowledge_tag(entity_id, tag_id) -> bool
+```
 
-### knowledge_api — 13 functions
+### graph_api.py
 
-| Function | Signature | Returns |
-|----------|-----------|---------|
-| `create_knowledge` | `(title, content=None, summary=None, category=None, domain=None, topic=None, difficulty=None, importance=5, tags=None, owned_by_agent=None, visibility='SHARED', source_type='MANUAL', source_entity_ids=None, confidence=0.8, workspace_id=None)` | `entity_id` |
-| `get_knowledge` | `(entity_id)` | `dict or None` |
-| `update_knowledge` | `(entity_id, **kwargs)` | `bool` |
-| `delete_knowledge` | `(entity_id)` | `bool` |
-| `search_knowledge` | `(keyword=None, domain=None, category=None, validation_status=None, limit=100, offset=0)` | `list[dict]` |
-| `get_due_reviews` | `(limit=50)` | `list[dict]` |
-| `record_review` | `(entity_id)` | `bool` |
-| `add_edge` | `(source_id, target_id, edge_type, strength=1.0, confidence=0.8, source_type=None, metadata=None)` | `edge_id` |
-| `get_edges` | `(entity_id, direction='both')` | `list[dict]` |
-| `add_knowledge_tags` | `(entity_id, tag_names)` | `int` |
-| `get_knowledge_tags` | `(entity_id)` | `list[str]` |
-| `remove_knowledge_tag` | `(entity_id, tag_name)` | `bool` |
-| `count_knowledge` | `(domain=None)` | `int` |
+```python
+get_neighbors(entity_id, direction, edge_type, min_strength, limit) -> list
+get_reachable(entity_id, max_hops, edge_type, limit) -> list
+get_shortest_path(source_id, target_id, max_hops) -> list | None
+find_similar_entities(entity_id, max_hops, limit) -> list
+get_entity_context(entity_id, depth) -> dict
+get_graph_stats() -> dict
+get_subgraph(entity_ids, include_intermediate) -> dict
+find_communities(entity_type, min_connections, limit) -> list
+graph_search(keyword, entity_type, category, min_importance, limit) -> list
+```
 
-### agent_api — 14 functions
+All functions use Apache AGE `cypher()` function against `pg_memory_graph`.
 
-| Function | Signature | Returns |
-|----------|-----------|---------|
-| `register_agent` | `(agent_id, agent_name, agent_type='general', capabilities=None, description='', permission_level='READ_WRITE')` | `bool` |
-| `get_agent` | `(agent_id)` | `dict or None` |
-| `update_agent` | `(agent_id, **kwargs)` | `bool` |
-| `decommission_agent` | `(agent_id, reason='')` | `bool` |
-| `heartbeat` | `(agent_id)` | `bool` |
-| `create_session` | `(agent_id, owner_user_id=None, workspace_id=None, predecessor_session_id=None)` | `session_id or None` |
-| `end_session` | `(session_id)` | `bool` |
-| `checkpoint_session` | `(session_id)` | `bool` |
-| `get_session_chain` | `(session_id)` | `list[dict]` |
-| `get_active_sessions` | `(agent_id=None)` | `list[dict]` |
-| `log_access` | `(agent_id, entity_id, access_type='READ')` | `None` |
-| `get_access_log` | `(agent_id, limit=50)` | `list[dict]` |
-| `create_collaboration` | `(sharing_agent, receiving_agent, entity_id, reason='')` | `collab_id or None` |
-| `get_collaborations` | `(agent_id=None, status=None, limit=50)` | `list[dict]` |
+### agent_api.py
 
-### graph_api — 9 functions
+```python
+register_agent(agent_id, agent_name, agent_type, description, capabilities, config) -> str
+get_agent(agent_id) -> dict | None
+update_agent(agent_id, **kwargs) -> bool
+decommission_agent(agent_id) -> bool
+heartbeat(agent_id) -> bool
+create_session(agent_id, wm_entity_id, context, owner_user_id, workspace_id, predecessor_session_id) -> str
+end_session(session_id) -> bool
+checkpoint_session(session_id, context_data) -> bool
+get_session_chain(session_id, limit) -> list
+get_active_sessions(agent_id) -> list
+log_access(agent_id, entity_id, access_type, session_id) -> str
+get_access_log(entity_id, agent_id, limit) -> list
+create_collaboration(source_agent_id, target_agent_id, col_type, entity_id, context, strength) -> str
+get_collaborations(agent_id, limit) -> list
+```
 
-| Function | Signature | Returns |
-|----------|-----------|---------|
-| `get_neighbors` | `(entity_id, max_hops=2, entity_type=None, direction='both')` | `list[dict]` |
-| `get_reachable` | `(entity_id, max_hops=3, entity_type=None)` | `list[dict]` |
-| `get_shortest_path` | `(from_entity_id, to_entity_id)` | `list[dict]` |
-| `find_similar_entities` | `(entity_id, limit=10)` | `list[dict]` |
-| `get_entity_context` | `(entity_id, max_hops=2)` | `dict` |
-| `get_graph_stats` | `()` | `dict` |
-| `get_subgraph` | `(entity_ids)` | `dict` |
-| `find_communities` | `(entity_type=None, min_size=3)` | `list[list[int]]` |
-| `graph_search` | `(keyword=None, entity_type=None, category=None, min_importance=1, limit=50)` | `list[dict]` |
+### task_plan_api.py
 
-### workspace_api — 11 functions
+```python
+create_plan(agent_id, goal, priority, strategy) -> str
+get_plan(plan_id) -> dict | None
+update_plan(plan_id, **kwargs) -> bool
+add_step(plan_id, plan_status, description, step_order, tool_name, tool_input) -> str
+update_step(step_id, **kwargs) -> bool
+get_plan_steps(plan_id) -> list
+add_dependency(source_plan_id, target_plan_id, dep_type) -> str
+get_plan_dependencies(plan_id) -> list
+log_tool_call(plan_id, step_id, tool_name, tool_input, tool_output, status, duration_ms) -> str
+save_snapshot(plan_id, snapshot_type, context_data) -> str
+list_plans(agent_id, status, limit) -> list
+delete_plan(plan_id) -> bool
+```
 
-| Function | Signature | Returns |
-|----------|-----------|---------|
-| `create_workspace` | `(name, workspace_type='CONVERSATION', isolation_mode='SHARED', owner_user_id=None)` | `workspace_id` |
-| `get_workspace` | `(workspace_id)` | `dict or None` |
-| `get_user_workspaces` | `(owner_user_id=None, limit=100)` | `list[dict]` |
-| `update_workspace` | `(workspace_id, **kwargs)` | `bool` |
-| `save_context` | `(workspace_id, agent_id, context_type, context_data, session_id=None)` | `context_id` |
-| `get_context_chain` | `(workspace_id, limit=10)` | `list[dict]` |
-| `get_latest_context` | `(workspace_id)` | `dict or None` |
-| `create_handoff_session` | `(workspace_id, new_agent_id, handoff_data=None)` | `session_id` |
-| `recover_workspace` | `(workspace_id, checkpoint_context_id=None)` | `bool` |
-| `link_task_to_workspace` | `(workspace_id, plan_id)` | `bool` |
-| `get_workspace_tasks` | `(workspace_id, status=None)` | `list[dict]` |
+### harness_api.py
 
-### task_plan_api — 12 functions
+```python
+create_harness_template(title, summary, content, category, input_schema, output_schema, execution_mode, importance, owned_by_agent, visibility) -> str
+get_harness_template(entity_id) -> dict | None
+update_harness_template(entity_id, **kwargs) -> bool
+delete_harness_template(entity_id) -> bool
+list_harness_templates(category, execution_mode, limit, offset) -> list
+get_template_with_variables(entity_id) -> dict | None
+instantiate_harness_template(entity_id, variable_values, agent_id) -> str
+count_harness_templates(category) -> int
+```
 
-| Function | Signature | Returns |
-|----------|-----------|---------|
-| `create_plan` | `(goal, agent_id=None, priority=5, workspace_id=None)` | `plan_id` |
-| `get_plan` | `(plan_id)` | `dict or None` |
-| `update_plan` | `(plan_id, **kwargs)` | `bool` |
-| `add_step` | `(plan_id, description, tool_name=None, tool_input=None)` | `step_id` |
-| `update_step` | `(step_id, **kwargs)` | `bool` |
-| `get_plan_steps` | `(plan_id)` | `list[dict]` |
-| `add_dependency` | `(source_plan_id, target_plan_id, dependency_type='HARD', condition=None)` | `dependency_id` |
-| `get_plan_dependencies` | `(plan_id)` | `list[dict]` |
-| `log_tool_call` | `(plan_id, tool_name, action, step_id=None, status='SUCCESS', result_size=None, duration_ms=None)` | `call_id` |
-| `save_snapshot` | `(plan_id, context, snapshot_type='MANUAL')` | `snapshot_id` |
-| `list_plans` | `(status=None, agent_id=None, limit=50)` | `list[dict]` |
-| `delete_plan` | `(plan_id)` | `bool` |
+### security.py
 
-### security — 2 functions
+```python
+DataMaskingService(context_level).mask_text(text) -> str
+DataMaskingService(context_level).mask_dict(data) -> dict
+DataMaskingService(context_level).mask_json(json_string) -> str
+hash_password(password, salt, iterations) -> (hash, salt_hex)
+verify_password(password, stored_hash, salt_hex, iterations) -> bool
+```
 
-| Function | Signature | Returns |
-|----------|-----------|---------|
-| `hash_password` | `(password, salt=None, iterations=100000)` | `(hash_hex, salt_hex)` |
-| `verify_password` | `(password, stored_hash, salt_hex, iterations=100000)` | `bool` |
+### workspace_api.py
 
-### harness_api — 8 functions
+```python
+create_workspace(owner_user_id, name, workspace_type, isolation_mode, metadata) -> str
+get_workspace(workspace_id) -> dict | None
+get_user_workspaces(user_id, status) -> list
+update_workspace(workspace_id, **kwargs) -> bool
+save_context(workspace_id, agent_id, context_type, context_data, session_id, parent_context_id, visibility) -> str
+get_context_chain(workspace_id, limit) -> list
+get_latest_context(workspace_id) -> dict | None
+create_handoff_session(workspace_id, new_agent_id, handoff_data) -> str
+recover_workspace(workspace_id) -> dict
+link_task_to_workspace(workspace_id, plan_id) -> bool
+get_workspace_tasks(workspace_id) -> list
+```
 
-| Function | Signature | Returns |
-|----------|-----------|---------|
-| `create_harness_template` | `(title, summary=None, prompt_templates=None, tool_bindings=None, tool_sets=None, memory_access=None, guardrails=None, guardrail_preset=None, evaluation=None, variables=None, category=None, tags=None, owned_by_agent=None, visibility='SHARED', parent_template_id=None, workspace_id=None, input_schema=None, output_schema=None, execution_mode=None)` | `entity_id` |
-| `get_harness_template` | `(entity_id)` | `dict or None` |
-| `update_harness_template` | `(entity_id, **kwargs)` | `bool` |
-| `delete_harness_template` | `(entity_id)` | `bool` |
-| `list_harness_templates` | `(category=None, status=None, limit=100)` | `list[dict]` |
-| `get_template_with_variables` | `(entity_id)` | `dict or None` |
-| `instantiate_harness_template` | `(template_id, variables=None, overrides=None, agent_id=None)` | `dict or None` |
-| `count_harness_templates` | `(category=None)` | `int` |
+## PL/pgSQL API (13 function groups)
 
----
+### memory_fusion_engine
 
-## PL/pgSQL API
+- `fuse_similar_memories(category, min_similarity, dry_run)` — Merge similar memories
+- `extract_knowledge_from_memories(category, min_count)` — Auto-extract knowledge
+- `decay_old_memories(days_threshold, decay_factor)` — Reduce IMPORTANCE of old memories
+- `get_fusion_stats()` — Fusion statistics as JSONB
 
-### Schema: `memory`
+### knowledge_base_api
 
-| Function | Signature |
-|----------|-----------|
-| `memory.generate_embedding` | `(p_text TEXT) → vector(1024)` |
-| `memory.add_concept_with_embedding` | `(p_title VARCHAR, p_content TEXT, p_category VARCHAR, p_importance INT DEFAULT 5) → BIGINT` |
-| `memory.search_similar` | `(p_query TEXT, p_limit INT DEFAULT 10) → TABLE(entity_id BIGINT, title VARCHAR, category VARCHAR, similarity FLOAT)` |
+- `schedule_review(entity_id, entity_type)` — Schedule next spaced review
+- `record_review(entity_id, entity_type)` — Record review with doubling interval
+- `get_due_reviews()` — List pending reviews
+- `get_concept_lineage(entity_id, entity_type)` — Ancestor/descendant graph as JSONB
 
-### Schema: `memory_fusion`
+### agent_permission_manager
 
-| Function | Signature |
-|----------|-----------|
-| `memory_fusion.fuse_similar_memories` | `(p_category TEXT DEFAULT NULL, p_min_similarity NUMERIC DEFAULT 0.85, p_dry_run BOOLEAN DEFAULT TRUE) → TABLE(source_id BIGINT, target_id BIGINT, similarity NUMERIC, action TEXT)` |
-| `memory_fusion.extract_knowledge_from_memories` | `(p_category TEXT DEFAULT NULL, p_min_count INT DEFAULT 3) → TABLE(category TEXT, memory_count INT, knowledge_entity_id BIGINT)` |
-| `memory_fusion.decay_old_memories` | `(p_days_threshold INT DEFAULT 90, p_decay_factor NUMERIC DEFAULT 0.5) → INT` |
-| `memory_fusion.get_fusion_stats` | `() → JSONB` |
+- `check_entity_access(agent_id, entity_id)` — 'GRANTED'/'DENIED' based on visibility
+- `log_access(agent_id, entity_id, access_type, session_id)` — Insert into entity_access_log
+- `cleanup_expired_sessions()` — Close sessions inactive >300min
 
-### Schema: `knowledge_api`
+### session_cleanup
 
-| Function | Signature |
-|----------|-----------|
-| `knowledge_api.validate_concept` | `(p_entity_id BIGINT, p_validator TEXT DEFAULT 'SYSTEM') → BOOLEAN` |
-| `knowledge_api.deprecate_concept` | `(p_entity_id BIGINT, p_reason TEXT DEFAULT NULL) → BOOLEAN` |
-| `knowledge_api.create_concept_version` | `(p_entity_id BIGINT, p_new_content TEXT) → BIGINT` |
-| `knowledge_api.get_unvalidated` | `() → TABLE(entity_id BIGINT, title VARCHAR, category VARCHAR, validation_status VARCHAR, confidence NUMERIC, version INT)` |
-| `knowledge_api.get_concept_lineage` | `(p_entity_id BIGINT) → JSONB` |
-| `knowledge_api.record_review` | `(p_entity_id BIGINT) → VOID` |
-| `knowledge_api.get_due_reviews` | `(p_limit INT DEFAULT 50) → TABLE(entity_id BIGINT, title VARCHAR, domain VARCHAR, review_count INT, next_review TIMESTAMPTZ)` |
+- `purge_access_logs(days_to_keep)` — Delete old access logs
+- `purge_inactive_sessions(days_to_keep)` — Delete old closed sessions
+- `archive_old_entities(days_threshold)` — Archive low-importance memories
 
-### Schema: `agent_perm`
+## Admin API (v3.6.2)
 
-| Function | Signature |
-|----------|-----------|
-| `agent_perm.check_entity_access` | `(p_agent_id VARCHAR, p_entity_id BIGINT, p_access_type VARCHAR) → TEXT` |
-| `agent_perm.grant_access` | `(p_agent_id VARCHAR, p_entity_id BIGINT, p_granted_by VARCHAR) → BOOLEAN` |
-| `agent_perm.revoke_access` | `(p_agent_id VARCHAR, p_entity_id BIGINT) → BOOLEAN` |
-| `agent_perm.cleanup_expired_sessions` | `() → INT` |
-| `agent_perm.process_collaboration_requests` | `() → INT` |
+Admin API endpoints for Admin/Agent Separation Architecture. Only available in `admin` or `standalone` mode.
 
-### Schema: `session_cleanup`
+### POST /api/admin/agent/register
 
-| Function | Signature |
-|----------|-----------|
-| `session_cleanup.purge_access_logs` | `(p_days_to_keep INT DEFAULT 90) → INT` |
-| `session_cleanup.purge_inactive_sessions` | `(p_days_to_keep INT DEFAULT 30) → INT` |
-| `session_cleanup.archive_old_entities` | `(p_days_threshold INT DEFAULT 180) → INT` |
-| `session_cleanup.update_tag_counts` | `() → INT` |
+Register a Business Agent with admin token. Returns recovery codes.
 
-### Schema: `workspace_manager`
+**Request:**
+```json
+{
+  "admin_token": "<registration-token>",
+  "agent_name": "business-agent-1",
+  "capabilities": {"type": "research", "skills": ["search", "memory"]}
+}
+```
 
-| Function | Signature |
-|----------|-----------|
-| `workspace_manager.create_workspace` | `(p_name VARCHAR DEFAULT NULL, p_workspace_type VARCHAR DEFAULT 'CONVERSATION', p_isolation_mode VARCHAR DEFAULT 'SHARED', p_owner_user_id VARCHAR DEFAULT NULL) → BIGINT` |
-| `workspace_manager.get_workspace` | `(p_workspace_id BIGINT) → JSONB` |
-| `workspace_manager.update_workspace_status` | `(p_workspace_id BIGINT, p_new_status VARCHAR) → BOOLEAN` |
-| `workspace_manager.delete_workspace` | `(p_workspace_id BIGINT) → BOOLEAN` |
-| `workspace_manager.add_context_entry` | `(p_workspace_id BIGINT, p_agent_id VARCHAR, p_context_type VARCHAR, p_session_id VARCHAR DEFAULT NULL, p_context_data JSONB DEFAULT '{}') → BIGINT` |
-| `workspace_manager.get_context_chain` | `(p_workspace_id BIGINT, p_limit INT DEFAULT 10) → JSONB` |
-| `workspace_manager.create_handoff` | `(p_workspace_id BIGINT, p_new_agent_id VARCHAR, p_handoff_data JSONB DEFAULT '{}') → VARCHAR` |
-| `workspace_manager.recover_to_checkpoint` | `(p_workspace_id BIGINT) → BOOLEAN` |
-| `workspace_manager.get_workspace_summary` | `(p_workspace_id BIGINT) → JSONB` |
-| `workspace_manager.cleanup_abandoned` | `() → INT` |
+**Response:**
+```json
+{
+  "agent_id": "AGENT_XXX",
+  "recovery_codes": ["RC-XXXX-XXXX-XXXX", ...]
+}
+```
 
----
+### POST /api/admin/token/generate
 
-## Visualization API
+Generate a new admin registration token. Requires admin session.
 
-The web visualization server (`scripts/visualization/server.py`) exposes REST
-endpoints that proxy to the remote PostgreSQL database. It runs locally on the
-agent side and connects via TCP.
+**Response:**
+```json
+{
+  "admin_token": "<new-token>",
+  "expires_at": "2026-06-16T13:00:00Z"
+}
+```
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/api/health` | GET | No | Server health check and DB connectivity status |
-| `/api/login` | POST | No | Authenticate with username/password; returns session token |
-| `/api/logout` | GET | Yes | Clear session cookie and redirect to login |
-| `/api/knowledge` | GET | Yes | Knowledge entities with edges for vis.js rendering |
-| `/api/memory` | GET | Yes | Memory entities with edges for vis.js rendering |
-| `/api/agents` | GET | Yes | Agent registry, active sessions, collaborations |
-| `/api/tasks` | GET | Yes | Task plans with steps |
-| `/api/workspaces` | GET | Yes | Workspaces with context chains |
-| `/api/stats` | GET | Yes | System statistics (entity counts, edge count, workspace count, agent count) |
-| `/api/graph/neighbors` | GET | Yes | `?entity_id=X` — neighbor data for graph exploration |
-| `/api/graph/context` | GET | Yes | `?entity_id=X` — entity context with grouped neighbors |
-| `/api/graph/stats` | GET | Yes | Graph statistics (vertex/edge counts, avg degree, type distribution) |
-| `/api/graph/search` | GET | Yes | `?q=X&type=Y` — search entities by keyword and type |
-| `/api/graph/all` | GET | Yes | All entities and edges for full graph rendering |
+### POST /api/admin/token/rotate
 
-All endpoints require a valid session cookie (except `/api/health` and `/api/login`).
-Default admin credentials: `admin` / `admin123` (**development only**).
-Session timeout: 5 minutes of inactivity (auto-logout with countdown timer).
+Rotate the admin token. Existing Business Agents must re-register with the new token.
+
+**Response:**
+```json
+{
+  "admin_token": "<rotated-token>",
+  "previous_token_invalidated": true
+}
+```
+
+### POST /api/admin/agent/recover
+
+Recover an agent using a one-time recovery code.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| admin_token | Yes | Admin registration token |
+| agent_id | Yes | Agent identifier to recover |
+| recovery_code | Yes | One-time recovery code (RC-XXXX-XXXX-XXXX) |
+
+Response: `{"agent_id": "...", "recovered": true}`
+
+**Recovery Process:**
+1. Verify admin_token + recovery_code
+2. Check LAST_SEEN_AT — reject if agent may still be active (< 5 min)
+3. Reset agent status to ACTIVE
+4. Return recovery confirmation
+
+### GET /api/admin/skill/list
+
+List available skills. Requires admin_token as query parameter.
+
+| Parameter | Location | Required | Description |
+|-----------|----------|----------|-------------|
+| admin_token | query | Yes | Admin registration token |
+| type | query | No | Filter by skill type |
+| runtime | query | No | Filter by runtime |
+| keyword | query | No | Search keyword |
+
+Response: `{"skills": [...]}`
+
+### GET /api/admin/skill/{skill_id}/acquire
+
+Acquire skill content. Requires admin_token as query parameter.
+
+| Parameter | Location | Required | Description |
+|-----------|----------|----------|-------------|
+| skill_id | path | Yes | Skill entity ID |
+| admin_token | query | Yes | Admin registration token |
+| resource | query | No | Set to 1 to include resource ZIP (base64 encoded) |
+
+### POST /api/admin/skill/create
+
+Create a new skill. Requires admin_token in request body.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| admin_token | Yes | Admin registration token |
+| title | Yes | Skill title |
+| skill_name | Yes | Skill name |
+| skill_version | No | Version (default 1.0.0) |
+| skill_type | No | Type (default CUSTOM) |
+| skill_format | No | Format (default TEXT) |
+| text_content | No | SKILL.md content |
+| visibility | No | PRIVATE/SHARED/PUBLIC |
+
+### POST /api/admin/skill/update
+
+Update an existing skill. Requires admin_token and skill_id.
+
+### POST /api/admin/skill/delete
+
+Delete a skill. Requires admin_token and skill_id.
+
+### POST /api/admin/skill/upload
+
+Upload resource file for a skill. Requires admin_token, skill_id, filename, and content_base64.
+
+### Admin Token Functions (Python API)
+
+```python
+from scripts.lib.agent_api import generate_admin_token, verify_admin_token
+from scripts.lib.connection_crypto import (
+    encrypt_credential_for_distribution,
+    decrypt_credential_from_distribution,
+    save_agent_config,
+    load_agent_config,
+)
+
+token = generate_admin_token()
+is_valid = verify_admin_token(token)
+encrypted = encrypt_credential_for_distribution(credential_data, admin_token)
+decrypted = decrypt_credential_from_distribution(encrypted_credential, salt, admin_token)
+save_agent_config(agent_id, credential_data, "/path/to/agent_config.json")
+config = load_agent_config("/path/to/agent_config.json")
+```

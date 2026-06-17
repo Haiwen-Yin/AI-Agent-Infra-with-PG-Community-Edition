@@ -1,328 +1,301 @@
-# memory-pg18-by-yhw - PostgreSQL AI Database Memory System v2.3.1
+# AI Agent Infra with PostgreSQL - Community Edition v3.6.2
 
-**Author**: Haiwen Yin (胖头鱼)
-**Version**: v2.3.1 - 2026-05-26
-**License**: Apache License 2.0
-**Database**: PostgreSQL 18.3 + pgvector 0.8.2 + Apache AGE 1.7.0 + pg_cron 1.6 + [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)
+[![Version](https://img.shields.io/badge/version-v3.6.2-blue.svg)](CHANGELOG.md)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.3-blue.svg)](https://www.postgresql.org/)
+[![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
-**[中文介绍 (Chinese Introduction)](docs/introduction_v2.3.1_zh.md)**
+**AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on PostgreSQL 18.3.**
 
-## What's New in v2.3.1
+> **v3.6.2 (2026-06-18): Bug fix release — 15 bug fixes including conn→connection typo, SQL case compatibility, BIGINT substring errors, user authentication, workspace owner_user_id, portal chat send, graph stats field names, branch_api/graph_api missing functions, task_plan_api/spec_api column mismatches, session switching error handling. See [CHANGELOG.md](CHANGELOG.md) for details.**
 
-- **Embedding Python API**: embedding_api.py (12 functions) — generate_embedding, store_embedding, store_embedding_vector, get_embedding, delete_embedding, search_similar, search_by_entity_id, search_hybrid, search_multi_type, generate_embeddings_batch, get_embedding_stats, get_model_dimension; uses pgvector cosine distance (<=> operator), %s positional binds, ::vector cast, ILIKE, LIMIT
-- **EMBEDDING_GENERATION_JOB**: pg_cron job every 2 hours for MEMORY/KNOWLEDGE entity embedding generation
-- **19 New Embedding Tests**: 162/162 API Tests Passing (from 143)
-- Leverages existing memory.generate_embedding() PL/pgSQL and pg-embedding-gen-by-yhw extension
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.6.2.md)**
 
-## What's New in v2.3.0
+📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
-- **Spec Driven Development (SDD)**: spec_meta table, spec_plan_links table, spec_api.py (10 functions), SPEC entity type, spec_manager PL/pgSQL schema (6 functions)
-- **Agent Elastic Management**: agent_credentials table, DORMANT/POOL agent states, hibernate/wake/pool functions (8 new agent_api functions), dormant_agent_job, credential_cleanup_job
-- **Collaboration Groups**: collab_groups table, collab_group_members table, collab_api.py (10 functions), collab_group_manager PL/pgSQL schema (7 functions), auto-created shared/personal workspaces, collab_group_cleanup_job
-- **Web Visualization Expanded**: 9 HTML pages (new: Specs, Collab), 16 REST API endpoints
-- **162/162 API Tests Passing**: Verified on Python 3.14 (local) + Python 3.6 (remote)
+---
 
-### Previous Releases
+## 5-Signal Unified Hybrid Search
 
-- **Language Persistence**: Bilingual (zh/en) toggle now persists across page navigation via `localStorage`
-- **UI Text Contrast Fix**: Tasks page step table and Plan Details values now use white text for readability on dark backgrounds
+The project provides a 10-strategy unified search API (`search_api.py`) for AI agents to retrieve across all data types. The **recommended production strategy** is `unified_sql` — a single-SQL CTE that fuses 5 signals in one database call:
 
-## What's New in v2.2.0
+| Signal | Default Weight | Source |
+|--------|---------------|--------|
+| Vector | 0.40 | `<=>` cosine distance via pgvector |
+| Fulltext | 0.25 | PostgreSQL `ts_vector` + `ts_rank` |
+| Relational | 0.20 | `KNOWLEDGE_META` / `SPEC_META` / `ENTITIES` metadata |
+| Tag | (included in relational) | `ENTITY_TAGS` overlap ratio |
+| Graph | 0.15 | `ENTITY_EDGES` BFS proximity (1/depth decay) via Apache AGE |
 
-- **Workspace Management**: 3 new tables, 10 PL/pgSQL functions, 11 Python functions for isolated execution environments, context chains, and agent handoff
-- **Web Visualization**: 7 HTML pages + server.py + style.css + local vis-network.min.js
-- **Visualization REST API**: 14 endpoints including /api/graph/all for full graph rendering
-- **graph_api SQL Fallback**: `get_neighbors()` falls back to SQL when AGE Cypher queries fail
+**Why `unified_sql` is recommended**:
+- Eliminates 5 Python-SQL round trips → single database call
+- Server-side scoring → no data transfer overhead
+- 70-85% lower latency in production
+- Returns `engine: "single_sql"` for identification
+
+```python
+from lib.search_api import search
+
+# Recommended: single-SQL 5-signal fusion
+results = search("database partitioning", strategy="unified_sql", top_k=10)
+
+# Alternative: multi-round fusion (for debugging individual signal scores)
+results = search("database partitioning", strategy="unified", top_k=10)
+
+# Auto-detect best strategy
+results = search("encryption", strategy="auto")
+```
+
+All 10 strategies: `vector`, `fulltext`, `keyword`, `graph`, `hybrid`, `unified`, `unified_sql`, `relational`, `multi_type`, `auto`
+
+---
+
+## Portal User System
+
+Two independent page systems: **Portal** (user-facing: register/login/chat) and **Dashboard** (admin-facing: data management). Root `/` redirects to Portal.
+
+### Portal Login (`/portal/login`)
+
+- Register/login with local system user authentication
+- Registration checks SYSTEM_USERS (case-insensitive) for duplicates
+- "进入管理页面" button in top-right corner
+
+### Portal Chat (`/portal/chat`)
+
+- **Sidebar**: user info (name + auth type), session list with rename/delete, new chat button
+- **Main area**: chat messages, input box, simulated keyword-based replies
+- **Session management**: create/switch/rename/delete chat sessions
+- **Auto-naming**: new sessions named "New Chat"; auto-renamed to first 60 chars of first message via `WORKSPACE_ALIAS`
+- **Agent lifecycle**: POOL → ACTIVE (assigned) → POOL (released)
+
+#### Agent Timeout Auto-Recall
+
+| Config Key | Default | Description |
+|------------|---------|-------------|
+| `dormant_timeout_min` | 30 min | Agent idle beyond this → auto-recalled to POOL via `DORMANT_AGENT_JOB` |
+| `session_timeout_min` | 60 min | Portal session timeout |
+
+Core logic: `LAST_ACTIVE_AT` older than `dormant_timeout_min` → `STATUS='POOL'`, `CURRENT_USER_ID=NULL`.
+
+Change timeout:
+```sql
+UPDATE system_config SET config_value = '10' WHERE config_key = 'dormant_timeout_min';
+```
+
+### Admin Dashboard (`/login`)
+
+- Only LOCAL users can access admin Dashboard
+- All existing data management pages unchanged
+
+### Encrypted Credentials
+
+- `config.json`: DB `user`/`password`/`host`/`port`/`dbname` encrypted as `_encrypted` blob
+- `AGENT_CREDENTIALS.CREDENTIAL_VALUE`: encrypted with pgcrypto `encrypt_iv`/`decrypt_iv`
+- Master key: env `MASTER_DB_KEY` > `~/.pg-infra/master.key` > auto-generate
+
+> **For Enterprise Edition features, see [https://db4agent.top](https://db4agent.top) or the [Enterprise Edition](https://github.com/Haiwen-Yin/AI-Agent-Infra-with-PG-Enterprise-Edition).**
+
+---
+
+## Editions
+
+| Feature | Community Edition | Enterprise Edition |
+|---------|------------------|-------------------|
+| **Core Infrastructure** | | |
+| Memory System & Knowledge Graph | Yes | Yes |
+| 5-Signal Unified Hybrid Search | Yes | Yes |
+| Spec Driven Development | Yes | Yes |
+| Agent Elastic Management | Yes | Yes |
+| Collaboration Groups | Yes | Yes |
+| Multi-Agent Collaboration (Branch+Spec+Plan+Harness) | Yes | Yes |
+| Workspace & Context Continuity | Yes | Yes |
+| Context Branching | Yes | Yes |
+| Property Graph API (Apache AGE) | Yes | Yes |
+| Harness Templates | Yes | Yes |
+| Web Visualization Dashboard | Yes | Yes |
+| **Portal User System** | | |
+| Portal Login / Register | Yes (System User) | Yes (System User) |
+| Portal Chat with Sessions | Yes | Yes |
+| Session Rename / Delete | Yes | Yes |
+| Agent Pool Assignment | Yes | Yes |
+| **Identity & Authentication** | | |
+| Local System User Auth | Yes | Yes |
+| Admin Dashboard Isolation (LOCAL only) | Yes | Yes |
+| LDAP Authentication | No | Yes |
+| **Skill System** | | |
+| Skill CRUD (skill_api.py) | Yes | Yes |
+| Skill Distribution via Admin API | Yes | Yes |
+| Private Skill Backup (visibility=PRIVATE) | Yes | Yes |
+| Skill Management via Admin API | Yes | Yes |
+| Secure Token Distribution (skill_token_api.py) | No | Yes |
+| **Audit & Compliance** | | |
+| Workspace Context Audit | No | Yes |
+| Entity Access Audit | No | Yes |
+| Compliance Logging | No | Yes |
+| **Security & Encryption** | | |
+| Encrypted config.json (DB credentials) | Yes | Yes |
+| Encrypted AGENT_CREDENTIALS | Yes | Yes |
+| Master Key Management | Yes | Yes |
+| Data Masking | Yes | Yes |
+| **Database** | | |
+| Tables | 30 | 35 |
+| PL/pgSQL Functions/Packages | 22 base + 78 API in 13 schemas | 22 base + 91 API in 16 schemas |
+| pg_cron Jobs | 13 | 17 |
+| Row Security Policies | 25+ | 31 |
+| Tests | 105 | 135 |
+| **License** | Apache 2.0 | BSL 1.1 |
+
+---
 
 ## Quick Start
 
-### 1. Deploy Schema
-```bash
-psql -d memory_graph -f scripts/deploy/1_schema.sql
-psql -d memory_graph -f scripts/deploy/2_api.sql
-psql -d memory_graph -f scripts/deploy/3_jobs.sql
-psql -d memory_graph -f scripts/deploy/4_harness_templates.sql
-```
+### ⚠️ Pre-Deployment Safety Check (REQUIRED)
 
-### 2. Install Python Dependencies
-```bash
-pip install psycopg2-binary   # Python 3.14+ recommended, 3.6+ minimum
-```
+**Before running ANY deploy script, check whether the database already has an existing deployment. Re-running deploy scripts on an existing database will DESTROY all data.**
 
-### 3. Run Tests
-```bash
-cd /root/memory-pg18-by-yhw
-python3.14 -m scripts.tests.test_all
-# 162 tests, 100% pass rate
-```
-
-### 4. Start Visualization Server (optional)
-```bash
-./start_web_server.sh start
-# http://10.10.10.136:8000 — login: admin / admin123 (dev only)
-```
-
-### 5. Use the API
 ```python
-from scripts.lib.memory_api import create_memory, search_memories
-from scripts.lib.knowledge_api import create_knowledge, add_edge
-from scripts.lib.agent_api import register_agent, create_session
-from scripts.lib.harness_api import create_harness_template, instantiate_harness_template
-from scripts.lib.spec_api import create_spec, link_spec_to_plan
-from scripts.lib.collab_api import create_collab_group, add_group_member
-
-# Memory
-mid = create_memory("Meeting Notes", "Discussed v2.0 architecture", category="meeting")
-
-# Knowledge
-kid = create_knowledge("Architecture Pattern", domain="architecture", importance=9)
-add_edge(mid, 'MEMORY', kid, 'DERIVED_FROM', strength=0.9)
-
-# Agent
-register_agent("agent-1", "Research Agent", capabilities=["read", "write"])
-sid = create_session("agent-1")
-
-# Harness
-tpl = create_harness_template("Analyst", execution_mode="PARALLEL")
-config = instantiate_harness_template(tpl, {"role": "Data Scientist"}, "agent-1")
-
-# Spec (SDD) — create_spec(entity_data=dict, spec_meta=dict)
-spec_id = create_spec(
-    entity_data={"title": "API Design Spec", "content": "...", "visibility": "PUBLIC"},
-    spec_meta={"spec_scope": "API", "complexity": "HIGH"},
-)
-# link_type: DRIVES/VALIDATES/CONSTRAINS/EXTENDS
-link_spec_to_plan(spec_id, plan_id, 'DRIVES', 0.9)
-
-# Collaboration Group — sharing_policy: OPEN/MODERATED/RESTRICTED
-group_id = create_collab_group("Research Team", "TEAM", "Description", "MODERATED", "agent-1")
-# role: LEAD/CONTRIBUTOR/OBSERVER
-add_group_member(group_id, "agent-2", role="CONTRIBUTOR")
+from lib.deploy_api import check_deployment
+result = check_deployment()
+if result["deployed"]:
+    # DO NOT deploy! Only register this Skill.
+    pass
+else:
+    # Safe to deploy from scratch
+    pass
 ```
 
-## Architecture
-
-```
-ENTITIES (unified) --+-- MEMORY
-                     |-- KNOWLEDGE (with KNOWLEDGE_META)
-                     |-- TASK_OUTPUT
-                     |-- EXPERIENCE
-                     |-- HARNESS_TEMPLATE (with HARNESS_META)
-                     +-- SPEC (with SPEC_META)
-
-ENTITY_EDGES (unified) -- DEPENDS_ON, RELATED_TO, DERIVED_FROM, CAUSES,
-                          ENABLES, PREVENTS, SIMILAR_TO, EVOLVED_FROM,
-                          CONTRADICTS, SUPPORTS, DERIVES_FROM, USES_HARNESS
-
-ENTITY_EMBEDDINGS -- vector(1024) via pg-embedding-gen-by-yhw
+HTTP endpoint (public, no auth):
+```bash
+curl http://localhost:18080/api/agent/deployment-check
 ```
 
-### Visibility Model
+The `1_schema.sql` script now includes built-in protection: it auto-aborts if `system_config.schema_version` exists.
 
-| Level | Description |
-|-------|-------------|
-| PRIVATE | Only the owning agent can access |
-| SHARED | All agents can access (default for knowledge) |
-| PUBLIC | Unrestricted access |
+### Prerequisites
 
-## Database Schema (27 tables)
+- **PostgreSQL 18.3 or later** (required for pgvector, Apache AGE, Row Security Policies)
+- **Python 3.8+ with `psycopg2` 2.9+**
+- Required PostgreSQL extensions: `pgvector`, `age`, `pg_cron`, `plpython3u`, `pgcrypto`
+- `psql` 18+ (for SQL script deployment)
 
-| Table | Purpose |
-|-------|---------|
-| entities | Unified entity store (MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE, SPEC) |
-| entity_edges | Directed relationships with strength (0-1) and confidence (0-1) |
-| knowledge_meta | Knowledge domain/topic/difficulty/review scheduling |
-| harness_meta | Template input/output schemas and execution mode |
-| entity_embeddings | Vector embeddings vector(1024) with HNSW index |
-| agent_registry | Agent identity, capabilities, permissions, elastic states (ACTIVE/DORMANT/POOL) |
-| agent_session | Session tracking with workspace and predecessor links |
-| agent_credentials | Agent credential store for hibernate/wake lifecycle |
-| entity_access_log | Access audit trail |
-| agent_permission_log | Permission change audit |
-| agent_collaboration | Cross-agent sharing |
-| task_plans | Task definitions |
-| task_steps | Plan steps with status and tool I/O |
-| task_context_snapshots | Breakpoint recovery |
-| task_tool_calls | Tool call audit |
-| task_dependencies | Inter-plan dependency graph |
-| tags / entity_tags | Normalized tag system |
-| workspaces | Workspace lifecycle and isolation (incl. COLLAB_GROUP, PERSONAL_IN_GROUP types) |
-| workspace_context | Context version chain (5 types) |
-| workspace_tasks | Workspace-task linking |
-| system_config | System configuration |
-| system_users | User accounts with PBKDF2-SHA256 |
-| spec_meta | Spec metadata (SDD: Spec Driven Development) |
-| spec_plan_links | Spec-to-plan linking for SDD |
-| collab_groups | Collaboration group definitions |
-| collab_group_members | Collaboration group membership |
+> ⚠️ **Critical**: Ensure `pgvector` extension is installed for vector similarity search. Install with: `CREATE EXTENSION IF NOT EXISTS vector;`
 
-## PL/pgSQL API (7 schemas)
+> ⚠️ **Critical**: Ensure `pgcrypto` extension is installed for in-database encryption. Install with: `CREATE EXTENSION IF NOT EXISTS pgcrypto;`
 
-- `memory` (3 functions): generate_embedding, add_concept_with_embedding, search_similar
-- `memory_fusion` (4 functions): fuse_similar_memories, extract_knowledge_from_memories, decay_old_memories, get_fusion_stats
-- `knowledge_api` (7 functions): validate_concept, deprecate_concept, create_concept_version, get_unvalidated, get_concept_lineage, record_review, get_due_reviews
-- `agent_perm` (5 functions): check_entity_access, grant_access, revoke_access, cleanup_expired_sessions, process_collaboration_requests
-- `session_cleanup` (4 functions): purge_access_logs, purge_inactive_sessions, archive_old_entities, update_tag_counts
-- `workspace_manager` (10 functions): create_workspace, get_workspace, update_workspace_status, delete_workspace, add_context_entry, get_context_chain, create_handoff, recover_to_checkpoint, get_workspace_summary, cleanup_abandoned
-- `spec_manager` (6 functions): create_spec, get_spec, update_spec_status, link_spec_to_plan, get_spec_plans, cleanup_orphaned_specs
-- `collab_group_manager` (7 functions): create_collab_group, get_collab_group, add_member, remove_member, get_group_members, get_agent_groups, cleanup_empty_groups
+### 1. Install PostgreSQL Extensions
 
-## Python API (13 modules)
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS age;
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+CREATE EXTENSION IF NOT EXISTS plpython3u;
+```
 
-| Module | Functions | Purpose |
-|--------|-----------|---------|
-| memory_api | 10 | Memory CRUD, search, tags, count |
-| knowledge_api | 13 | Knowledge CRUD, edges, reviews, tags, count |
-| agent_api | 22 | Agent registration, sessions, collaboration, access log, hibernate/wake/pool |
-| graph_api | 9 | Graph traversal (AGE Cypher + SQL fallback) |
-| workspace_api | 11 | Workspace lifecycle, context chains, handoff |
-| task_plan_api | 12 | Plans, steps, dependencies, snapshots, tool calls |
-| harness_api | 8 | Template CRUD, instantiation, variable extraction |
-| spec_api | 10 | Spec CRUD, plan linking, status management (SDD) |
-| collab_api | 10 | Collaboration group CRUD, membership, shared workspaces |
-| embedding_api | 12 | Embedding generation, storage, search, batch, stats (pgvector + pg-embedding-gen-by-yhw) |
-| security | 2 | Password hashing and verification |
-| config | 1 | Unified configuration with env var overrides |
-| connection | 8 | psycopg2 ThreadedConnectionPool management |
-
-## Web Visualization
-
-9 pages served by `scripts/visualization/server.py` on port 8000:
-
-| Page | Route | Features |
-|------|-------|----------|
-| Knowledge | `/knowledge` | Graph/List dual view, domain-colored nodes, inline detail expansion |
-| Memory | `/memory` | Graph/List dual view, category-colored nodes, inline detail expansion |
-| Agents | `/agents` | Registry, active sessions, collaboration requests |
-| Tasks | `/tasks` | Status filter, expandable step details, plan info panel |
-| Workspaces | `/workspaces` | Context chain timeline, linked tasks, expandable details with close button |
-| Graph Explorer | `/graph` | Full graph on load, search, neighbor networks, detail panel with close |
-| Specs | `/specs` | Spec list + detail dual tab, acceptance criteria/constraints JSON display |
-| Collab | `/collab` | Group list + detail dual tab, member table, sharing policy display |
-| Login | `/login` | PBKDF2-SHA256 auth, 5-min auto-logout with countdown |
-
-16 REST API endpoints. See [docs/visualization.md](docs/visualization.md) for details.
-
-## pg-embedding-gen-by-yhw Extension
-
-This system uses **pg-embedding-gen-by-yhw** ([GitHub](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)), a custom PostgreSQL 18 extension developed by Haiwen Yin. It is **not** a built-in database feature — it uses PG18's `COPY FROM PROGRAM` mechanism to call a Python proxy that communicates with any OpenAI-compatible `/v1/embeddings` API endpoint.
-
-### Key Features
-
-| Feature | Description |
-|---------|-------------|
-| Multi-model profiles | Register multiple models via `embedding_register_model()` |
-| Auto-dimension detection | Vector dimensions detected on first use and cached |
-| Three call modes | Default profile, named profile, or inline (model_id + api_url) |
-| Shell-safe | Base64-encoded input prevents injection |
-| Auto-retry | Exponential backoff on transient failures |
-| Health check | `embedding_health_check()` for API connectivity testing |
-| Batch generation | `embedding_generate_batch()` for bulk processing |
-| Cosine similarity | `embedding_cosine_similarity()` for in-DB vector comparison |
-
-### Installation
+### 2. Create Database
 
 ```bash
-# From the pg-embedding-gen-by-yhw project directory
-sudo bash scripts/install.sh
-psql -d memory_graph -f sql/install.sql
-
-# Register your model (if not using defaults)
-psql -d memory_graph -c "SELECT embedding_register_model('bge-m3', 'http://10.10.10.1:12345/v1/embeddings', 'text-embedding-bge-m3', true);"
-
-# Verify
-psql -d memory_graph -c "SELECT * FROM embedding_health_check();"
+createdb -U postgres ai_agent
 ```
 
-See the [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) repository for installation and configuration.
+### 3. Deploy Schema
 
-## Harness Templates (5 built-in)
-
-| Template | Category | Execution Mode |
-|----------|----------|---------------|
-| Research Analyst | research | SEQUENTIAL |
-| Code Assistant | development | SEQUENTIAL |
-| Data Analyst | analytics | PARALLEL |
-| Task Planner | orchestration | CONDITIONAL |
-| Security Auditor | security | SEQUENTIAL |
-
-## Configuration
-
-Edit `config.json`:
-```json
-{
-  "database": {"host": "10.10.10.131", "port": 5432, "database": "memory_graph", "user": "pgsql"},
-  "server": {"host": "0.0.0.0", "port": 8000, "session_timeout": 300},
-  "embedding": {"api_url": "http://10.10.10.1:12345/v1/embeddings", "model": "text-embedding-bge-m3", "dimension": 1024},
-  "security": {"masking_enabled": true, "pbkdf2_iterations": 100000}
-}
+```bash
+psql -U postgres -d ai_agent -f scripts/deploy/1_schema.sql
+psql -U postgres -d ai_agent -f scripts/deploy/2_api.sql
+psql -U postgres -d ai_agent -f scripts/deploy/3_jobs.sql
 ```
 
-Environment variables: `MEMORY_DB_HOST`, `MEMORY_DB_PORT`, `MEMORY_DB_NAME`, `MEMORY_DB_USER`, `MEMORY_DB_PASSWORD`, `MEMORY_SERVER_HOST`, `MEMORY_SERVER_PORT`, `MEMORY_SESSION_TIMEOUT`
+### 4. Install Python Dependencies
 
-## v1.x to v2.0 Migration
+```bash
+pip install psycopg2-binary
+```
 
-| v1.x | v2.0 |
-|------|------|
-| knowledge_concepts | entities (entity_type='KNOWLEDGE') |
-| knowledge_graph | entity_edges |
-| knowledge_versions | knowledge_meta.version |
-| knowledge_tags + knowledge_concept_tags | tags + entity_tags |
-| knowledge_distillation_log | (dropped, use memory_fusion) |
-| knowledge_search_history | (dropped) |
-| agent_memory_access | entity_access_log |
-| concepts (memory schema) | entities (entity_type='MEMORY') |
-| relations (memory schema) | entity_edges |
-| 4 independent SQL scripts | 4-phase ordered deployment |
-| psql subprocess | psycopg2 connection pool |
+### 5. Configure
 
-## Testing
+Edit `config.json` — database credentials will be auto-encrypted on first run:
 
-115 tests across 8 test suites → 162 tests across 12 test suites, 100% pass rate (Python 3.14 local + Python 3.6 remote):
+```bash
+# Option A: Environment variable (recommended)
+export MASTER_DB_KEY=$(python3 -c "import base64,os; print(base64.b64encode(os.urandom(32)).decode())")
+export MEMORY_DB_USER=<db_user>
+export MEMORY_DB_PASSWORD=<db_password>
+export MEMORY_DB_HOST=<db_host>
+export MEMORY_DB_PORT=5432
+export MEMORY_DB_NAME=<db_name>
 
-| Suite | Tests | Coverage |
-|-------|-------|----------|
-| Connection | 6 | Pool create/get/release/query |
-| Memory | 16 | CRUD, search, tags, count |
-| Knowledge | 19 | CRUD, edges, reviews, tags, count |
-| Agent | 22 | Registration, sessions, collaboration, access, hibernate/wake/pool |
-| Graph | 12 | Neighbors (SQL fallback), paths, context, search |
-| Harness | 12 | CRUD, instantiation, variables, count |
-| Security | 19 | Masking, encryption, hashing, context levels |
-| Workspace | 14 | CRUD, context chains, handoff, recovery, tasks |
-| Spec | 10 | CRUD, plan linking, status management |
-| Collab | 10 | Group CRUD, membership, shared workspaces |
-| Embedding | 19 | Generate, store, search, batch, stats, hybrid, multi-type |
-| Task Plan | 4 | Plans, steps, dependencies |
+# Option B: Edit config.json (will auto-encrypt on first run)
+```
 
-## Directory Structure
+### 6. Run Tests
+
+```bash
+cd scripts && python -m tests.test_all
+```
+
+### 7. Start Visualization Server
+
+```bash
+./start_web_server.sh start    # Start (daemon mode)
+./start_web_server.sh status   # Check status
+./start_web_server.sh stop     # Stop
+# Open http://<web_host>:<web_port> — Login: admin / admin123
+```
+
+---
+
+## Project Structure
 
 ```
-memory-pg18-by-yhw/
-  .gitignore
+ai-agent-infra-pg-community/
+  scripts/
+    deploy/
+      1_schema.sql              # 30 tables, indexes, property graph (AGE), seed data
+      2_api.sql                 # 13 PL/pgSQL function groups
+      3_jobs.sql                # 13 pg_cron jobs
+    lib/
+      config.py                 # Unified Config with encrypted DB credentials
+      connection.py             # psycopg2 connection pool (decrypts config)
+      connection_crypto.py      # Config encryption/decryption/key rotation
+      memory_api.py             # Memory CRUD (8 functions)
+      knowledge_api.py          # Knowledge CRUD + graph (7 functions)
+      agent_api.py              # Agent, sessions, credentials (17+ functions)
+      task_plan_api.py          # Task plans, steps (6 functions)
+      security.py               # Data masking, encryption, ConfigEncryption
+      harness_api.py            # Harness template CRUD (6 functions)
+      graph_api.py              # Property Graph API via Apache AGE (9 functions)
+      workspace_api.py          # Workspace lifecycle (14 functions)
+      spec_api.py               # Spec CRUD + plan linkage (10 functions)
+      collab_api.py             # Collaboration groups (10 functions)
+      embedding_api.py          # Vector embedding + search (14 functions)
+      search_api.py             # Unified search (3 functions)
+      skill_api.py              # Skill CRUD [shared] (Phase 3)
+      skill_acquire_api.py      # Agent skill discovery & acquisition [shared] (Phase 3)
+      branch_api.py             # Context branching lifecycle (9 functions)
+    tests/
+      __init__.py               # Package marker
+      test_all.py               # Master runner
+      ... (14+ suites)
+    visualization/
+      server.py                 # HTTP server v3.6.2
+      templates/                # 9+ HTML templates
+      static/                   # style.css + vis-network.min.js
+  docs/
+  config.json                  # Database connection config (auto-encrypted)
+  LICENSE           # Apache 2.0
   SKILL.md
   README.md
-  CHANGELOG.md
-  RELEASE_NOTES_v2.2.0.md
-  RELEASE_NOTES_v2.2.1.md
-  RELEASE_NOTES_v2.3.0.md
-  VERSION
-  LICENSE
-  NOTICE
-  config.json
-  start_web_server.sh
-  scripts/
-    deploy/ (4 SQL files)
-    lib/ (13 Python modules)
-    tests/ (13 test files)
-    visualization/ (server.py, 9 HTML pages, style.css, vis-network.min.js)
-  docs/ (10 documentation files)
 ```
 
-## Author
-
-**Haiwen Yin (胖头鱼)** - PostgreSQL/MySQL ACE Database Expert
+---
 
 ## License
 
-Apache License 2.0
+Apache License 2.0 — see [LICENSE](LICENSE)
+
+Non-production use is free.
+
+## Author
+
+**Haiwen Yin** — [GitHub](https://github.com/Haiwen-Yin) | [Blog](https://blog.csdn.net/yhw1809)

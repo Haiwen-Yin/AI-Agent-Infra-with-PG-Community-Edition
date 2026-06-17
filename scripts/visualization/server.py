@@ -1,16 +1,19 @@
-"""PostgreSQL Memory System v2.3.1 - Web Visualization Server
+"""AI Agent Infra v3.6.2 - Community Edition (PG) - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
-and graph visualization.
+specs, collaboration groups, and graph visualization.
 """
 
 import hashlib
 import json
+import logging
 import os
+import signal
 import sys
 import time
 import urllib.parse
+from decimal import Decimal
 from http.cookies import SimpleCookie
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -18,13 +21,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib import connection, memory_api, knowledge_api, agent_api
 from lib import task_plan_api, workspace_api, harness_api, graph_api
-from lib import security, config
+from lib import spec_api, collab_api, branch_api
+from lib import security, config, user_api
 
-VERSION = "2.3.1"
+VERSION = "3.6.2"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
 
+logger = logging.getLogger(__name__)
 sessions = {}
 
 PAGE_ROUTES = {
@@ -32,13 +37,23 @@ PAGE_ROUTES = {
     '/memory': 'memory.html',
     '/agents': 'agents.html',
     '/tasks': 'tasks.html',
-'/workspaces': 'workspaces.html',
-     '/graph': 'graph.html',
-     '/specs': 'specs.html',
-     '/collab': 'collab.html',
+    '/workspaces': 'workspaces.html',
+    '/graph': 'graph.html',
+    '/specs': 'specs.html',
+    '/collab': 'collab.html',
+    '/skills': 'skills.html',
+    '/branches': 'branches.html',
 }
 
-PUBLIC_API = {'/api/health', '/api/login'}
+PUBLIC_API = {'/api/health', '/api/login', '/portal/api/register', '/portal/api/login', '/api/admin/agent/register', '/api/admin/agent/recover', '/api/admin/token/generate', '/api/admin/token/rotate', '/api/admin/skill/list', '/api/admin/skill/acquire', '/api/admin/skill/create', '/api/admin/skill/update', '/api/admin/skill/delete', '/api/admin/skill/upload'}
+
+
+def _is_public_api(path):
+    if path in PUBLIC_API:
+        return True
+    if path.startswith('/api/agent/'):
+        return True
+    return False
 
 
 def _load_server_config():
@@ -56,6 +71,16 @@ def _create_session(username, user_id, role):
         'created_at': time.time(),
     }
     return session_id
+
+
+def _set_portal_agent_context(sess):
+    agent_id = sess.get('agent_id', '')
+    if agent_id:
+        connection.set_agent_context(agent_id)
+
+
+def _clear_portal_agent_context():
+    connection.set_agent_context(None)
 
 
 def _get_session(request_handler):
@@ -76,19 +101,27 @@ def _get_session(request_handler):
     return session_id, sess
 
 
-def _authenticate(username, password):
+def _authenticate_local(username, password):
     try:
-        row = connection.execute_query_one(
-            "SELECT user_id, username, password_hash, salt, role FROM system_users WHERE username = %s",
-            (username,)
+        result = connection.execute_query_one(
+            "SELECT user_manager.authenticate(%s, %s) AS result",
+            (username, password)
         )
     except Exception:
         return None
-    if not row:
+    if not result or not result.get('result'):
         return None
-    iterations = config.get_config().security.pbkdf2_iterations
-    if security.verify_password(password, row['password_hash'], row['salt'], iterations):
-        return row
+    val = result['result']
+    if isinstance(val, str):
+        val = json.loads(val)
+    if isinstance(val, dict) and val.get('authenticated'):
+        return {
+            'user_id': val['user_id'],
+            'username': val['username'],
+            'role': val.get('role', 'USER'),
+            'status': 'ACTIVE',
+            'auth_source': 'LOCAL',
+        }
     return None
 
 
@@ -107,6 +140,13 @@ def _clean_row(row):
     for k, v in row.items():
         if hasattr(v, 'isoformat'):
             out[k] = v.isoformat()
+        elif isinstance(v, Decimal):
+            out[k] = int(v) if v % 1 == 0 else float(v)
+        elif isinstance(v, bytes):
+            try:
+                out[k] = v.decode('utf-8')
+            except Exception:
+                out[k] = v.hex()
         else:
             out[k] = v
     return out
@@ -118,13 +158,13 @@ def _graph_all():
         "SELECT source_id, target_id, edge_type, strength FROM entity_edges"
     )
     type_colors = {
-        'KNOWLEDGE': '#4a90d9', 'MEMORY': '#4fc3f7', 'TASK_OUTPUT': '#ffb74d',
-        'EXPERIENCE': '#e57373', 'HARNESS_TEMPLATE': '#ba68c8', 'SPEC': '#81c784',
-    }
+            'KNOWLEDGE': '#4a90d9', 'MEMORY': '#4fc3f7', 'TASK_OUTPUT': '#ffb74d',
+            'EXPERIENCE': '#e57373', 'HARNESS_TEMPLATE': '#ba68c8', 'SPEC': '#66bb6a',
+        }
     nodes = []
     for item in all_items:
         tc = type_colors.get(item.get('entity_type', ''), '#666')
-        imp = item.get('importance', 5)
+        imp = float(item.get('importance', 5) or 5)
         nodes.append({
             'id': item['entity_id'],
             'label': (item.get('title') or '')[:40],
@@ -143,34 +183,6 @@ def _graph_all():
             'label': e.get('edge_type', ''),
         })
     return {'nodes': nodes, 'edges': edges}
-
-
-def _api_specs():
-    from lib import spec_api
-    specs = spec_api.list_specs()
-    result = []
-    for s in specs:
-        links = spec_api.get_spec_plan_links(s['entity_id'])
-        s['plan_links'] = [_clean_row(l) for l in links]
-        result.append(_clean_row(s))
-    return {'specs': result}
-
-
-def _api_collab():
-    from lib import collab_api
-    groups = connection.execute_query(
-        "SELECT cg.group_id, cg.group_name, cg.group_type, cg.description, "
-        "cg.workspace_id, cg.coordinator_agent_id, cg.sharing_policy, cg.status, "
-        "cg.created_at, cg.updated_at, "
-        "(SELECT COUNT(*) FROM collab_group_members WHERE group_id = cg.group_id AND status = 'ACTIVE') AS member_count "
-        "FROM collab_groups cg ORDER BY cg.created_at DESC"
-    )
-    result = []
-    for g in groups:
-        members = collab_api.list_group_members(g['group_id'])
-        g['members'] = [_clean_row(m) for m in members]
-        result.append(_clean_row(g))
-    return {'groups': result}
 
 
 def _get_tags_for_entities(entity_ids):
@@ -305,17 +317,54 @@ class VisHandler(BaseHTTPRequestHandler):
             return self.rfile.read(length)
         return b''
 
+    def _set_context_from_session(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip('/') or '/'
+        if path in ('/portal/api/register', '/portal/api/login', '/api/login', '/api/health'):
+            connection.set_agent_context(None)
+            return
+        result = _get_session(self)
+        if result and isinstance(result, tuple) and len(result) == 2:
+            sess = result[1]
+            if sess and sess.get('agent_id'):
+                connection.set_agent_context(sess['agent_id'])
+                return
+        connection.set_agent_context(None)
+
     def do_GET(self):
+        try:
+            self._set_context_from_session()
+            self._do_GET_impl()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                self._send_error(500, str(e))
+            except:
+                pass
+
+    def _do_GET_impl(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip('/') or '/'
         qs = urllib.parse.parse_qs(parsed.query)
 
         if path == '/' :
-            self._send_redirect('/knowledge')
+            self._send_redirect('/portal/login')
             return
 
         if path == '/login':
             self._serve_template('login.html')
+            return
+
+        if path == '/portal/login' or path == '/portal':
+            self._serve_template('portal_login.html')
+            return
+
+        if path == '/portal/chat':
+            if _get_session(self) is None:
+                self._send_redirect('/portal/login')
+                return
+            self._serve_template('portal_chat.html')
             return
 
         if path == '/logout':
@@ -339,6 +388,10 @@ class VisHandler(BaseHTTPRequestHandler):
             self._handle_api_get(path, qs)
             return
 
+        if path.startswith('/portal/api/'):
+            self._handle_portal_api_get(path, qs)
+            return
+
         if path.startswith('/static/'):
             self._serve_static(path[8:])
             return
@@ -346,11 +399,147 @@ class VisHandler(BaseHTTPRequestHandler):
         self._send_error(404, 'Not found')
 
     def do_POST(self):
+        try:
+            self._set_context_from_session()
+            self._do_POST_impl()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                self._send_error(500, str(e))
+            except:
+                pass
+
+    def _do_POST_impl(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip('/') or '/'
 
         if path == '/api/login':
             self._handle_login()
+            return
+
+        if path == '/api/skill/create':
+            self._handle_skill_create_route()
+            return
+
+        if path.startswith('/api/skill/'):
+            self._handle_skill_post(path)
+            return
+
+        if path == '/api/branch/fork':
+            self._api_branch_fork()
+            return
+
+        if path == '/api/branch/merge':
+            self._api_branch_merge()
+            return
+
+        if path == '/api/branch/fork-for-spec':
+            self._api_branch_fork_for_spec()
+            return
+
+        if path == '/api/branch/merge-with-validation':
+            self._api_branch_merge_with_validation()
+            return
+
+        if path == '/api/branch/fork-parallel':
+            self._api_branch_fork_parallel()
+            return
+
+        if path == '/api/branch/merge-parallel':
+            self._api_branch_merge_parallel()
+            return
+
+        if path == '/api/collab/distribute-plan':
+            self._api_collab_distribute_plan()
+            return
+
+        if path == '/api/collab/sync-context':
+            self._api_collab_sync_context()
+            return
+
+        if path.startswith('/api/branch/') and path.endswith('/abandon'):
+            self._api_branch_abandon(path)
+            return
+
+        if path.startswith('/api/branch/') and path.endswith('/pause'):
+            self._api_branch_pause(path)
+            return
+
+        if path.startswith('/api/branch/') and path.endswith('/resume'):
+            self._api_branch_resume(path)
+            return
+
+        if path.startswith('/api/branch/') and path.endswith('/lesson'):
+            self._api_branch_lesson(path)
+            return
+
+        if path.startswith('/api/branch/') and path.endswith('/extract-lessons'):
+            self._api_branch_extract_lessons(path)
+            return
+
+        if path == '/portal/api/register':
+            self._handle_portal_register()
+            return
+
+        if path == '/portal/api/login':
+            self._handle_portal_login()
+            return
+
+        if path == '/portal/api/chat/send':
+            self._handle_portal_chat_send()
+            return
+
+        if path == '/portal/api/chat/new':
+            self._handle_portal_chat_new()
+            return
+
+        if path == '/portal/api/chat/rename':
+            self._handle_portal_chat_rename()
+            return
+
+        if path == '/portal/api/chat/delete':
+            self._handle_portal_chat_delete()
+            return
+
+        if path == '/portal/api/chat/switch':
+            self._handle_portal_chat_switch()
+            return
+
+        if path == '/portal/api/agent/release':
+            self._handle_portal_agent_release()
+            return
+
+        if path == '/api/admin/agent/register':
+            self._handle_admin_agent_register()
+            return
+
+        if path == '/api/admin/agent/recover':
+            self._handle_admin_agent_recover()
+            return
+
+        if path == '/api/admin/token/generate':
+            self._handle_admin_token_generate()
+            return
+
+        if path == '/api/admin/token/rotate':
+            self._handle_admin_token_rotate()
+            return
+
+        if path == '/api/admin/skill/create':
+            self._handle_admin_skill_create()
+            return
+
+        if path == '/api/admin/skill/update':
+            self._handle_admin_skill_update()
+            return
+
+        if path == '/api/admin/skill/delete':
+            self._handle_admin_skill_delete()
+            return
+
+        if path == '/api/admin/skill/upload':
+            self._handle_admin_skill_upload()
             return
 
         self._send_error(404, 'Not found')
@@ -365,7 +554,7 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_json({'success': False, 'error': 'Invalid request'}, 400)
             return
 
-        user = _authenticate(username, password)
+        user = _authenticate_local(username, password)
         if not user:
             self._send_json({'success': False, 'error': 'Invalid credentials'}, 401)
             return
@@ -380,7 +569,7 @@ class VisHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_api_get(self, path, qs):
-        if path not in PUBLIC_API:
+        if not _is_public_api(path):
             if self._require_auth() is None:
                 return
 
@@ -397,8 +586,26 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_tasks()
             elif path == '/api/workspaces':
                 self._api_workspaces()
+            elif path == '/api/specs':
+                self._api_specs()
+            elif path == '/api/collab':
+                self._api_collab()
+            elif path == '/api/agent/skills':
+                self._api_agent_discover_skills(qs)
+            elif path == '/api/agent/deployment-check':
+                self._api_agent_deployment_check()
+            elif path.startswith('/api/agent/skill/') and path.endswith('/acquire'):
+                self._api_agent_acquire_skill(path)
+            elif path == '/api/skills':
+                self._api_skills()
+            elif path.startswith('/api/skill/'):
+                self._handle_skill_get(path)
             elif path == '/api/stats':
                 self._api_stats()
+            elif path == '/api/admin/skill/list':
+                self._handle_admin_skill_list()
+            elif path.startswith('/api/admin/skill/') and path.endswith('/acquire'):
+                self._handle_admin_skill_acquire()
             elif path == '/api/graph/neighbors':
                 entity_id = qs.get('entity_id', [None])[0]
                 if not entity_id:
@@ -423,10 +630,28 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._send_json(graph_api.graph_search(keyword=q if q else None, entity_type=et))
             elif path == '/api/graph/all':
                 self._send_json(_graph_all())
-            elif path == '/api/specs':
-                self._send_json(_api_specs())
-            elif path == '/api/collab':
-                self._send_json(_api_collab())
+            elif path == '/api/branches':
+                self._api_branch_list(qs)
+            elif path.startswith('/api/branch/tree/'):
+                self._api_branch_tree(path)
+            elif path.startswith('/api/branch/diff/'):
+                self._api_branch_diff(path)
+            elif path.startswith('/api/branch/') and path.endswith('/chain'):
+                self._api_branch_chain(path, qs)
+            elif path.startswith('/api/branch/') and path.endswith('/stats'):
+                self._api_branch_stats(path)
+            elif path.startswith('/api/branch/') and path.endswith('/spec'):
+                self._api_branch_spec(path)
+            elif path.startswith('/api/branch/') and path.endswith('/plans'):
+                self._api_branch_plans(path)
+            elif path.startswith('/api/branch/') and '/validate-spec/' in path:
+                self._api_branch_validate_spec(path)
+            elif path.startswith('/api/branch/') and path.endswith('/plans'):
+                self._api_branch_plans(path)
+            elif path == '/api/collab/group-branches' or path == '/api/collab/group-spec-validation':
+                self._api_collab_branch(path, qs)
+            elif path.startswith('/api/branch/'):
+                self._api_branch_get(path)
             else:
                 self._send_error(404, 'API endpoint not found')
         except Exception as e:
@@ -438,7 +663,10 @@ class VisHandler(BaseHTTPRequestHandler):
             "last_seen_at, created_at, updated_at FROM agent_registry ORDER BY created_at DESC"
         )
         sessions_list = agent_api.get_active_sessions()
-        collaborations = agent_api.get_collaborations(limit=100)
+        collaborations = connection.execute_query(
+            "SELECT collab_id, source_agent_id, target_agent_id, col_type, entity_id, "
+            "context, strength, created_at FROM agent_collaboration ORDER BY created_at DESC"
+        )
         self._send_json({
             'agents': [_clean_row(a) for a in agents],
             'sessions': [_clean_row(s) for s in sessions_list],
@@ -448,7 +676,7 @@ class VisHandler(BaseHTTPRequestHandler):
     def _api_tasks(self):
         plans = task_plan_api.list_plans(limit=100)
         for plan in plans:
-            plan['steps'] = task_plan_api.get_plan_steps(plan['plan_id'])
+            plan['steps'] = task_plan_api.list_steps(plan['plan_id'])
         self._send_json({'plans': [_clean_row(p) for p in plans]})
 
     def _api_workspaces(self):
@@ -463,7 +691,302 @@ class VisHandler(BaseHTTPRequestHandler):
                 (ws['workspace_id'],)
             )
             ws['context_count'] = ctx_count['cnt'] if ctx_count else 0
+            br_count = connection.execute_query_one(
+                "SELECT COUNT(*) AS cnt FROM context_branches WHERE workspace_id = %s",
+                (ws['workspace_id'],)
+            )
+            ws['branch_count'] = br_count['cnt'] if br_count else 0
+            ctx_chain = connection.execute_query(
+                "SELECT context_id, context_type, agent_id, context_data, parent_context_id, created_at "
+                "FROM workspace_context WHERE workspace_id = %s ORDER BY created_at DESC",
+                (ws['workspace_id'],)
+            )
+            ws['context_chain'] = [_clean_row(c) for c in ctx_chain]
+            linked = connection.execute_query(
+                "SELECT wt.plan_id, tp.goal, tp.status FROM workspace_tasks wt "
+                "JOIN task_plans tp ON wt.plan_id = tp.plan_id "
+                "WHERE wt.workspace_id = %s",
+                (ws['workspace_id'],)
+            )
+            ws['linked_tasks'] = [_clean_row(t) for t in linked]
+            ws['task_count'] = len(linked)
         self._send_json({'workspaces': [_clean_row(w) for w in workspaces]})
+
+    def _api_specs(self):
+        specs = spec_api.list_specs(limit=100)
+        for sp in specs:
+            sp['plan_links'] = spec_api.get_spec_plan_links(sp['entity_id'])
+        self._send_json({'specs': [_clean_row(s) for s in specs]})
+
+    def _api_collab(self):
+        groups = connection.execute_query(
+            "SELECT g.group_id, g.group_name, g.group_type, g.description, "
+            "g.workspace_id, g.coordinator_agent_id, g.sharing_policy, g.status, "
+            "g.metadata, g.created_at, g.updated_at, g.branch_id, g.spec_id, "
+            "(SELECT COUNT(*) FROM collab_group_members cgm WHERE cgm.group_id = g.group_id AND cgm.status = 'ACTIVE') AS member_count "
+            "FROM collab_groups g ORDER BY g.updated_at DESC"
+        )
+        for g in groups:
+            members = connection.execute_query(
+                "SELECT member_id, agent_id, role, personal_workspace_id, joined_at, status "
+                "FROM collab_group_members WHERE group_id = %s ORDER BY joined_at",
+                (g['group_id'],)
+            )
+            g['members'] = [_clean_row(m) for m in members]
+        self._send_json({'groups': [_clean_row(g) for g in groups]})
+
+    def _api_skills(self):
+        from lib import skill_api
+        skills = skill_api.list_skills(limit=200)
+        self._send_json({'skills': [_clean_row(s) for s in skills]})
+
+    def _api_agent_deployment_check(self):
+        from lib import deploy_api
+        result = deploy_api.check_deployment()
+        self._send_json(result)
+
+    def _api_agent_discover_skills(self, qs):
+        from lib import skill_acquire_api
+        keyword = qs.get('keyword', [None])[0] or qs.get('q', [None])[0]
+        skill_type = qs.get('type', [None])[0]
+        runtime = qs.get('runtime', [None])[0]
+        skill_format = qs.get('format', [None])[0]
+        results = skill_acquire_api.discover_skills(
+            skill_type=skill_type, runtime=runtime,
+            skill_format=skill_format, keyword=keyword,
+        )
+        self._send_json({'skills': [_clean_row(r) for r in results]})
+
+    def _api_agent_acquire_skill(self, path):
+        parts = path.split('/')
+        if len(parts) < 6:
+            self._send_error(400, 'Invalid skill acquire path')
+            return
+        skill_id = parts[4]
+        from lib import skill_acquire_api
+        result = skill_acquire_api.acquire_skill_text(skill_id)
+        if result is None:
+            self._send_error(404, 'Skill not found or not active')
+            return
+        self._send_json(_clean_row(result))
+
+    def _handle_skill_get(self, path):
+        if self._require_auth() is None:
+            return
+        from lib import skill_api, skill_storage
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid skill path')
+            return
+        skill_id = parts[3]
+        if len(parts) == 4:
+            skill = skill_api.get_skill(skill_id)
+            if skill is None:
+                self._send_error(404, 'Skill not found')
+                return
+            self._send_json(_clean_row(skill))
+            return
+        action = parts[4] if len(parts) > 4 else ''
+        if action == 'resource':
+            skill = skill_api.get_skill(skill_id)
+            if skill is None:
+                self._send_error(404, 'Skill not found')
+                return
+            if not skill.get('resource_uri'):
+                self._send_error(404, 'No resource attached')
+                return
+            from lib import skill_storage
+            content = skill_storage.read_resource_content(skill_id)
+            if content is None:
+                self._send_error(404, 'Resource file not found')
+                return
+            skill_name = skill.get('skill_name', 'skill')
+            skill_version = skill.get('skill_version', '1.0.0')
+            fname = f"{skill_name}-{skill_version}.zip"
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            return
+        self._send_error(404, 'Unknown skill action')
+
+    def _handle_skill_post(self, path):
+        if self._require_auth() is None:
+            return
+        from lib import skill_api
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid skill path')
+            return
+        skill_id = parts[3]
+        action = parts[4] if len(parts) > 4 else ''
+        if action == 'upload':
+            self._handle_skill_upload(skill_id)
+        elif action == 'update':
+            self._handle_skill_update(skill_id)
+        elif action == 'delete':
+            self._handle_skill_delete(skill_id)
+        else:
+            self._send_error(404, 'Unknown skill action')
+
+    def _handle_skill_create(self, data):
+        from lib import skill_api
+        skill_id = skill_api.register_skill(
+            title=data.get('title', ''),
+            skill_name=data.get('skill_name', ''),
+            skill_version=data.get('skill_version', '1.0.0'),
+            skill_type=data.get('skill_type', 'CUSTOM'),
+            skill_format=data.get('skill_format', 'TEXT'),
+            text_content=data.get('text_content'),
+            runtime=data.get('runtime', 'PYTHON'),
+            parameters=data.get('parameters'),
+            dependencies=data.get('dependencies'),
+            category=data.get('category'),
+            owned_by_agent=data.get('owned_by_agent'),
+            visibility=data.get('visibility', 'SHARED'),
+        )
+        return skill_id
+
+    def _handle_skill_create_route(self):
+        if self._require_auth() is None:
+            return
+        content_type = self.headers.get('Content-Type', '')
+        if 'multipart/form-data' not in content_type:
+            self._send_error(400, 'multipart/form-data required. Upload a zip containing SKILL.md')
+            return
+        boundary = content_type.split('boundary=')[-1].encode()
+        body = self._read_body()
+        if not body:
+            self._send_error(400, 'Empty body')
+            return
+        import io as _io, zipfile as _zipfile
+        file_content = None
+        filename = None
+        parts_list = body.split(b'--' + boundary)
+        for part in parts_list:
+            if part in (b'', b'--\r\n', b'--', b'--\r\n\r\n'):
+                continue
+            header_end = part.find(b'\r\n\r\n')
+            if header_end == -1:
+                continue
+            headers_raw = part[:header_end].decode('utf-8', errors='replace')
+            part_body = part[header_end + 4:]
+            if part_body.endswith(b'\r\n'):
+                part_body = part_body[:-2]
+            if 'filename=' in headers_raw:
+                for h in headers_raw.split('\r\n'):
+                    if 'filename=' in h:
+                        for seg in h.split(';'):
+                            seg = seg.strip()
+                            if seg.startswith('filename='):
+                                filename = seg.split('=', 1)[1].strip('" ')
+                file_content = part_body
+        if file_content is None or not filename:
+            self._send_error(400, 'No file uploaded')
+            return
+        try:
+            if not _zipfile.is_zipfile(_io.BytesIO(file_content)):
+                self._send_error(400, 'Uploaded file is not a valid ZIP archive')
+                return
+            zf_check = _zipfile.ZipFile(_io.BytesIO(file_content))
+            zip_names = zf_check.namelist()
+            zf_check.close()
+            from lib.skill_parser import parse_skill_package
+            from lib.skill_storage import save_resource_files
+            from lib import skill_api
+            meta, resource_files = parse_skill_package(file_content)
+            skill_id = skill_api.register_skill(
+                title=meta['title'],
+                skill_name=meta['skill_name'],
+                skill_version=meta['skill_version'],
+                skill_type=meta['skill_type'],
+                skill_format=meta['skill_format'],
+                text_content=meta.get('text_content'),
+                skill_description=meta.get('skill_description'),
+                runtime=meta['runtime'],
+                parameters=meta.get('parameters'),
+                dependencies=meta.get('dependencies'),
+                category=meta.get('category'),
+                owned_by_agent=meta.get('owned_by_agent'),
+                visibility=meta.get('visibility', 'SHARED'),
+            )
+            if resource_files:
+                save_resource_files(skill_id, resource_files)
+            skill = skill_api.get_skill(skill_id)
+            self._send_json({'success': True, 'skill_id': skill_id, 'skill': _clean_row(skill), 'file_count': len(resource_files)})
+        except ValueError as e:
+            self._send_error(400, str(e))
+        except Exception as e:
+            self._send_error(500, 'Failed to parse skill package: {}'.format(str(e)))
+        else:
+            body = self._read_body()
+            try:
+                data = json.loads(body) if body else {}
+            except Exception:
+                self._send_error(400, 'Invalid JSON')
+                return
+            skill_id = self._handle_skill_create(data)
+            skill = skill_api.get_skill(skill_id)
+            self._send_json({'success': True, 'skill_id': skill_id, 'skill': _clean_row(skill)})
+
+    def _handle_skill_upload(self, skill_id):
+        content_type = self.headers.get('Content-Type', '')
+        if 'multipart/form-data' not in content_type:
+            self._send_error(400, 'multipart/form-data required')
+            return
+        boundary = content_type.split('boundary=')[-1].encode()
+        body = self._read_body()
+        if not body:
+            self._send_error(400, 'Empty body')
+            return
+        parts_list = body.split(b'--' + boundary)
+        file_content = None
+        filename = 'resource'
+        for part in parts_list:
+            if part in (b'', b'--\r\n', b'--', b'--\r\n\r\n'):
+                continue
+            header_end = part.find(b'\r\n\r\n')
+            if header_end == -1:
+                continue
+            headers_raw = part[:header_end].decode('utf-8', errors='replace')
+            part_body = part[header_end + 4:]
+            if part_body.endswith(b'\r\n'):
+                part_body = part_body[:-2]
+            if 'filename=' in headers_raw:
+                for h in headers_raw.split('\r\n'):
+                    if 'filename=' in h:
+                        for seg in h.split(';'):
+                            seg = seg.strip()
+                            if seg.startswith('filename='):
+                                filename = seg.split('=', 1)[1].strip('" ')
+                file_content = part_body
+        if file_content is None:
+            self._send_error(400, 'No file found in upload')
+            return
+        from lib import skill_api
+        result = skill_api.upload_skill_resource(skill_id, filename, file_content)
+        if result is None:
+            self._send_error(404, 'Skill not found')
+            return
+        self._send_json({'success': True, 'resource': result})
+
+    def _handle_skill_update(self, skill_id):
+        body = self._read_body()
+        try:
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        from lib import skill_api
+        success = skill_api.update_skill(skill_id, **data)
+        self._send_json({'success': success})
+
+    def _handle_skill_delete(self, skill_id):
+        from lib import skill_api
+        success = skill_api.delete_skill(skill_id)
+        self._send_json({'success': success})
 
     def _api_stats(self):
         entity_counts = {}
@@ -475,8 +998,13 @@ class VisHandler(BaseHTTPRequestHandler):
         edge_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entity_edges")
         ws_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM workspaces")
         agent_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM agent_registry")
-        spec_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM spec_meta")
-        collab_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM collab_groups WHERE status = 'ACTIVE'")
+        spec_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'SPEC'")
+        collab_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM collab_groups")
+        skill_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'SKILL'")
+        try:
+            audit_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entity_access_audit WHERE 1=0")
+        except Exception:
+            audit_row = None
         self._send_json({
             'entity_counts': entity_counts,
             'edge_count': edge_row['cnt'] if edge_row else 0,
@@ -484,7 +1012,979 @@ class VisHandler(BaseHTTPRequestHandler):
             'agent_count': agent_row['cnt'] if agent_row else 0,
             'spec_count': spec_row['cnt'] if spec_row else 0,
             'collab_count': collab_row['cnt'] if collab_row else 0,
+            'skill_count': skill_row['cnt'] if skill_row else 0,
+            'audit_open_count': audit_row['cnt'] if audit_row else 0,
+            'active_branches': connection.execute_query_one("SELECT COUNT(*) AS c FROM context_branches WHERE status='ACTIVE'")['c'],
+            'total_branches': connection.execute_query_one("SELECT COUNT(*) AS c FROM context_branches")['c'],
         })
+
+    def _api_branch_list(self, qs):
+        workspace_id = qs.get('workspace_id', [None])[0]
+        agent_id = qs.get('agent_id', [None])[0]
+        status = qs.get('status', [None])[0]
+        branch_type = qs.get('branch_type', [None])[0]
+        result = branch_api.list_branches(
+            workspace_id=workspace_id, agent_id=agent_id,
+            status=status,
+        )
+        self._send_json({'branches': [_clean_row(b) for b in result]})
+
+    def _api_branch_get(self, path):
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        result = branch_api.get_branch(branch_id)
+        if result is None:
+            self._send_error(404, 'Branch not found')
+            return
+        self._send_json(_clean_row(result))
+
+    def _api_branch_chain(self, path, qs):
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        limit = qs.get('limit', [None])[0]
+        limit = int(limit) if limit else None
+        result = branch_api.get_branch_context_chain(branch_id, limit=limit)
+        self._send_json({'chain': [_clean_row(c) for c in result]})
+
+    def _api_branch_stats(self, path):
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        result = branch_api.get_branch_stats(branch_id)
+        if result is None:
+            self._send_error(404, 'Branch not found')
+            return
+        self._send_json(_clean_row(result))
+
+    def _api_branch_tree(self, path):
+        parts = path.split('/')
+        if len(parts) < 5:
+            self._send_error(400, 'Invalid branch tree path')
+            return
+        workspace_id = parts[4]
+        result = branch_api.get_branch_tree(workspace_id)
+        self._send_json(_clean_row(result))
+
+    def _api_branch_diff(self, path):
+        parts = path.split('/')
+        if len(parts) < 6:
+            self._send_error(400, 'Invalid branch diff path')
+            return
+        branch_a_id = parts[4]
+        branch_b_id = parts[5]
+        result = branch_api.diff_branches(branch_a_id, branch_b_id)
+        self._send_json(_clean_row(result))
+
+    def _api_branch_fork(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        result = branch_api.fork_branch(
+            workspace_id=data.get('workspace_id'),
+            fork_context_id=data.get('fork_context_id'),
+            branch_name=data.get('branch_name'),
+            branch_type=data.get('branch_type'),
+            agent_id=data.get('agent_id'),
+            source_agent_id=data.get('source_agent_id'),
+            purpose=data.get('purpose'),
+            fork_session_id=data.get('fork_session_id'),
+        )
+        if isinstance(result, str):
+            self._send_json({'branch_id': result, 'success': True})
+        else:
+            self._send_json(_clean_row(result))
+
+    def _api_branch_merge(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        result = branch_api.merge_branch(
+            source_branch_id=data.get('source_branch_id'),
+            target_branch_id=data.get('target_branch_id'),
+            merge_type=data.get('merge_type'),
+            merged_by_agent=data.get('merged_by_agent'),
+            conflict_resolutions=data.get('conflict_resolutions'),
+        )
+        self._send_json(_clean_row(result))
+
+    def _api_branch_abandon(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            data = {}
+        result = branch_api.abandon_branch(branch_id, reason=data.get('reason'))
+        self._send_json({'success': bool(result), 'branch_id': branch_id, 'branch_status': 'ABANDONED'})
+
+    def _api_branch_pause(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        result = branch_api.pause_branch(branch_id)
+        self._send_json({'success': bool(result), 'branch_id': branch_id, 'branch_status': 'PAUSED'})
+
+    def _api_branch_resume(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        result = branch_api.resume_branch(branch_id)
+        self._send_json({'success': bool(result), 'branch_id': branch_id, 'branch_status': 'ACTIVE'})
+
+    def _api_branch_lesson(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        result = branch_api.mark_as_lesson(
+            branch_id=branch_id,
+            context_id=data.get('context_id'),
+            lesson_type=data.get('lesson_type'),
+            lesson_summary=data.get('lesson_summary'),
+            lesson_detail=data.get('lesson_detail'),
+            agent_id=data.get('agent_id'),
+        )
+        if isinstance(result, dict):
+            self._send_json(_clean_row(result))
+        else:
+            self._send_json({'success': True, 'branch_id': branch_id})
+
+    def _api_branch_extract_lessons(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            data = {}
+        result = branch_api.extract_lessons_from_branch(branch_id, auto_confirm=data.get('auto_confirm', False))
+        self._send_json({'lessons': [_clean_row(l) for l in result]})
+
+    def _api_branch_spec(self, path):
+        if self._require_auth() is None:
+            return
+        try:
+            branch_id = path.split('/api/branch/')[1].replace('/spec', '')
+            if not branch_id:
+                self._send_error(400, 'Branch ID required')
+                return
+            from lib import spec_api
+            from lib.connection import execute_query
+            specs = execute_query(
+                'SELECT s.entity_id, e.title, s.spec_status FROM spec_meta s JOIN entities e ON s.entity_id=e.entity_id AND s.entity_type=e.entity_type WHERE s.branch_id = %s',
+                {'vbid': branch_id}
+            )
+            self._send_json([_clean_row(r) for r in specs])
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_branch_plans(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        branch_id = parts[3] if len(parts) > 3 else None
+        if not branch_id:
+            self._send_error(400, 'Branch ID required')
+            return
+        result = task_plan_api.get_branch_plans(branch_id)
+        self._send_json([_clean_row(r) for r in result])
+
+    def _api_branch_validate_spec(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        branch_id = parts[3] if len(parts) > 3 else None
+        spec_id = parts[5] if len(parts) > 5 else None
+        if not branch_id or not spec_id:
+            self._send_error(400, 'Branch ID and Spec ID required')
+            return
+        try:
+            from lib import spec_api
+            result = spec_api.validate_branch_against_spec(branch_id, spec_id)
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_branch_fork_for_spec(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import branch_api
+            result = branch_api.fork_branch_for_spec(
+                workspace_id=data.get('workspace_id'),
+                spec_id=data.get('spec_id'),
+                branch_name=data.get('branch_name'),
+                agent_id=data.get('agent_id'),
+                source_agent_id=data.get('source_agent_id'),
+            )
+            self._send_json({'branch_id': result, 'success': True})
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_branch_merge_with_validation(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import branch_api
+            result = branch_api.merge_branch_with_validation(
+                source_branch_id=data.get('source_branch_id'),
+                target_branch_id=data.get('target_branch_id'),
+                spec_id=data.get('spec_id'),
+                merged_by_agent=data.get('merged_by_agent'),
+                conflict_resolutions=data.get('conflict_resolutions'),
+            )
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_collab_branch(self, path, qs):
+        if self._require_auth() is None:
+            return
+        try:
+            from lib import collab_api
+            if path.endswith('group-branches'):
+                group_id = qs.get('group_id', [None])[0]
+                if not group_id:
+                    self._send_error(400, 'group_id required')
+                    return
+                result = collab_api.get_member_branches(group_id)
+                self._send_json([_clean_row(r) for r in result])
+            elif path.endswith('group-spec-validation'):
+                group_id = qs.get('group_id', [None])[0]
+                spec_id = qs.get('spec_id', [None])[0]
+                if not group_id:
+                    self._send_error(400, 'group_id required')
+                    return
+                result = collab_api.validate_group_against_spec(group_id, spec_id)
+                self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_branch_fork_parallel(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import branch_api
+            agent_ids = data.get('agent_ids', [])
+            if not agent_ids:
+                self._send_error(400, 'agent_ids required')
+                return
+            result = branch_api.fork_parallel_branches(
+                workspace_id=data.get('workspace_id'),
+                agent_ids=agent_ids,
+                branch_name_prefix=data.get('branch_name_prefix', 'parallel'),
+                spec_id=data.get('spec_id'),
+                purpose=data.get('purpose'),
+            )
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_branch_merge_parallel(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import branch_api
+            result = branch_api.merge_parallel_branches(
+                source_branch_ids=data.get('source_branch_ids', []),
+                target_branch_id=data.get('target_branch_id'),
+                merged_by_agent=data.get('merged_by_agent'),
+            )
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_collab_distribute_plan(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import task_plan_api
+            result = task_plan_api.distribute_plan_to_group(
+                plan_id=data.get('plan_id'),
+                group_id=data.get('group_id'),
+            )
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_collab_sync_context(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import collab_api
+            result = collab_api.sync_group_context(data.get('group_id'))
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _handle_portal_register(self):
+        try:
+            connection.set_agent_context(None)
+            body = self._read_body()
+            data = json.loads(body)
+            username = data.get('username', '').strip()
+            password = data.get('password', '').strip()
+            if not username or not password or len(username) < 3 or len(password) < 6:
+                self._send_json({'success': False, 'error': 'Username min 3 chars, password min 6 chars'}, 400)
+                return
+            db_exists = connection.execute_query_one(
+                "SELECT user_id, auth_source FROM system_users WHERE UPPER(username) = UPPER(%s)",
+                (username,),
+            )
+            if db_exists:
+                if db_exists.get('auth_source') == 'LDAP':
+                    self._send_json({'success': False, 'error': 'This username belongs to an LDAP user, please use LDAP login'}, 409)
+                else:
+                    self._send_json({'success': False, 'error': 'Username already exists'}, 409)
+                return
+            result = user_api.create_user(username, password)
+            if not result:
+                self._send_json({'success': False, 'error': 'Username already exists'}, 409)
+                return
+            session_id = _create_session(result['username'], result['user_id'], result['role'])
+            sess = sessions[session_id]
+            pool_agent = connection.execute_query_one(
+                "SELECT agent_id FROM agent_registry WHERE status = 'ACTIVE' AND agent_id LIKE 'AGENT_POOL_%%' ORDER BY agent_id LIMIT 1"
+            )
+            if pool_agent:
+                sess['agent_id'] = pool_agent['agent_id']
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
+            body_out = json.dumps({'success': True, 'session_id': session_id, 'user_id': result['user_id'], 'username': result['username'], 'has_agent': bool(pool_agent)}).encode()
+            self.send_header('Content-Length', str(len(body_out)))
+            self.end_headers()
+            self.wfile.write(body_out)
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_chat_send(self):
+        try:
+            sess_data = _get_session(self)
+            if not sess_data:
+                self._send_error(401, 'Not authenticated')
+                return
+            session_id, sess = sess_data
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+            message = data.get('message', '').strip()
+            if not message:
+                self._send_json({'success': False, 'error': 'Empty message'})
+                return
+            agent_id = sess.get('agent_id')
+            username = sess.get('username', 'unknown')
+            workspace_id = sess.get('workspace_id')
+            ctx_id = None
+            if workspace_id:
+                ctx_data = json.dumps({'role': 'user', 'content': message, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')})
+                ctx_row = connection.execute_query_one(
+                    "INSERT INTO workspace_context (workspace_id, context_type, context_data, agent_id) "
+                    "VALUES (%s, 'CHAT_MESSAGE', %s, %s) RETURNING context_id",
+                    (workspace_id, ctx_data, agent_id)
+                )
+                if ctx_row:
+                    ctx_id = ctx_row['context_id']
+            connection.execute(
+                "INSERT INTO entities (entity_type, title, content, category, status, importance, owned_by_agent, visibility) "
+                "VALUES ('MEMORY', %s, %s, 'CHAT', 'ACTIVE', 3, %s, 'SHARED')",
+                [message[:200], message, agent_id or username]
+            )
+            if workspace_id:
+                reply_data = json.dumps({'role': 'agent', 'content': 'Message received and stored.', 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')})
+                connection.execute(
+                    "INSERT INTO workspace_context (workspace_id, context_type, context_data, agent_id) "
+                    "VALUES (%s, 'CHAT_MESSAGE', %s, %s)",
+                    (workspace_id, reply_data, agent_id)
+                )
+            self._send_json({
+                'success': True,
+                'reply': 'Message received and stored.',
+                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                'user_context_id': ctx_id,
+            })
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_login(self):
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            username = data.get('username', '').strip()
+            password = data.get('password', '').strip()
+        except Exception:
+            self._send_json({'success': False, 'error': 'Invalid request'}, 400)
+            return
+        user = _authenticate_local(username, password)
+        if not user:
+            self._send_json({'success': False, 'error': 'Invalid username or password'}, 401)
+            return
+        session_id = _create_session(user['username'], str(user['user_id']), user.get('role', 'user'))
+        sess = sessions[session_id]
+        pool_agent = connection.execute_query_one(
+            "SELECT agent_id FROM agent_registry WHERE status = 'ACTIVE' AND agent_id LIKE 'AGENT_POOL_%%' ORDER BY agent_id LIMIT 1"
+        )
+        if pool_agent:
+            sess['agent_id'] = pool_agent['agent_id']
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
+        body_out = json.dumps({
+            'success': True,
+            'session_id': session_id,
+            'user_id': str(user['user_id']),
+            'username': user['username'],
+            'has_agent': bool(pool_agent),
+        }).encode()
+        self.send_header('Content-Length', str(len(body_out)))
+        self.end_headers()
+        self.wfile.write(body_out)
+
+    def _handle_admin_agent_register(self):
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_json({'error': 'Invalid request body'}, 400)
+            return
+        agent_id = data.get('agent_id', '')
+        agent_name = data.get('agent_name', '')
+        admin_token = data.get('admin_token', '')
+        if not agent_id or not agent_name or not admin_token:
+            self._send_json({'error': 'agent_id, agent_name, and admin_token are required'}, 400)
+            return
+        try:
+            result = agent_api.register_agent_via_admin(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                admin_token=admin_token,
+                agent_type=data.get('agent_type'),
+                description=data.get('description'),
+                capabilities=data.get('capabilities'),
+                config=data.get('config'),
+            )
+            if result is None:
+                self._send_json({'error': 'Admin token verification failed'}, 403)
+                return
+            self._send_json(result)
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_agent_recover(self):
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_json({'error': 'Invalid request body'}, 400)
+            return
+        agent_id = data.get('agent_id', '')
+        recovery_code = data.get('recovery_code', '')
+        admin_token = data.get('admin_token', '')
+        if not agent_id or not recovery_code or not admin_token:
+            self._send_json({'error': 'agent_id, recovery_code, and admin_token are required'}, 400)
+            return
+        try:
+            result = agent_api.recover_agent_via_admin(
+                agent_id=agent_id,
+                recovery_code=recovery_code,
+                admin_token=admin_token,
+            )
+            if result is None:
+                self._send_json({'error': 'Recovery failed: invalid token, wrong recovery code, or agent still active'}, 403)
+                return
+            self._send_json(result)
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_token_generate(self):
+        try:
+            token = agent_api.generate_admin_token()
+            self._send_json({'admin_token': token})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_token_rotate(self):
+        try:
+            token = agent_api.generate_admin_token()
+            self._send_json({'admin_token': token})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_skill_list(self):
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        admin_token = qs.get('admin_token', [None])[0]
+        if not admin_token or not agent_api.verify_admin_token(admin_token):
+            self._send_json({'error': 'Invalid admin token'}, 403)
+            return
+        try:
+            from lib import skill_acquire_api
+            skill_type = qs.get('type', [None])[0]
+            runtime = qs.get('runtime', [None])[0]
+            keyword = qs.get('keyword', [None])[0]
+            agent_id = qs.get('agent_id', [None])[0]
+            visibility = qs.get('visibility', [None])[0]
+            results = skill_acquire_api.discover_skills(
+                skill_type=skill_type, runtime=runtime, keyword=keyword,
+            )
+            if agent_id:
+                filtered = []
+                for r in results:
+                    vis = r.get('visibility', 'SHARED')
+                    owner = r.get('owned_by_agent', '')
+                    if vis != 'PRIVATE' or owner == agent_id:
+                        filtered.append(r)
+                results = filtered
+            if visibility:
+                results = [r for r in results if r.get('visibility', 'SHARED') == visibility]
+            self._send_json({'skills': [_clean_row(r) for r in results]})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_skill_acquire(self):
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        admin_token = qs.get('admin_token', [None])[0]
+        if not admin_token or not agent_api.verify_admin_token(admin_token):
+            self._send_json({'error': 'Invalid admin token'}, 403)
+            return
+        path = parsed.path.rstrip('/')
+        parts = path.split('/')
+        try:
+            skill_id_idx = parts.index('skill') + 1
+            skill_id = parts[skill_id_idx]
+        except (ValueError, IndexError):
+            self._send_json({'error': 'Invalid skill ID'}, 400)
+            return
+        include_resource = qs.get('resource', ['0'])[0] == '1'
+        try:
+            from lib import skill_acquire_api
+            if include_resource:
+                result = skill_acquire_api.acquire_skill_full(skill_id)
+            else:
+                result = skill_acquire_api.acquire_skill_text(skill_id)
+            if result is None:
+                self._send_json({'error': 'Skill not found or not active'}, 404)
+                return
+            if include_resource and result.get('resource_zip'):
+                import base64
+                result['resource_zip'] = base64.b64encode(result['resource_zip']).decode('ascii')
+                result['resource_encoding'] = 'base64'
+            self._send_json(_clean_row(result))
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _verify_admin_token_from_body(self):
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            data = {}
+        token = data.get('admin_token', '')
+        if not token or not agent_api.verify_admin_token(token):
+            self._send_json({'error': 'Invalid admin token'}, 403)
+            return None
+        return data
+
+    def _handle_admin_skill_create(self):
+        data = self._verify_admin_token_from_body()
+        if data is None:
+            return
+        try:
+            from lib import skill_api
+            skill_id = skill_api.register_skill(
+                title=data.get('title', ''),
+                skill_name=data.get('skill_name', ''),
+                skill_version=data.get('skill_version', '1.0.0'),
+                skill_type=data.get('skill_type', 'CUSTOM'),
+                skill_format=data.get('skill_format', 'TEXT'),
+                text_content=data.get('text_content'),
+                skill_description=data.get('skill_description'),
+                runtime=data.get('runtime', 'PYTHON'),
+                parameters=data.get('parameters'),
+                dependencies=data.get('dependencies'),
+                category=data.get('category'),
+                owned_by_agent=data.get('owned_by_agent'),
+                visibility=data.get('visibility', 'SHARED'),
+            )
+            skill = skill_api.get_skill(skill_id)
+            self._send_json({'skill_id': skill_id, 'skill': _clean_row(skill)})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_skill_update(self):
+        data = self._verify_admin_token_from_body()
+        if data is None:
+            return
+        skill_id = data.get('skill_id', '')
+        if not skill_id:
+            self._send_json({'error': 'skill_id required'}, 400)
+            return
+        try:
+            from lib import skill_api
+            update_fields = {k: v for k, v in data.items() if k not in ('admin_token', 'skill_id')}
+            ok = skill_api.update_skill(skill_id, **update_fields)
+            if ok:
+                skill = skill_api.get_skill(skill_id)
+                self._send_json({'skill_id': skill_id, 'skill': _clean_row(skill)})
+            else:
+                self._send_json({'error': 'Skill not found or no changes'}, 404)
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_skill_delete(self):
+        data = self._verify_admin_token_from_body()
+        if data is None:
+            return
+        skill_id = data.get('skill_id', '')
+        if not skill_id:
+            self._send_json({'error': 'skill_id required'}, 400)
+            return
+        try:
+            from lib import skill_api
+            ok = skill_api.delete_skill(skill_id)
+            if ok:
+                self._send_json({'skill_id': skill_id, 'deleted': True})
+            else:
+                self._send_json({'error': 'Skill not found'}, 404)
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_skill_upload(self):
+        data = self._verify_admin_token_from_body()
+        if data is None:
+            return
+        skill_id = data.get('skill_id', '')
+        if not skill_id:
+            self._send_json({'error': 'skill_id required'}, 400)
+            return
+        filename = data.get('filename', '')
+        content_b64 = data.get('content_base64', '')
+        if not filename or not content_b64:
+            self._send_json({'error': 'filename and content_base64 required'}, 400)
+            return
+        try:
+            import base64
+            content = base64.b64decode(content_b64)
+            from lib import skill_api
+            result = skill_api.upload_skill_resource(skill_id, filename, content)
+            if result:
+                self._send_json({'skill_id': skill_id, 'upload': _clean_row(result)})
+            else:
+                self._send_json({'error': 'Skill not found'}, 404)
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_portal_chat_new(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        sess = session_data[1]
+        agent_id = sess.get('agent_id', '')
+        username = sess.get('username', '')
+        user_id = sess.get('user_id', '')
+        if not agent_id:
+            self._send_json({'success': False, 'error': 'No agent assigned'}, 400)
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+            fork_context_id = data.get('fork_context_id', '')
+            agent_session_id = sess.get('agent_session_id', '')
+            connection.set_agent_context(None)
+            if agent_session_id:
+                agent_api.end_session(agent_session_id)
+            new_session = agent_api.create_session(agent_id, owner_user_id=user_id)
+            sess['agent_session_id'] = new_session
+            ws = workspace_api.create_workspace(owner_user_id=username, name='New Chat', workspace_type='CONVERSATION')
+            sess['workspace_id'] = ws
+            if fork_context_id:
+                branch = branch_api.fork_branch(
+                    workspace_id=ws,
+                    fork_context_id=fork_context_id,
+                    branch_type='EXPLORATION',
+                    agent_id=agent_id,
+                )
+                sess['branch_id'] = branch.get('branch_id', '')
+            _set_portal_agent_context(sess)
+            self._send_json({'success': True})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_chat_rename(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            ws_id = data.get('workspace_id')
+            new_name = data.get('name', '').strip()
+            if ws_id is None or not new_name:
+                self._send_json({'success': False, 'error': 'workspace_id and name required'}, 400)
+                return
+            connection.set_agent_context(None)
+            connection.execute(
+                "UPDATE workspaces SET workspace_alias = %s, updated_at = CURRENT_TIMESTAMP WHERE workspace_id = %s",
+                (new_name, int(ws_id)),
+            )
+            if session_data[1].get('agent_id'):
+                connection.set_agent_context(session_data[1]['agent_id'])
+            self._send_json({'success': True})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_chat_delete(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        sess = session_data[1]
+        username = sess.get('username', '')
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            ws_id = data.get('workspace_id')
+            if not ws_id:
+                self._send_json({'success': False, 'error': 'workspace_id required'}, 400)
+                return
+            if sess.get('agent_id'):
+                connection.set_agent_context(sess['agent_id'])
+            ws = connection.execute_query_one(
+                "SELECT workspace_id FROM workspaces WHERE workspace_id = %s AND owner_user_id = %s",
+                (int(ws_id), username),
+            )
+            if not ws:
+                self._send_json({'success': False, 'error': 'Workspace not found'}, 404)
+                return
+            connection.execute("DELETE FROM workspace_context WHERE workspace_id = %s", (int(ws_id),))
+            connection.execute("DELETE FROM workspaces WHERE workspace_id = %s", (int(ws_id),))
+            if sess.get('workspace_id') == int(ws_id):
+                sess.pop('workspace_id', None)
+            self._send_json({'success': True})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_chat_switch(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        sess = session_data[1]
+        username = sess.get('username', '')
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            ws_id = data.get('workspace_id')
+            if not ws_id:
+                self._send_json({'success': False, 'error': 'workspace_id required'}, 400)
+                return
+            if sess.get('agent_id'):
+                connection.set_agent_context(sess['agent_id'])
+            ws = connection.execute_query_one(
+                "SELECT workspace_id FROM workspaces WHERE workspace_id = %s AND owner_user_id = %s AND status = 'ACTIVE'",
+                (int(ws_id), username),
+            )
+            if not ws:
+                self._send_json({'success': False, 'error': 'Workspace not found'}, 404)
+                return
+            sess['workspace_id'] = int(ws_id)
+            self._send_json({'success': True})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_api_get(self, path, qs):
+        if path not in PUBLIC_API:
+            session_data = _get_session(self)
+            if not session_data:
+                self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+                return
+            sess = session_data[1]
+        try:
+            if path == '/portal/api/user/profile':
+                session_data = _get_session(self)
+                if session_data:
+                    connection.set_agent_context(None)
+                    profile = user_api.get_user_profile(session_data[1].get('user_id', ''))
+                    if session_data[1].get('agent_id'):
+                        connection.set_agent_context(session_data[1]['agent_id'])
+                    self._send_json(_clean_row(profile) if profile else {'error': 'User not found'})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/agent/status':
+                session_data = _get_session(self)
+                if session_data:
+                    agent_id = session_data[1].get('agent_id', '')
+                    if agent_id:
+                        agent = agent_api.get_agent(agent_id)
+                        self._send_json(_clean_row(agent) if agent else {'error': 'Agent not found'})
+                    else:
+                        self._send_json({'has_agent': False})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/chat/history':
+                session_data = _get_session(self)
+                if session_data:
+                    username = session_data[1].get('username', '')
+                    workspace_id = session_data[1].get('workspace_id', '')
+                    if workspace_id:
+                        connection.set_agent_context(None)
+                        rows = connection.execute_query("""
+                            SELECT context_id, context_data FROM workspace_context
+                            WHERE context_type = 'CHAT_MESSAGE' AND workspace_id = %s
+                            ORDER BY created_at ASC
+                        """, (workspace_id,))
+                        messages = []
+                        for r in rows:
+                            try:
+                                cd = r.get('context_data', '{}')
+                                d = cd if isinstance(cd, dict) else json.loads(cd)
+                                d['context_id'] = r.get('context_id', '')
+                                messages.append(d)
+                            except Exception:
+                                pass
+                        if session_data[1].get('agent_id'):
+                            connection.set_agent_context(session_data[1]['agent_id'])
+                        self._send_json({'messages': messages, 'workspace_id': workspace_id})
+                    else:
+                        self._send_json({'messages': []})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/chat/sessions':
+                session_data = _get_session(self)
+                if session_data:
+                    username = session_data[1].get('username', '')
+                    current_ws = session_data[1].get('workspace_id', '')
+                    connection.set_agent_context(None)
+                    rows = connection.execute_query("""
+                        SELECT w.workspace_id, w.workspace_name, w.workspace_alias,
+                               to_char(w.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+                               (SELECT COUNT(*) FROM workspace_context wc WHERE wc.workspace_id = w.workspace_id AND wc.context_type = 'CHAT_MESSAGE') AS msg_count
+                        FROM workspaces w
+                        WHERE w.owner_user_id = %s AND w.workspace_type = 'CONVERSATION' AND w.status = 'ACTIVE'
+                        ORDER BY w.created_at DESC
+                    """, (username,))
+                    sessions_list = []
+                    for r in rows:
+                        sessions_list.append({
+                            'workspace_id': r['workspace_id'],
+                            'name': r.get('workspace_alias') or r.get('workspace_name', ''),
+                            'created_at': r.get('created_at', ''),
+                            'msg_count': r.get('msg_count', 0),
+                            'is_current': r['workspace_id'] == current_ws,
+                        })
+                    if session_data[1].get('agent_id'):
+                        connection.set_agent_context(session_data[1]['agent_id'])
+                    self._send_json({'sessions': sessions_list})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/user/workspaces':
+                session_data = _get_session(self)
+                if session_data:
+                    connection.set_agent_context(None)
+                    wss = user_api.get_user_workspaces(session_data[1].get('user_id', ''))
+                    if session_data[1].get('agent_id'):
+                        connection.set_agent_context(session_data[1]['agent_id'])
+                    self._send_json({'workspaces': [_clean_row(w) for w in wss]})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/user/memories':
+                session_data = _get_session(self)
+                if session_data:
+                    connection.set_agent_context(None)
+                    mems = user_api.get_user_memories(session_data[1].get('user_id', ''))
+                    if session_data[1].get('agent_id'):
+                        connection.set_agent_context(session_data[1]['agent_id'])
+                    self._send_json({'memories': [_clean_row(m) for m in mems]})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            else:
+                self._send_error(404, 'Not found')
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
 
     def _serve_template(self, filename):
         filepath = os.path.join(TEMPLATES_DIR, filename)
@@ -520,6 +2020,26 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_error(500, str(e))
 
 
+SIM_REPLIES = {
+    'hello': 'Hello! I am your AI Agent. How can I help you today?',
+    '你好': '你好！我是你的 AI Agent，有什么可以帮你的吗？',
+    'help': 'I can help you manage memories, search knowledge, organize tasks, and collaborate with other agents. What would you like to do?',
+    'memory': 'I can store and retrieve your memories. Just tell me what you want to remember or recall.',
+    'status': 'I am currently active and ready to assist you. All systems are operational.',
+    'skill': 'I have access to various skills including knowledge search, memory management, task planning, and workspace organization.',
+    'workspace': 'Your workspace is ready. I can help you organize your context and collaborate with team members.',
+}
+
+
+def _generate_sim_reply(message, agent_id, sess):
+    msg_lower = message.lower().strip()
+    for key, reply in SIM_REPLIES.items():
+        if key in msg_lower:
+            return reply
+    agent_name = sess.get('agent_name', 'Agent')
+    return f"[{agent_name}] I received your message: \"{message}\". I'm processing it and will respond more intelligently once connected to a real LLM backend. For now, I can help with basic memory, knowledge, and workspace operations."
+
+
 def main():
     cfg = _load_server_config()
     host = getattr(cfg, 'host', '0.0.0.0')
@@ -532,7 +2052,8 @@ def main():
         print("[server] WARNING: Database connection failed: {}".format(e))
 
     server = HTTPServer((host, port), VisHandler)
-    print("[server] PostgreSQL Memory System v{} visualization server".format(VERSION))
+    server.daemon_threads = True
+    print("[server] AI Agent Infra v{} visualization server".format(VERSION))
     print("[server] Listening on http://{}:{}".format(host, port))
     try:
         server.serve_forever()
@@ -543,4 +2064,5 @@ def main():
 
 
 if __name__ == '__main__':
+    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
     main()

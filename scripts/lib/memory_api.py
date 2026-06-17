@@ -1,13 +1,14 @@
-"""PostgreSQL Memory System v2.3.1 - Memory API
+"""AI Agent Infra v3.6.2 - PG Community Edition - Memory API
 
-CRUD operations on entities with entity_type='MEMORY'.
+Unified memory management using psycopg2 with %s positional binds.
+Operates on the entities table (entity_type='MEMORY').
 """
 
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from .connection import execute, execute_query, execute_query_one, execute_insert_returning_id
+from .connection import (execute_query, execute_query_one, execute,
+                         execute_insert_returning_id)
 
 logger = logging.getLogger(__name__)
 
@@ -25,34 +26,30 @@ def create_memory(
 ) -> str:
     sql = """
         INSERT INTO entities (entity_type, title, content, summary, category,
-                              importance, status, owned_by_agent, source_agent,
-                              visibility, workspace_id)
-        VALUES ('MEMORY', %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s)
+                              importance, status, owned_by_agent, source_agent, visibility,
+                              workspace_id)
+        VALUES ('MEMORY', %s, %s, %s, %s,
+                %s, 'ACTIVE', %s, %s, %s, %s)
         RETURNING entity_id
     """
-    params = (
-        title[:500],
-        content,
-        summary,
-        category,
-        importance,
-        owned_by_agent,
-        source_agent,
-        visibility,
-        workspace_id,
-    )
-    return execute_insert_returning_id(sql, params)
+    return execute_insert_returning_id(sql, [
+        title[:500], content, summary, category,
+        importance, owned_by_agent, source_agent, visibility, workspace_id,
+    ])
 
 
 def get_memory(entity_id: str) -> Optional[Dict[str, Any]]:
     sql = """
         SELECT entity_id, entity_type, title, content, summary, category,
                importance, status, owned_by_agent, source_agent, visibility,
-               retrieval_count, created_at, updated_at, expires_at
+               retrieval_count,
+               TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+               TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI:SS') AS updated_at,
+               TO_CHAR(expires_at, 'YYYY-MM-DD HH24:MI:SS') AS expires_at
         FROM entities
         WHERE entity_id = %s AND entity_type = 'MEMORY'
     """
-    row = execute_query_one(sql, (entity_id,))
+    row = execute_query_one(sql, [entity_id])
     if row is None:
         return None
     return _row_to_dict(row)
@@ -71,27 +68,23 @@ def update_memory(entity_id: str, **kwargs) -> bool:
     if not updates:
         return False
 
-    set_parts = ["{} = %s".format(k) for k in updates]
-    set_parts.append("updated_at = NOW()")
-    values = list(updates.values())
-    values.append(entity_id)
+    set_parts = [f"{k} = %s" for k in updates]
+    set_parts.append("updated_at = CURRENT_TIMESTAMP")
+    values = list(updates.values()) + [entity_id]
 
-    sql = "UPDATE entities SET {} WHERE entity_id = %s AND entity_type = 'MEMORY'".format(
-        ', '.join(set_parts)
-    )
+    sql = f"UPDATE entities SET {', '.join(set_parts)} WHERE entity_id = %s AND entity_type = 'MEMORY'"
     return execute(sql, values) > 0
 
 
 def delete_memory(entity_id: str) -> bool:
-    execute("DELETE FROM entity_tags WHERE entity_id = %s AND entity_type = 'MEMORY'", (entity_id,))
-    execute("DELETE FROM entity_edges WHERE source_id = %s OR target_id = %s",
-            (entity_id, entity_id))
-    execute("DELETE FROM entity_embeddings WHERE entity_id = %s AND entity_type = 'MEMORY'", (entity_id,))
+    execute("DELETE FROM entity_tags WHERE entity_id = %s AND entity_type = 'MEMORY'", [entity_id])
+    execute("DELETE FROM entity_edges WHERE source_id = %s AND source_type = 'MEMORY'", [entity_id])
+    execute("DELETE FROM entity_embeddings WHERE entity_id = %s AND entity_type = 'MEMORY'", [entity_id])
     sql = "DELETE FROM entities WHERE entity_id = %s AND entity_type = 'MEMORY'"
-    return execute(sql, (entity_id,)) > 0
+    return execute(sql, [entity_id]) > 0
 
 
-def search_memories(
+def list_memories(
     keyword: Optional[str] = None,
     category: Optional[str] = None,
     visibility: Optional[str] = None,
@@ -102,12 +95,11 @@ def search_memories(
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
     conditions = ["entity_type = 'MEMORY'"]
-    params: List[Any] = []
+    params: list = []
 
     if keyword:
-        conditions.append("(UPPER(title) LIKE UPPER(%s) OR UPPER(content) LIKE UPPER(%s))")
-        like_val = '%' + keyword + '%'
-        params.extend([like_val, like_val])
+        conditions.append("(title ILIKE %s OR content ILIKE %s)")
+        params.extend([f"%{keyword}%", f"%{keyword}%"])
     if category:
         conditions.append("category = %s")
         params.append(category)
@@ -126,89 +118,89 @@ def search_memories(
         conditions.append("workspace_id = %s")
         params.append(workspace_id)
 
-    where = ' AND '.join(conditions)
+    where = " AND ".join(conditions)
     params.extend([limit, offset])
-
-    sql = """
+    sql = f"""
         SELECT entity_id, entity_type, title, content, summary, category,
                importance, status, owned_by_agent, source_agent, visibility,
-               retrieval_count, created_at, updated_at
+               retrieval_count,
+               TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at
         FROM entities
-        WHERE {}
+        WHERE {where}
         ORDER BY created_at DESC
         LIMIT %s OFFSET %s
-    """.format(where)
-
+    """
     return [_row_to_dict(r) for r in execute_query(sql, params)]
 
 
-def get_agent_memories(agent_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+def search_memories(
+    keyword: Optional[str] = None,
+    category: Optional[str] = None,
+    visibility: Optional[str] = None,
+    owned_by_agent: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    isolation_mode: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    return list_memories(keyword=keyword, category=category, visibility=visibility,
+                         owned_by_agent=owned_by_agent, workspace_id=workspace_id,
+                         isolation_mode=isolation_mode, limit=limit, offset=offset)
+
+
+def archive_memory(entity_id: str) -> bool:
     sql = """
-        SELECT entity_id, entity_type, title, content, summary, category,
-               importance, status, owned_by_agent, source_agent, visibility,
-               retrieval_count, created_at
+        UPDATE entities SET status = 'ARCHIVED', updated_at = CURRENT_TIMESTAMP
+        WHERE entity_id = %s AND entity_type = 'MEMORY'
+    """
+    return execute(sql, [entity_id]) > 0
+
+
+def restore_memory(entity_id: str) -> bool:
+    sql = """
+        UPDATE entities SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP
+        WHERE entity_id = %s AND entity_type = 'MEMORY'
+    """
+    return execute(sql, [entity_id]) > 0
+
+
+def get_memory_stats() -> Dict[str, Any]:
+    row = execute_query_one("""
+        SELECT COUNT(*) AS total,
+               COUNT(*) FILTER (WHERE status = 'ACTIVE') AS active,
+               COUNT(*) FILTER (WHERE status = 'ARCHIVED') AS archived,
+               COUNT(DISTINCT category) AS category_count,
+               AVG(importance) AS avg_importance
         FROM entities
         WHERE entity_type = 'MEMORY'
-          AND (visibility = 'SHARED' OR visibility = 'PUBLIC' OR owned_by_agent = %s)
-        ORDER BY created_at DESC
-        LIMIT %s
-    """
-    return [_row_to_dict(r) for r in execute_query(sql, (agent_id, limit))]
+    """)
+    if row:
+        return {
+            "total": int(row.get("total", 0)),
+            "active": int(row.get("active", 0)),
+            "archived": int(row.get("archived", 0)),
+            "category_count": int(row.get("category_count", 0)),
+            "avg_importance": float(row.get("avg_importance", 0) or 0),
+        }
+    return {"total": 0, "active": 0, "archived": 0, "category_count": 0, "avg_importance": 0}
 
 
-def count_memories(category: Optional[str] = None) -> int:
-    if category:
-        sql = "SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'MEMORY' AND category = %s"
-        row = execute_query_one(sql, (category,))
-    else:
-        sql = "SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'MEMORY'"
-        row = execute_query_one(sql)
-    return row['cnt'] if row else 0
-
-
-def add_memory_tags(entity_id: str, tag_names: List[str]) -> int:
-    added = 0
-    for tag_name in tag_names:
-        execute(
-            "INSERT INTO tags (tag_name, usage_count) VALUES (%s, 0) ON CONFLICT (tag_name) DO NOTHING",
-            (tag_name,)
+def fuse_similar_memories(
+    entity_ids: Optional[list] = None,
+    similarity_threshold: float = 0.9,
+    strategy: str = "merge",
+) -> Dict[str, Any]:
+    try:
+        row = execute_query_one(
+            "SELECT memory_fusion.fuse_similar(%s, %s, %s) AS result",
+            [entity_ids, similarity_threshold, strategy]
         )
-        tag_row = execute_query_one(
-            "SELECT tag_id FROM tags WHERE tag_name = %s",
-            (tag_name,),
-        )
-        if tag_row is None:
-            continue
-        tag_id = tag_row["tag_id"]
-        affected = execute(
-            "INSERT INTO entity_tags (entity_id, entity_type, tag_id) VALUES (%s, 'MEMORY', %s) ON CONFLICT DO NOTHING",
-            (entity_id, tag_id)
-        )
-        if affected > 0:
-            added += 1
-    return added
-
-
-def get_memory_tags(entity_id: str) -> List[Dict[str, Any]]:
-    sql = """
-        SELECT t.tag_id, t.tag_name, t.tag_group
-        FROM entity_tags et
-        JOIN tags t ON et.tag_id = t.tag_id
-        WHERE et.entity_id = %s AND et.entity_type = 'MEMORY'
-    """
-    rows = execute_query(sql, (entity_id,))
-    return [
-        {"tag_id": r["tag_id"], "tag_name": r["tag_name"], "tag_group": r.get("tag_group")}
-        for r in rows
-    ]
-
-
-def remove_memory_tag(entity_id: str, tag_id: int) -> bool:
-    sql = """
-        DELETE FROM entity_tags
-        WHERE entity_id = %s AND entity_type = 'MEMORY' AND tag_id = %s
-    """
-    return execute(sql, (entity_id, tag_id)) > 0
+        if row and row.get("result"):
+            import json
+            return json.loads(row["result"]) if isinstance(row["result"], str) else row["result"]
+    except Exception as e:
+        logger.error("memory_fusion.fuse_similar call failed: %s", e)
+    return {"fused": 0, "details": []}
 
 
 def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:

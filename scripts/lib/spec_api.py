@@ -1,15 +1,20 @@
-"""PostgreSQL Memory System v2.3.1 - Spec API
+"""AI Agent Infra v3.6.2 - PG Community Edition - Spec API
 
-Spec Driven Development: spec CRUD, plan derivation, spec-plan linking,
-validation, and spec derivation chains.
-Operates on entities (entity_type='SPEC') + spec_meta + spec_plan_links.
+Spec Driven Development: spec CRUD, plan linkage, validation,
+derivation, and spec status management.
 """
 
 import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from .connection import execute, execute_query, execute_query_one, execute_insert_returning_id
+from .connection import (
+    execute,
+    execute_query,
+    execute_query_one,
+    execute_insert_returning_id,
+    sanitize_row,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,285 +35,284 @@ def _row_to_dict(row: Any) -> Dict[str, Any]:
 
 
 def create_spec(
-    entity_data: Dict[str, Any],
-    spec_meta: Dict[str, Any],
-    workspace_id: Optional[int] = None,
-) -> int:
+    title: str,
+    content: Optional[str] = None,
+    summary: Optional[str] = None,
+    category: Optional[str] = None,
+    importance: int = 5,
+    owned_by_agent: Optional[str] = None,
+    visibility: str = "SHARED",
+    workspace_id: Optional[str] = None,
+    spec_scope: Optional[str] = None,
+    complexity: str = "MEDIUM",
+    acceptance_criteria: Optional[Any] = None,
+    constraints: Optional[Any] = None,
+    parent_spec_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
+) -> str:
     entity_sql = """
         INSERT INTO entities (entity_type, title, content, summary, category,
-                              importance, status, owned_by_agent, source_agent,
-                              visibility, retrieval_count, workspace_id)
-        VALUES ('SPEC', %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, 0, %s)
+                              status, owned_by_agent, visibility,
+                              importance, workspace_id, created_at, updated_at)
+        VALUES ('SPEC', %s, %s, %s, %s,
+                'ACTIVE', %s, %s,
+                %s, %s, NOW(), NOW())
         RETURNING entity_id
     """
-    entity_params = (
-        entity_data.get('title', '')[:500],
-        entity_data.get('content'),
-        entity_data.get('summary'),
-        entity_data.get('category'),
-        entity_data.get('importance', 5),
-        entity_data.get('status', 'ACTIVE'),
-        entity_data.get('owned_by_agent'),
-        entity_data.get('source_agent'),
-        entity_data.get('visibility', 'PRIVATE'),
-        workspace_id,
-    )
-    entity_id = execute_insert_returning_id(entity_sql, entity_params)
+    entity_id = execute_insert_returning_id(entity_sql, (
+        title, content, summary, category,
+        owned_by_agent, visibility,
+        importance, workspace_id,
+    ))
 
-    ac_val = spec_meta.get('acceptance_criteria')
-    if isinstance(ac_val, (dict, list)):
-        ac_val = json.dumps(ac_val)
-    sc_val = spec_meta.get('spec_constraints')
-    if isinstance(sc_val, (dict, list)):
-        sc_val = json.dumps(sc_val)
+    ac_val = json.dumps(acceptance_criteria) if acceptance_criteria and not isinstance(acceptance_criteria, str) else acceptance_criteria
+    cs_val = json.dumps(constraints) if constraints and not isinstance(constraints, str) else constraints
 
     meta_sql = """
-        INSERT INTO spec_meta (entity_id, spec_version, spec_status,
-                               acceptance_criteria, spec_constraints,
-                               spec_scope, complexity, parent_spec_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO spec_meta (entity_id, entity_type, spec_version, spec_status,
+                               acceptance_criteria, spec_constraints, spec_scope,
+                               complexity, parent_spec_id, branch_id)
+        VALUES (%s, 'SPEC', 1, 'DRAFT', %s, %s, %s, %s, %s, %s)
     """
-    meta_params = (
-        entity_id,
-        spec_meta.get('spec_version', 1),
-        spec_meta.get('spec_status', 'DRAFT'),
-        ac_val,
-        sc_val,
-        spec_meta.get('spec_scope'),
-        spec_meta.get('complexity', 'MEDIUM'),
-        spec_meta.get('parent_spec_id'),
-    )
-    execute(meta_sql, meta_params)
+    execute(meta_sql, (
+        entity_id, ac_val, cs_val,
+        spec_scope, complexity, parent_spec_id, branch_id,
+    ))
+
     return entity_id
 
 
-def get_spec(spec_id: int) -> Optional[Dict[str, Any]]:
+def get_spec(entity_id: str) -> Optional[Dict[str, Any]]:
     sql = """
-        SELECT e.entity_id, e.entity_type, e.title, e.content, e.summary, e.category,
-               e.importance, e.status, e.owned_by_agent, e.source_agent, e.visibility,
-               e.retrieval_count, e.expires_at, e.created_at, e.updated_at,
+        SELECT e.entity_id, e.entity_type, e.title, e.content, e.summary,
+               e.category, e.status, e.owned_by_agent, e.visibility, e.importance,
+               e.workspace_id, e.created_at, e.updated_at,
                sm.spec_version, sm.spec_status, sm.acceptance_criteria,
-               sm.spec_constraints, sm.spec_scope, sm.complexity, sm.parent_spec_id
+               sm.spec_constraints, sm.spec_scope, sm.complexity, sm.parent_spec_id,
+               sm.branch_id
         FROM entities e
-        JOIN spec_meta sm ON sm.entity_id = e.entity_id
+        LEFT JOIN spec_meta sm ON sm.entity_id = e.entity_id
+                               AND sm.entity_type = e.entity_type
         WHERE e.entity_id = %s AND e.entity_type = 'SPEC'
     """
-    row = execute_query_one(sql, (spec_id,))
+    row = execute_query_one(sql, (entity_id,))
     if row is None:
         return None
-    return _row_to_dict(row)
+
+    result = _row_to_dict(row)
+
+    links_sql = """
+        SELECT link_id, spec_id, plan_id, link_type, link_strength
+        FROM spec_plan_links
+        WHERE spec_id = %s
+    """
+    links = execute_query(links_sql, (entity_id,))
+    result["plan_links"] = [sanitize_row(l) for l in links]
+    return result
 
 
-def update_spec(spec_id: int, entity_data: Optional[Dict[str, Any]] = None,
-                spec_meta: Optional[Dict[str, Any]] = None) -> bool:
+def update_spec(entity_id: str, **kwargs: Any) -> bool:
     entity_fields = {"title", "content", "summary", "category", "importance",
-                     "status", "visibility", "expires_at"}
-    meta_fields = {"spec_version", "spec_status", "acceptance_criteria",
-                   "spec_constraints", "spec_scope", "complexity"}
+                     "visibility", "status"}
+    meta_fields = {"spec_status", "spec_scope", "complexity",
+                   "acceptance_criteria", "constraints", "branch_id"}
+
+    entity_updates: Dict[str, Any] = {}
+    entity_values: List[Any] = []
+    meta_updates: Dict[str, Any] = {}
+    meta_values: List[Any] = []
+
+    for k, v in kwargs.items():
+        lk = k.lower()
+        if lk in entity_fields and v is not None:
+            entity_updates[lk] = "%s"
+            entity_values.append(v)
+        elif lk in meta_fields and v is not None:
+            if lk in ("acceptance_criteria", "constraints") and not isinstance(v, str):
+                meta_updates[lk] = "%s"
+                meta_values.append(json.dumps(v))
+            else:
+                meta_updates[lk] = "%s"
+                meta_values.append(v)
 
     affected = 0
 
-    if entity_data:
-        entity_updates = {}
-        entity_values: List[Any] = []
-        for k, v in entity_data.items():
-            lk = k.lower()
-            if lk in entity_fields:
-                entity_updates[lk] = "%s"
-                entity_values.append(v)
-        if entity_updates:
-            set_parts = ["{} = {}".format(k, v) for k, v in entity_updates.items()]
-            set_parts.append("updated_at = NOW()")
-            entity_values.append(spec_id)
-            sql = "UPDATE entities SET {} WHERE entity_id = %s AND entity_type = 'SPEC'".format(
-                ', '.join(set_parts)
-            )
-            affected += execute(sql, entity_values)
+    if entity_updates:
+        set_parts = ["{} = {}".format(k, v) for k, v in entity_updates.items()]
+        set_parts.append("updated_at = NOW()")
+        entity_values.append(entity_id)
+        sql = "UPDATE entities SET {} WHERE entity_id = %s AND entity_type = 'SPEC'".format(
+            ", ".join(set_parts)
+        )
+        affected += execute(sql, entity_values)
 
-    if spec_meta:
-        meta_updates = {}
-        meta_values: List[Any] = []
-        for k, v in spec_meta.items():
-            lk = k.lower()
-            if lk in meta_fields:
-                if lk in _JSON_COLUMNS and isinstance(v, (dict, list)):
-                    v = json.dumps(v)
-                meta_updates[lk] = "%s"
-                meta_values.append(v)
-        if meta_updates:
-            set_parts = ["{} = {}".format(k, v) for k, v in meta_updates.items()]
-            meta_values.append(spec_id)
-            sql = "UPDATE spec_meta SET {} WHERE entity_id = %s".format(
-                ', '.join(set_parts)
-            )
-            affected += execute(sql, meta_values)
+    if meta_updates:
+        col_map = {"constraints": "spec_constraints"}
+        actual_updates = {}
+        for k, v in meta_updates.items():
+            actual_key = col_map.get(k, k)
+            actual_updates[actual_key] = v
+        set_parts = ["{} = {}".format(k, v) for k, v in actual_updates.items()]
+        meta_values.append(entity_id)
+        sql = "UPDATE spec_meta SET {} WHERE entity_id = %s AND entity_type = 'SPEC'".format(
+            ", ".join(set_parts)
+        )
+        affected += execute(sql, meta_values)
 
     return affected > 0
 
 
-def list_specs(status: Optional[str] = None,
-               workspace_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def delete_spec(entity_id: str) -> bool:
+    try:
+        execute("DELETE FROM spec_plan_links WHERE spec_id = %s", (entity_id,))
+        execute("DELETE FROM spec_meta WHERE entity_id = %s AND entity_type = 'SPEC'", (entity_id,))
+        execute("DELETE FROM entity_tags WHERE entity_id = %s AND entity_type = 'SPEC'", (entity_id,))
+        execute("DELETE FROM entity_edges WHERE source_id = %s AND source_type = 'SPEC'", (entity_id,))
+        execute("DELETE FROM entity_embeddings WHERE entity_id = %s AND entity_type = 'SPEC'", (entity_id,))
+        affected = execute("DELETE FROM entities WHERE entity_id = %s AND entity_type = 'SPEC'", (entity_id,))
+        return affected > 0
+    except Exception:
+        return False
+
+
+def list_specs(
+    spec_scope: Optional[str] = None,
+    spec_status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
     conditions = ["e.entity_type = 'SPEC'"]
     params: List[Any] = []
 
-    if status:
+    if spec_scope:
+        conditions.append("sm.spec_scope = %s")
+        params.append(spec_scope)
+    if spec_status:
         conditions.append("sm.spec_status = %s")
-        params.append(status)
-    if workspace_id is not None:
-        conditions.append("e.workspace_id = %s")
-        params.append(workspace_id)
+        params.append(spec_status)
 
-    where = ' AND '.join(conditions)
-
+    where = " AND ".join(conditions)
+    params.extend([limit, offset])
     sql = """
-        SELECT e.entity_id, e.entity_type, e.title, e.content, e.summary, e.category,
-               e.importance, e.status, e.owned_by_agent, e.source_agent, e.visibility,
-               e.retrieval_count, e.created_at, e.updated_at,
-               sm.spec_version, sm.spec_status, sm.acceptance_criteria,
-               sm.spec_constraints, sm.spec_scope, sm.complexity, sm.parent_spec_id
+        SELECT e.entity_id, e.title, e.category, e.status, e.importance,
+               sm.spec_version, sm.spec_status, sm.spec_scope, sm.complexity,
+               sm.branch_id
         FROM entities e
         JOIN spec_meta sm ON sm.entity_id = e.entity_id
-        WHERE {}
+                          AND sm.entity_type = e.entity_type
+        WHERE {where}
         ORDER BY e.created_at DESC
-    """.format(where)
-
+        LIMIT %s OFFSET %s
+    """.format(where=where)
     return [_row_to_dict(r) for r in execute_query(sql, params)]
 
 
-def create_plan_from_spec(spec_id: int, plan_title: str,
-                          plan_description: str) -> int:
-    spec = get_spec(spec_id)
-    if spec is None:
-        raise ValueError("Spec not found: {}".format(spec_id))
-
-    plan_sql = """
-        INSERT INTO task_plans (goal, agent_id, priority, status, workspace_id)
-        VALUES (%s, %s, %s, 'PENDING', %s)
-        RETURNING plan_id
-    """
-    plan_id = execute_insert_returning_id(plan_sql, (
-        plan_title,
-        spec.get('owned_by_agent'),
-        5,
-        spec.get('workspace_id'),
-    ), id_column="plan_id")
-
-    link_sql = """
-        INSERT INTO spec_plan_links (spec_id, plan_id, link_type, link_strength)
-        VALUES (%s, %s, 'DRIVES', 1.0)
-    """
-    execute(link_sql, (spec_id, plan_id))
-
-    return plan_id
-
-
-def link_spec_to_plan(spec_id: int, plan_id: int,
-                      link_type: str = 'DRIVES',
-                      strength: float = 1.0) -> int:
+def link_spec_to_plan(
+    spec_id: str,
+    plan_id: str,
+    link_type: str,
+    strength: float = 1.0,
+) -> str:
     sql = """
         INSERT INTO spec_plan_links (spec_id, plan_id, link_type, link_strength)
         VALUES (%s, %s, %s, %s)
-        ON CONFLICT (spec_id, plan_id, link_type) DO NOTHING
+        ON CONFLICT DO NOTHING
         RETURNING link_id
     """
-    result = execute_insert_returning_id(sql, (spec_id, plan_id, link_type, strength),
-                                         id_column="link_id")
+    result = execute_insert_returning_id(sql, (spec_id, plan_id, link_type, strength), id_column="link_id")
     if result is None:
         existing = execute_query_one(
             "SELECT link_id FROM spec_plan_links WHERE spec_id = %s AND plan_id = %s AND link_type = %s",
             (spec_id, plan_id, link_type),
         )
-        return existing['link_id'] if existing else None
+        return existing["link_id"] if existing else None
     return result
 
 
-def get_spec_plan_links(spec_id: int) -> List[Dict[str, Any]]:
+def get_spec_plan_links(spec_id: str) -> List[Dict[str, Any]]:
     sql = """
         SELECT spl.link_id, spl.spec_id, spl.plan_id, spl.link_type,
-               spl.link_strength, spl.created_at,
-               tp.goal, tp.status AS plan_status, tp.priority, tp.agent_id
+               spl.link_strength,
+               tp.goal, tp.status AS plan_status
         FROM spec_plan_links spl
         JOIN task_plans tp ON tp.plan_id = spl.plan_id
         WHERE spl.spec_id = %s
-        ORDER BY spl.created_at DESC
+        ORDER BY spl.link_id
     """
-    return [_row_to_dict(r) for r in execute_query(sql, (spec_id,))]
+    return [sanitize_row(r) for r in execute_query(sql, (spec_id,))]
 
 
-def validate_plan_against_spec(spec_id: int, plan_id: int) -> Dict[str, Any]:
+def unlink_spec_from_plan(spec_id: str, plan_id: str, link_type: Optional[str] = None) -> bool:
+    if link_type:
+        sql = "DELETE FROM spec_plan_links WHERE spec_id = %s AND plan_id = %s AND link_type = %s"
+        return execute(sql, (spec_id, plan_id, link_type)) > 0
+    sql = "DELETE FROM spec_plan_links WHERE spec_id = %s AND plan_id = %s"
+    return execute(sql, (spec_id, plan_id)) > 0
+
+
+def validate_spec(spec_id: str) -> Dict[str, Any]:
     spec = get_spec(spec_id)
     if spec is None:
         return {"valid": False, "errors": ["Spec not found: {}".format(spec_id)], "warnings": []}
 
-    plan_sql = "SELECT plan_id, goal, status, priority, agent_id FROM task_plans WHERE plan_id = %s"
-    plan = execute_query_one(plan_sql, (plan_id,))
-    if plan is None:
-        return {"valid": False, "errors": ["Plan not found: {}".format(plan_id)], "warnings": []}
-
     errors: List[str] = []
     warnings: List[str] = []
 
-    spec_status = spec.get('spec_status')
-    if spec_status not in ('APPROVED', 'IMPLEMENTED'):
-        errors.append("Spec status is {} but must be APPROVED or IMPLEMENTED to validate plans against".format(spec_status))
+    if not spec.get("title"):
+        errors.append("Spec has no title")
 
-    acceptance_criteria = spec.get('acceptance_criteria')
+    spec_status = spec.get("spec_status")
+    if spec_status not in ("DRAFT", "APPROVED", "IMPLEMENTED", "DEPRECATED"):
+        errors.append("Spec has invalid status: {}".format(spec_status))
+
+    acceptance_criteria = spec.get("acceptance_criteria")
     if acceptance_criteria:
         if isinstance(acceptance_criteria, str):
             try:
                 acceptance_criteria = json.loads(acceptance_criteria)
             except (json.JSONDecodeError, TypeError):
                 acceptance_criteria = None
-        if isinstance(acceptance_criteria, list) and len(acceptance_criteria) > 0:
-            if not plan.get('goal'):
-                errors.append("Plan has no goal defined; cannot map to acceptance criteria")
-        elif not acceptance_criteria:
-            warnings.append("Spec has no acceptance criteria defined")
+        if isinstance(acceptance_criteria, list) and len(acceptance_criteria) == 0:
+            warnings.append("Spec has empty acceptance criteria")
+    else:
+        warnings.append("Spec has no acceptance criteria defined")
 
-    spec_constraints = spec.get('spec_constraints')
-    if spec_constraints:
-        if isinstance(spec_constraints, str):
-            try:
-                spec_constraints = json.loads(spec_constraints)
-            except (json.JSONDecodeError, TypeError):
-                spec_constraints = None
-        if isinstance(spec_constraints, dict):
-            if spec_constraints.get('blocked') and plan.get('status') == 'RUNNING':
-                errors.append("Plan is RUNNING but spec constraints indicate blocked")
+    complexity = spec.get("complexity")
+    if complexity == "CRITICAL" and spec.get("importance", 0) < 8:
+        warnings.append("Spec complexity is CRITICAL but importance is below 8")
 
-    link_sql = """
-        SELECT link_id FROM spec_plan_links
-        WHERE spec_id = %s AND plan_id = %s
-    """
-    link = execute_query_one(link_sql, (spec_id, plan_id))
-    if link is None:
-        warnings.append("Spec and plan are not explicitly linked")
-
-    complexity = spec.get('complexity')
-    if complexity == 'CRITICAL' and plan.get('priority', 0) < 8:
-        warnings.append("Spec complexity is CRITICAL but plan priority is below 8")
+    plan_links = spec.get("plan_links", [])
+    if not plan_links:
+        warnings.append("Spec has no linked plans")
 
     return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
-def derive_spec(parent_spec_id: int, entity_data: Dict[str, Any],
-                spec_meta: Dict[str, Any]) -> int:
+def derive_spec(
+    parent_spec_id: str,
+    title: str,
+    content: Optional[str] = None,
+    summary: Optional[str] = None,
+) -> str:
     parent = get_spec(parent_spec_id)
     if parent is None:
-        raise ValueError("Parent spec not found: {}".format(parent_spec_id))
+        raise ValueError("Parent spec {} not found".format(parent_spec_id))
 
-    merged_meta = dict(spec_meta)
-    merged_meta['parent_spec_id'] = parent_spec_id
-    if 'spec_version' not in merged_meta:
-        merged_meta['spec_version'] = (parent.get('spec_version') or 0) + 1
-    if 'spec_status' not in merged_meta:
-        merged_meta['spec_status'] = 'DRAFT'
-    if 'complexity' not in merged_meta:
-        merged_meta['complexity'] = parent.get('complexity', 'MEDIUM')
-
-    entity_id = create_spec(entity_data, merged_meta,
-                            workspace_id=parent.get('workspace_id'))
+    entity_id = create_spec(
+        title=title,
+        content=content or parent.get("content"),
+        summary=summary or parent.get("summary"),
+        category=parent.get("category"),
+        importance=parent.get("importance"),
+        owned_by_agent=parent.get("owned_by_agent"),
+        visibility=parent.get("visibility"),
+        workspace_id=parent.get("workspace_id"),
+        spec_scope=parent.get("spec_scope"),
+        complexity=parent.get("complexity"),
+        acceptance_criteria=parent.get("acceptance_criteria"),
+        constraints=parent.get("spec_constraints"),
+        parent_spec_id=parent_spec_id,
+    )
 
     edge_sql = """
         INSERT INTO entity_edges (source_id, source_type, target_id, edge_type,
@@ -320,11 +324,147 @@ def derive_spec(parent_spec_id: int, entity_data: Dict[str, Any],
     return entity_id
 
 
-def delete_spec(spec_id: int) -> bool:
-    execute("DELETE FROM spec_plan_links WHERE spec_id = %s", (spec_id,))
-    execute("DELETE FROM entity_tags WHERE entity_id = %s AND entity_type = 'SPEC'", (spec_id,))
-    execute("DELETE FROM entity_edges WHERE source_id = %s OR target_id = %s", (spec_id, spec_id))
-    execute("DELETE FROM entity_embeddings WHERE entity_id = %s AND entity_type = 'SPEC'", (spec_id,))
-    execute("DELETE FROM spec_meta WHERE entity_id = %s", (spec_id,))
-    sql = "DELETE FROM entities WHERE entity_id = %s AND entity_type = 'SPEC'"
-    return execute(sql, (spec_id,)) > 0
+def update_spec_status(spec_id: str, new_status: str) -> bool:
+    valid_statuses = {"DRAFT", "APPROVED", "IMPLEMENTED", "DEPRECATED"}
+    if new_status not in valid_statuses:
+        return False
+    sql = """
+        UPDATE spec_meta SET spec_status = %s
+        WHERE entity_id = %s AND entity_type = 'SPEC'
+    """
+    return execute(sql, (new_status, spec_id)) > 0
+
+
+def get_spec_by_branch(branch_id: str) -> List[Dict[str, Any]]:
+    sql = """
+        SELECT e.entity_id, e.title, e.category, e.status, e.importance,
+               sm.spec_version, sm.spec_status, sm.spec_scope, sm.complexity,
+               sm.branch_id
+        FROM entities e
+        JOIN spec_meta sm ON sm.entity_id = e.entity_id
+                          AND sm.entity_type = e.entity_type
+        WHERE sm.branch_id = %s AND e.entity_type = 'SPEC'
+        ORDER BY e.created_at DESC
+    """
+    return [_row_to_dict(r) for r in execute_query(sql, (branch_id,))]
+
+
+def search_specs(
+    query: str,
+    spec_scope: Optional[str] = None,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    conditions = [
+        "e.entity_type = 'SPEC'",
+        "(e.title ILIKE %s OR e.content ILIKE %s OR e.summary ILIKE %s)",
+    ]
+    like_val = "%{}%".format(query)
+    params: List[Any] = [like_val, like_val, like_val]
+
+    if spec_scope:
+        conditions.append("sm.spec_scope = %s")
+        params.append(spec_scope)
+
+    where = " AND ".join(conditions)
+    params.append(limit)
+    sql = """
+        SELECT e.entity_id, e.title, e.summary, e.category, e.status,
+               sm.spec_status, sm.spec_scope, sm.complexity
+        FROM entities e
+        JOIN spec_meta sm ON sm.entity_id = e.entity_id
+                          AND sm.entity_type = e.entity_type
+        WHERE {where}
+        ORDER BY e.importance DESC, e.created_at DESC
+        LIMIT %s
+    """.format(where=where)
+    return [_row_to_dict(r) for r in execute_query(sql, params)]
+
+
+def validate_plan_against_spec(
+    spec_id: str,
+    plan_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    spec = get_spec(spec_id)
+    if spec is None:
+        raise ValueError("Spec {} not found".format(spec_id))
+
+    ac = spec.get("acceptance_criteria")
+    if isinstance(ac, str):
+        try:
+            ac = json.loads(ac)
+        except (json.JSONDecodeError, TypeError):
+            ac = None
+
+    results: Dict[str, Any] = {
+        "spec_id": spec_id,
+        "criteria_count": len(ac) if isinstance(ac, list) else 0,
+        "validations": [],
+    }
+
+    if plan_id:
+        plan_ids = [plan_id]
+    else:
+        links = get_spec_plan_links(spec_id)
+        plan_ids = [l["plan_id"] for l in links if l.get("link_type") == "DRIVES"]
+
+    from . import task_plan_api
+
+    for pid in plan_ids:
+        plan = task_plan_api.get_plan(pid)
+        steps = task_plan_api.list_steps(pid)
+        step_descs = [s.get("description", "") for s in steps]
+
+        validated = 0
+        passed = 0
+        if isinstance(ac, list):
+            for criterion in ac:
+                validated += 1
+                crit_str = criterion if isinstance(criterion, str) else json.dumps(criterion)
+                for desc in step_descs:
+                    if crit_str.lower() in desc.lower():
+                        passed += 1
+                        break
+
+        results["validations"].append({
+            "plan_id": pid,
+            "goal": plan.get("goal", "") if plan else "",
+            "plan_status": plan.get("status", "") if plan else "",
+            "criteria_validated": validated,
+            "criteria_passed": passed,
+            "pass_rate": round(passed / validated, 2) if validated > 0 else 0,
+        })
+
+    return results
+
+
+def get_spec_stats() -> Dict[str, Any]:
+    by_status = execute_query("""
+        SELECT sm.spec_status, COUNT(*) AS cnt
+        FROM spec_meta sm
+        JOIN entities e ON e.entity_id = sm.entity_id AND e.entity_type = 'SPEC'
+        WHERE e.status = 'ACTIVE'
+        GROUP BY sm.spec_status
+    """)
+    by_complexity = execute_query("""
+        SELECT sm.complexity, COUNT(*) AS cnt
+        FROM spec_meta sm
+        JOIN entities e ON e.entity_id = sm.entity_id AND e.entity_type = 'SPEC'
+        WHERE e.status = 'ACTIVE'
+        GROUP BY sm.complexity
+    """)
+    total = execute_query_one("""
+        SELECT COUNT(*) AS total
+        FROM entities
+        WHERE entity_type = 'SPEC' AND status = 'ACTIVE'
+    """)
+    linked = execute_query_one("""
+        SELECT COUNT(DISTINCT spl.spec_id) AS linked_count
+        FROM spec_plan_links spl
+        JOIN entities e ON e.entity_id = spl.spec_id AND e.entity_type = 'SPEC'
+    """)
+    return {
+        "total": total["total"] if total else 0,
+        "by_status": {r["spec_status"]: r["cnt"] for r in by_status},
+        "by_complexity": {r["complexity"]: r["cnt"] for r in by_complexity},
+        "linked_to_plans": linked["linked_count"] if linked else 0,
+    }

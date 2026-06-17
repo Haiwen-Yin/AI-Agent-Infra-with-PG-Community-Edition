@@ -1,31 +1,31 @@
-# Workspace & Context Continuity - PostgreSQL Memory System v2.3.0
+# Workspace & Context Continuity - AI Agent Infra v3.6.2 (2026-06-18) - PG Community Edition
 
-## Design Philosophy
+## Design Philosophy: Views with INSTEAD OF Triggers vs Native JSONB
 
 v2.2 adopts a layered JSON strategy that balances relational integrity with document convenience:
 
-1. **Native JSONB columns** for storage - `WORKSPACES.METADATA`, `WORKSPACE_CONTEXT.CONTEXT_DATA` use PostgreSQL's native JSONB type. This provides schemaless flexibility while remaining queryable via `->`, `->>`, `jsonb_path_query`, etc.
+1. **Native JSONB columns** for storage — `WORKSPACES.METADATA`, `WORKSPACE_CONTEXT.CONTEXT_DATA`, and `AGENT_SESSION.CONTEXT` use PostgreSQL's native JSONB type. This provides schemaless flexibility while remaining queryable via `->`, `->>`, `jsonb_path_query`, and GIN indexing.
 
-2. **Structured relational tables** for core operations - WORKSPACES has explicit columns for workspace_name, status, isolation_mode, etc. This enables efficient indexing and constraint enforcement.
+2. **Views with INSTEAD OF triggers** for document API — `WORKSPACE_DV` and `CONTEXT_DV` expose the relational schema as JSONB documents. WORKSPACE_DV nests WORKSPACE_CONTEXT and WORKSPACE_TASKS as sub-documents, enabling atomic workspace operations via a single JSONB payload. This replaces Oracle's JRD (JSON Relational Duality) Views.
 
-3. **JSONB for flexible extensions** - METADATA and CONTEXT_DATA are JSONB to accommodate evolving schema needs without ALTER TABLE.
+3. **jsonb_set for partial updates** — Updatable views use `jsonb_set` internally for atomic partial JSONB updates. This avoids full document replacement on small changes (e.g., updating a single field in METADATA).
 
-**Why not everything in JSONB?** Core fields that are queried, filtered, or constrained should be explicit columns. JSONB is reserved for truly schemaless, append-only, or rapidly evolving data (context chains, metadata blobs).
+**Why not views for everything?** Views with INSTEAD OF triggers impose structural constraints — nested subqueries must align with FK relationships, and read-only views cannot be used for writes. Native JSONB columns give full flexibility for unstructured data (CONTEXT_DATA, METADATA) while views provide the REST-friendly document interface for consumers.
 
 ---
 
 ## WORKSPACE Lifecycle
 
 ```
-ACTIVE --pause--> PAUSED --resume--> ACTIVE
-   |                  |
-   +--archive--> ARCHIVED <--archive--+
+ACTIVE ──pause──► PAUSED ──resume──► ACTIVE
+   │                  │
+   └──archive──► ARCHIVED ◄──archive──┘
 ```
 
 | Status | Description | Allowed Transitions |
 |--------|-------------|-------------------|
-| ACTIVE | Workspace is in use, agents can operate | -> PAUSED, -> ARCHIVED |
-| PAUSED | Temporarily suspended, no new sessions | -> ACTIVE, -> ARCHIVED |
+| ACTIVE | Workspace is in use, agents can operate | → PAUSED, → ARCHIVED |
+| PAUSED | Temporarily suspended, no new sessions | → ACTIVE, → ARCHIVED |
 | ARCHIVED | Read-only, preserved for history | (terminal) |
 
 WORKSPACES tracks the `CURRENT_AGENT_ID` and `CURRENT_SESSION_ID` to identify the active agent and session at any point. When a handoff occurs, these are updated atomically with the new session creation.
@@ -43,8 +43,8 @@ Full workspace state at a point in time:
 ```json
 {
   "entity_count": 42,
-  "active_tasks": ["plan_123", "plan_456"],
-  "recent_entities": ["entity_xxx", "entity_yyy"],
+  "active_tasks": ["PLAN_abc123", "PLAN_def456"],
+  "recent_entities": ["ENTITY_xxx", "ENTITY_yyy"],
   "session_summary": "Completed data analysis phase",
   "workspace_status": "ACTIVE"
 }
@@ -57,7 +57,7 @@ Intermediate save during a session:
 ```json
 {
   "progress": "Step 3 of 7 complete",
-  "intermediate_results": {},
+  "intermediate_results": { ... },
   "pending_actions": ["Run validation", "Generate report"],
   "timestamp_offset_ms": 145000
 }
@@ -74,7 +74,7 @@ Context transferred between agents:
   "reason": "Specialist handoff for code review",
   "current_state": "Analysis complete, review pending",
   "instructions": "Review the generated SQL queries for optimization",
-  "artifacts": ["entity_sql_draft", "entity_analysis_report"]
+  "artifacts": ["ENTITY_sql_draft", "ENTITY_analysis_report"]
 }
 ```
 
@@ -84,7 +84,7 @@ Condensed summary of session activity:
 
 ```json
 {
-  "session_id": "session-agent-1-1234567890",
+  "session_id": "SES_abc123",
   "duration_minutes": 45,
   "entities_created": 5,
   "entities_modified": 3,
@@ -93,28 +93,17 @@ Condensed summary of session activity:
 }
 ```
 
-### ERROR_STATE
+### RECOVERY
 
-Context when an error occurs:
-
-```json
-{
-  "error_type": "ValueError",
-  "error_message": "Invalid configuration",
-  "stack_trace": "Traceback...",
-  "recovery_hints": ["Check config.json", "Verify database connection"]
-}
-```
-
-### AUTO_SAVE
-
-Automatically saved context:
+Context used to restore a workspace after interruption:
 
 ```json
 {
-  "incremental_state": "partial state delta",
-  "last_operation": "INSERT INTO entities",
-  "timestamp": "2026-05-20T14:30:00Z"
+  "interrupted_at": "2026-05-20T14:30:00Z",
+  "interrupted_session": "SES_old123",
+  "recovery_point": "CHECKPOINT_CTX_abc",
+  "resume_instructions": "Continue from step 4 of the data pipeline",
+  "lost_operations": ["Partial entity update (rolled back)"]
 }
 ```
 
@@ -126,29 +115,29 @@ Agent handoff transfers workspace control from one agent to another while preser
 
 ```
 Agent-1 (current)                   Agent-2 (new)
-     |                                   |
-     | 1. create_handoff_session(ws_id)  |
-     | --------------------------------> |
-     |                                    |
-     | 2. New AGENT_SESSION created:      |
-     |    PREDECESSOR_SESSION_ID = old     |
-     |    WORKSPACE_ID = ws_id            |
-     |                                    |
-     | 3. HANDOFF context saved:          |
-     |    PARENT_CONTEXT_ID = latest ctx  |
-     |                                    |
-     | 4. WORKSPACES updated:             |
-     |    CURRENT_AGENT_ID = agent-2      |
-     |    CURRENT_SESSION_ID = new_ses    |
-     |                                    |
-     |           <-- Agent-2 active -->   |
+     │                                   │
+     │ 1. create_handoff_session(ws_id)  │
+     │ ─────────────────────────────────► │
+     │                                    │
+     │ 2. New AGENT_SESSION created:      │
+     │    PREDECESSOR_SESSION_ID = old     │
+     │    WORKSPACE_ID = ws_id            │
+     │                                    │
+     │ 3. HANDOFF context saved:          │
+     │    PARENT_CONTEXT_ID = latest ctx  │
+     │                                    │
+     │ 4. WORKSPACES updated:             │
+     │    CURRENT_AGENT_ID = agent-2      │
+     │    CURRENT_SESSION_ID = new_ses    │
+     │                                    │
+     │           ◄── Agent-2 active ──►   │
 ```
 
 **Steps performed by `create_handoff_session()`:**
 
 1. Retrieve the workspace's current state (latest context, current session)
 2. Create a new `AGENT_SESSION` with `PREDECESSOR_SESSION_ID` pointing to the current session
-3. Save a `HANDOFF` context entry
+3. Save a `HANDOFF` context entry with `PARENT_CONTEXT_ID` linking to the latest context
 4. Update `WORKSPACES` to set `CURRENT_AGENT_ID` and `CURRENT_SESSION_ID` to the new values
 
 **Session chain traversal:** `get_session_chain(session_id)` walks `PREDECESSOR_SESSION_ID` backwards, returning the full history of sessions in the workspace.
@@ -161,12 +150,12 @@ When a workspace needs to be restored (after crash, pause, or agent loss):
 
 ```
 recover_workspace(workspace_id)
-     |
-     +-- Returns workspace metadata
-     +-- Returns context chain (latest 5 entries)
-     +-- Returns active tasks (PENDING/RUNNING/BLOCKED)
-     +-- Returns recent sessions (latest 5)
-     +-- Returns recent entities (ISOLATED mode only, latest 10)
+     │
+     ├── Returns workspace metadata
+     ├── Returns context chain (latest 5 entries)
+     ├── Returns active tasks (PENDING/RUNNING/BLOCKED)
+     ├── Returns recent sessions (latest 5)
+     └── Returns recent entities (ISOLATED mode only, latest 10)
 ```
 
 **Recovery procedure:**
@@ -183,14 +172,14 @@ recover_workspace(workspace_id)
 
 | Mode | Behavior | Entity Scoping |
 |------|----------|---------------|
-| SHARED | Entities are visible across workspaces | `ENTITIES.WORKSPACE_ID` is nullable; queries are not filtered |
-| ISOLATED | Entities are scoped to the workspace | `ENTITIES.WORKSPACE_ID` is set; Python API filters by `WORKSPACE_ID` when the workspace has `ISOLATION_MODE = 'ISOLATED'` |
+| SHARED | Entities are visible across workspaces | `ENTITIES.WORKSPACE_ID` is optional (nullable) |
+| ISOLATED | Entities are scoped to the workspace | `ENTITIES.WORKSPACE_ID` is set; `recover_workspace()` returns only workspace-scoped entities |
 
-In ISOLATED mode, agents operating in a workspace can only see entities tagged with that `WORKSPACE_ID`. This is enforced at the application layer -- the Python API filters by `WORKSPACE_ID` when the workspace has `ISOLATION_MODE = 'ISOLATED'`.
+In ISOLATED mode, agents operating in a workspace can only see entities tagged with that `WORKSPACE_ID`. This is enforced at the application layer — the Python API filters by `WORKSPACE_ID` when the workspace has `ISOLATION_MODE = 'ISOLATED'`.
 
 ---
 
-## CONTEXT_DATA JSONB Recommendations
+## CONTEXT_DATA JSONB Schema Recommendations
 
 While CONTEXT_DATA is stored as schemaless JSONB, the following patterns are recommended:
 
@@ -216,7 +205,7 @@ If CONTEXT_DATA schema evolves, include a `_version` field:
 
 ### Nested vs Flat
 
-Prefer flat structures for query performance. Nest only when the sub-document is always read/written atomically:
+Prefer flat structures for QUERY performance. Nest only when the sub-document is always read/written atomically:
 
 ```json
 {
@@ -228,4 +217,4 @@ Prefer flat structures for query performance. Nest only when the sub-document is
 }
 ```
 
-The `metadata` sub-object is appropriate because it is always read together. Individual progress fields should be at the top level for `->>` access.
+The `metadata` sub-object is appropriate because it's always read together. Individual progress fields should be at the top level for `->>` operator access.

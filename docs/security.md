@@ -1,122 +1,156 @@
-# Security — PostgreSQL Memory System v2.3.0
+# Security - AI Agent Infra v3.6.2 (2026-06-18) - PG Community Edition
 
 ## Data Masking
 
-`DataMaskingService` provides context-aware PII masking across 7 patterns.
+`DataMaskingService` automatically detects and masks sensitive data:
 
-### Sensitive Patterns
+| Pattern | Example Input | Masked Output |
+|---------|--------------|---------------|
+| email | user@example.com | ****@example.com |
+| phone | 555-123-4567 | 555***-4567 |
+| credit_card | 4111111111111111 | ****-****-****-1111 |
+| ssn | 123-45-6789 | ***-**-6789 |
+| api_key | secretAbcDefGhi... | secr...Ghi |
+| ip_address | 192.168.1.1 | ***.***.***.1 |
+| jwt_token | eyJhbG... | eyJ...+last16 |
 
-| Pattern | Regex Target | Mask Rule |
-|---------|-------------|-----------|
-| `credit_card` | Visa/MC/Amex numbers | `****-****-****-1234` |
-| `ssn` | `XXX-XX-XXXX` | `***-**-1234` |
-| `jwt_token` | `eyJ...` format | `eyJ...[last 16]` |
-| `api_key` | `secret/key/token` prefix + 16+ chars | `sk-1...abcd` |
-| `email` | Standard email format | `*****@domain.com` |
-| `ip_address` | IPv4 dotted-quad | `***.***.***.1` |
-| `phone` | US phone formats | `123***-5678` |
+### Context-Aware Masking
 
-### Context Levels
-
-| Level | Patterns Masked | Use Case |
-|-------|----------------|----------|
-| `LOGGING` | email, phone, credit_card, ssn, api_key, jwt_token | Application logs |
-| `DEBUGGING` | All LOGGING + ip_address | Developer debugging |
-| `ANALYTICS` | credit_card, ssn, api_key, jwt_token | Aggregated analytics |
-| `SHARING` | All 7 patterns | Cross-agent sharing |
-
-### Usage
+| Context | Patterns Masked |
+|---------|----------------|
+| LOGGING | email, phone, credit_card, ssn, api_key, jwt_token |
+| DEBUGGING | All LOGGING + ip_address |
+| ANALYTICS | credit_card, ssn, api_key, jwt_token |
+| SHARING | All LOGGING + ip_address |
 
 ```python
 from scripts.lib.security import DataMaskingService
-
-svc = DataMaskingService(context_level="SHARING")
-masked = svc.mask_text("Contact john@example.com, SSN 123-45-6789")
-# → "Contact *****@example.com, SSN ***-**-6789"
-
-masked_dict = svc.mask_dict({"user_email": "a@b.com", "count": 42})
-# → {"user_email": "***MASKED***", "count": 42}
-```
-
-## Reversible Encryption
-
-`ReversibleEncryption` uses PBKDF2 key derivation with XOR cipher for
-encrypting data that must be read back (e.g., stored API keys).
-
-- **Key derivation**: `PBKDF2-HMAC-SHA256` with random 16-byte IV, 100 000 iterations
-- **Cipher**: XOR of plaintext with derived key and IV bytes
-- **Encoding**: Base64 of `IV || length_prefix(4B) || encrypted_payload`
-- **Key rotation**: `rotate_key(new_key, encrypted_values)` decrypts with old key, re-encrypts with new key
-
-```python
-from scripts.lib.security import ReversibleEncryption
-
-enc = ReversibleEncryption(key=b"my-32-byte-secret-key-here-xxxxx")
-ct = enc.encrypt("secret data")    # → base64 string
-pt = enc.decrypt(ct)                # → "secret data"
+svc = DataMaskingService("SHARING")
+safe_text = svc.mask_text("admin@company.com called from 10.0.0.1")
+safe_dict = svc.mask_dict({"password": "secret", "name": "John"})
 ```
 
 ## Password Hashing
 
+PBKDF2-HMAC-SHA256 with configurable iterations (default: 100,000).
+
 ```python
 from scripts.lib.security import hash_password, verify_password
-
-h, s = hash_password("MyP@ssw0rd")              # → (hex_hash, hex_salt)
-assert verify_password("MyP@ssw0rd", h, s)       # → True
-assert not verify_password("wrong", h, s)        # → False
+hash_val, salt = hash_password("MyPassword123!")
+is_valid = verify_password("MyPassword123!", hash_val, salt)
 ```
 
-- Algorithm: PBKDF2-HMAC-SHA256
-- Salt: 16 bytes random, stored as hex
-- Iterations: 100 000 (configurable via `config.json` → `security.pbkdf2_iterations`)
+## Entity Visibility
 
-## Entity Visibility Controls
+| Level | Access |
+|-------|--------|
+| PRIVATE | Only OWNED_BY_AGENT |
+| SHARED | All registered agents |
+| PUBLIC | Unrestricted |
 
-Visibility is enforced at the database level by `agent_perm.check_entity_access()`:
-
-| Visibility | Access Rule | SQL Check |
-|------------|-------------|-----------|
-| `SHARED` | All agents | `visibility = 'SHARED'` |
-| `PRIVATE` | Owner only | `owned_by_agent = current_agent` |
-| `PUBLIC` | Unrestricted | `visibility = 'PUBLIC'` |
-
-> **Note**: The visibility model is enforced by the `agent_perm.check_entity_access`
-> function, which must be called before any entity read/write operation. See the
-> `agent_perm` schema in the PL/pgSQL API for grant/revoke operations.
-
-Workspaces provide additional isolation: entities within a workspace are only
-accessible to agents operating in that workspace context, regardless of visibility.
-
-### Default Admin Account
-
-The system seeds a default admin user in `system_users` with credentials
-`admin` / `admin123`. **This is for development only** — change the password
-before any production deployment:
-
-```sql
-UPDATE system_users SET password_hash = ... WHERE username = 'admin';
-```
-
-Grant/revoke access:
-
-```sql
-SELECT agent_perm.grant_access('agent-B', 42, 'agent-A');
-SELECT agent_perm.revoke_access('agent-B', 42);
-```
+Cross-agent sharing is managed via the AGENT_COLLABORATION table.
 
 ## Access Auditing
 
-All entity access is logged to `entity_access_log`:
+All entity access is logged to ENTITY_ACCESS_LOG:
+- LOG_ID (VARCHAR(64)), Entity ID, Agent ID, Access Type (READ/WRITE/DELETE/SEARCH/EMBED), Access Time, Session ID, Context
 
-| Column | Values |
-|--------|--------|
-| `access_type` | READ, WRITE, DELETE, SHARE |
-| `agent_id` | Agent performing the action |
-| `entity_id` | Target entity |
-| `access_time` | Timestamp |
+## Row Security Policies (v3.6.2)
 
-Purge old logs:
+v3.6.2 uses PostgreSQL Row Security Policies for data isolation:
+
+- **25+ Row Security Policies** enforce row-level, column-level, and cell-level access control
+- **3 Database Roles**: `admin_data_role` (full), `agent_data_role` (filtered by agent), `pool_agent_data_role` (minimum)
+- **Agent Context** via `current_setting('app.current_agent_id', TRUE)` for zero-trust agent identification
+- **SYSTEM_CONFIG** fully restricted to `admin_data_role` only
+
+**Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the schema owner connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing RLS predicates to reject all rows for restricted users. After the operation completes, the agent context is restored.
+
+### WORKSPACE_CONTEXT VISIBILITY
+
+WORKSPACE_CONTEXT has a VISIBILITY column (PRIVATE/SHARED/PUBLIC, default SHARED) that controls cross-agent context visibility in collaboration group workspaces:
+
+| VISIBILITY | Agent sees own context? | Other agents in collab group see it? |
+|------------|------------------------|--------------------------------------|
+| PRIVATE | Yes (always) | No — blocked by RLS policy |
+| SHARED | Yes (always) | Yes — visible to collab group members |
+| PUBLIC | Yes (always) | Yes — visible to all |
+
+The `ws_ctx_agent_access` RLS policy enforces these rules:
+- Agent always sees its own context (AGENT_ID matches) regardless of VISIBILITY
+- Agent sees other agents' SHARED/PUBLIC context only in collab group workspaces
+- Agent CANNOT see other agents' PRIVATE context even in the same collab group workspace
+
+## Admin/Agent Separation Security Model
+
+v3.6.2 introduces the Admin/Agent Separation Architecture, which significantly reduces the security blast radius of a compromised Business Agent.
+
+### Threat Model Comparison
+
+| Threat | Before v3.6.2 | After v3.6.2 (Agent mode) |
+|--------|--------------|--------------------------|
+| Business Agent compromised | Attacker gets schema owner credentials → full database access | Attacker gets restricted user credentials → RLS-filtered access only |
+| Credential leakage from config.json | Schema owner user/password exposed | Only restricted user credentials exposed (scoped by RLS) |
+| Rogue Agent process | Can bypass all RLS (schema owner bypasses) | Cannot bypass RLS (restricted user connection) |
+| Lateral movement | Schema owner access to all tables and rows | Restricted user access limited to agent's own data |
+
+### Admin Token Security
+
+- **Generation**: `generate_admin_token()` creates a 32-byte random token, hex-encoded with AT_ prefix
+- **Storage**: Stored in `SYSTEM_CONFIG` as `admin.registration_token` (encrypted with pgcrypto)
+- **Rotation**: `POST /api/admin/token/rotate` invalidates old token; Business Agents must re-register
+- **Usage**: Single-use for registration; encrypted credential distribution uses it as PBKDF2 key material
+
+### Encrypted Credential Distribution
+
+End User credentials are encrypted in transit using the admin_token as key material:
+
+1. Admin Agent generates admin_token
+2. Admin_token shared with Business Agent operator over out-of-band secure channel
+3. Business Agent sends registration request with admin_token
+4. Admin Agent encrypts credentials with `encrypt_credential_for_distribution(credential, admin_token)`
+5. Business Agent decrypts with `decrypt_credential_from_distribution(encrypted, salt, admin_token)`
+6. Business Agent saves to encrypted `agent_config.json` with `save_agent_config(config, path)`
+
+**Key properties:**
+- admin_token is never stored on the Business Agent node
+- PBKDF2-HMAC-SHA512 with 210,000 iterations prevents brute-force
+- HMAC-SHA256 authentication tag prevents tampering
+- agent_config.json is encrypted at rest using derived key
+
+### Mode-Specific Security Controls
+
+| Control | standalone | admin | agent |
+|---------|-----------|-------|-------|
+| Schema owner connection pool | Yes | Yes | **No** |
+| RLS-restricted connections | Yes | Yes | Yes (only option) |
+| Web Portal | Yes | Yes | **No** |
+| admin_token stored locally | N/A | No | **No** |
+| agent_config.json | No | No | Yes (encrypted) |
+| RLS enforcement | Yes (with schema owner bypass) | Yes (with schema owner bypass) | **Always enforced** |
+| SYSTEM_CONFIG access | Via schema owner | Via schema owner | **Blocked** (admin_data_role only) |
+
+## Encryption Architecture
+
+### Dual-Track Encryption
+
+| Track | Component | Encrypts | Key Storage |
+|-------|-----------|----------|-------------|
+| Local file | connection_crypto.py | config.json DB credentials | `~/.pg-infra/master.key` |
+| In-database | pgcrypto | AGENT_CREDENTIALS | SYSTEM_CONFIG table |
+
+### pgcrypto In-Database Encryption
 
 ```sql
-SELECT session_cleanup.purge_access_logs(90);  -- keep last 90 days
+-- Encrypt
+SELECT encode(encrypt_iv(%s::bytea, %s::bytea, 'aes-cbc'), 'base64');
+
+-- Decrypt
+SELECT convert_from(decrypt_iv(decode(%s, 'base64'), %s::bytea, 'aes-cbc'), 'UTF8');
 ```
+
+Key properties:
+- AES-CBC encryption via pgcrypto extension
+- Keys stored in SYSTEM_CONFIG (db_crypto_master_key / db_crypto_key_salt)
+- All agents sharing the same database automatically share encryption keys
+- Key auto-generation on first use; concurrent-safe via ON CONFLICT

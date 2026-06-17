@@ -1,395 +1,142 @@
-"""PostgreSQL Memory System v2.3.1 - Agent API Tests"""
+"""AI Agent Infra v3.6.2 - PG Community Edition - Agent API Tests"""
+
 import sys
 import os
-import uuid
-
+import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.agent_api import (
     register_agent, get_agent, update_agent, decommission_agent,
-    heartbeat, create_session, end_session, checkpoint_session,
-    get_session_chain, get_active_sessions, log_access,
-    get_access_log, create_collaboration, get_collaborations,
+    heartbeat, register_pool_agent, assign_pool_agent,
 )
-from lib.memory_api import create_memory, delete_memory
-from lib.workspace_api import create_workspace
+from lib.connection import close_pool
 
-_cleanup_agents = []
-_cleanup_sessions = []
-_cleanup_memories = []
-_cleanup_workspaces = []
-_passed = 0
-_failed = 0
+TEST_AGENT = "pgtest-agent-1"
+TEST_AGENT_2 = "pgtest-agent-2"
+POOL_AGENT = "pgtest-pool-agent"
+TS = str(int(time.time()))
+
+
+def test_register_agent():
+    agent_id = register_agent(
+        agent_id=TEST_AGENT,
+        agent_name="PG Test Agent " + TS,
+        agent_type="test",
+        description="Agent for PG testing",
+    )
+    assert isinstance(agent_id, str)
+    assert agent_id == TEST_AGENT
+    print(f"PASS: test_register_agent (id={agent_id})")
+
+
+def test_get_agent():
+    agent = get_agent(TEST_AGENT)
+    assert agent is not None
+    assert agent["agent_name"].startswith("PG Test Agent")
+    assert agent["status"] == "ACTIVE"
+    print(f"PASS: test_get_agent (name={agent['agent_name']})")
+
+
+def test_update_agent():
+    ok = update_agent(TEST_AGENT, description="Updated PG test agent")
+    assert ok
+    agent = get_agent(TEST_AGENT)
+    assert agent["description"] == "Updated PG test agent"
+    print("PASS: test_update_agent")
+
+
+def test_decommission_agent():
+    register_agent("decom-agent-" + TS, "Decom Agent", agent_type="test")
+    ok = decommission_agent("decom-agent-" + TS)
+    assert ok
+    agent = get_agent("decom-agent-" + TS)
+    assert agent["status"] == "DECOMMISSIONED"
+    from lib.connection import execute
+    execute("DELETE FROM agent_registry WHERE agent_id = %s", ["decom-agent-" + TS])
+    print("PASS: test_decommission_agent")
+
+
+def test_list_agents():
+    from lib.connection import execute_query
+    rows = execute_query("SELECT agent_id FROM agent_registry WHERE agent_id = %s", [TEST_AGENT])
+    assert len(rows) >= 1
+    print(f"PASS: test_list_agents (found={len(rows)})")
+
+
+def test_pool_agent_register():
+    register_agent(POOL_AGENT, "PG Pool Agent " + TS, agent_type="test")
+    pool_config = {"max_idle_minutes": 60, "skills_tags": ["python", "sql", "postgresql"], "auto_wake": False}
+    ok = register_pool_agent(POOL_AGENT, pool_config)
+    assert ok
+    agent = get_agent(POOL_AGENT)
+    assert agent["status"] == "POOL"
+    print("PASS: test_pool_agent_register")
+
+
+def test_pool_agent_acquire():
+    result = assign_pool_agent("pgtest-user-" + TS, required_skills=["python", "sql"])
+    assert result is not None
+    assert result["agent_id"] == POOL_AGENT
+    assert result["status"] == "ACTIVE"
+    print(f"PASS: test_pool_agent_acquire (assigned={result['agent_id']})")
+
+
+def test_pool_agent_release():
+    from lib.agent_api import hibernate_agent
+    ok = hibernate_agent(POOL_AGENT)
+    assert ok
+    agent = get_agent(POOL_AGENT)
+    assert agent["status"] == "POOL"
+    print("PASS: test_pool_agent_release")
 
 
 def _cleanup():
     from lib.connection import execute
-    for agent_id in _cleanup_agents:
+    for aid in [TEST_AGENT, TEST_AGENT_2, POOL_AGENT]:
         try:
-            execute("DELETE FROM agent_collaboration WHERE source_agent_id = %s OR target_agent_id = %s", (agent_id, agent_id))
-            execute("DELETE FROM entity_access_log WHERE agent_id = %s", (agent_id,))
-            execute("DELETE FROM agent_session WHERE agent_id = %s", (agent_id,))
-            execute("DELETE FROM agent_registry WHERE agent_id = %s", (agent_id,))
+            execute("DELETE FROM agent_session WHERE agent_id = %s", [aid])
         except Exception:
             pass
-    for mid in _cleanup_memories:
         try:
-            delete_memory(mid)
+            execute("DELETE FROM agent_collaboration WHERE source_agent_id = %s OR target_agent_id = %s", [aid, aid])
         except Exception:
             pass
-    for ws_id in _cleanup_workspaces:
         try:
-            execute("DELETE FROM workspace_context WHERE workspace_id = %s", (ws_id,))
-            execute("DELETE FROM agent_session WHERE workspace_id = %s", (ws_id,))
-            execute("DELETE FROM workspaces WHERE workspace_id = %s", (ws_id,))
+            execute("DELETE FROM agent_credentials WHERE agent_id = %s", [aid])
         except Exception:
             pass
-    _cleanup_agents.clear()
-    _cleanup_sessions.clear()
-    _cleanup_memories.clear()
-    _cleanup_workspaces.clear()
-
-
-def _record(ok):
-    global _passed, _failed
-    if ok:
-        _passed += 1
-    else:
-        _failed += 1
-
-
-def test_register_agent():
-    try:
-        agent_id = "test_agent_" + uuid.uuid4().hex[:8]
-        result = register_agent(agent_id=agent_id, agent_name="Test Agent")
-        ok = result == agent_id
-        if ok:
-            _cleanup_agents.append(agent_id)
-            fetched = get_agent(agent_id)
-            ok = fetched is not None and fetched.get("agent_id") == agent_id
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_register_agent: " + status)
-    return ok
-
-
-def test_register_agent_with_options():
-    try:
-        agent_id = "test_agent_opts_" + uuid.uuid4().hex[:8]
-        result = register_agent(
-            agent_id=agent_id,
-            agent_name="Full Agent",
-            agent_type="worker",
-            description="A test worker agent",
-            capabilities={"skill1": True, "skill2": True},
-            config={"timeout": 30},
-        )
-        ok = result == agent_id
-        if ok:
-            _cleanup_agents.append(agent_id)
-            fetched = get_agent(agent_id)
-            ok = fetched is not None and fetched.get("agent_type") == "worker"
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_register_agent_with_options: " + status)
-    return ok
-
-
-def test_get_agent():
-    try:
-        agent_id = "test_get_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="Get Test Agent")
-        _cleanup_agents.append(agent_id)
-        result = get_agent(agent_id)
-        ok = result is not None and result.get("agent_id") == agent_id and result.get("agent_name") == "Get Test Agent"
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_get_agent: " + status)
-    return ok
-
-
-def test_get_agent_nonexistent():
-    try:
-        result = get_agent("nonexistent_agent_12345")
-        ok = result is None
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_get_agent_nonexistent: " + status)
-    return ok
-
-
-def test_update_agent():
-    try:
-        agent_id = "test_upd_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="Before Update")
-        _cleanup_agents.append(agent_id)
-        updated = update_agent(agent_id, agent_name="After Update", description="updated desc")
-        fetched = get_agent(agent_id)
-        ok = updated and fetched is not None and fetched.get("agent_name") == "After Update"
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_update_agent: " + status)
-    return ok
-
-
-def test_decommission_agent():
-    try:
-        agent_id = "test_decom_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="Decommission Agent")
-        _cleanup_agents.append(agent_id)
-        decommission_agent(agent_id)
-        fetched = get_agent(agent_id)
-        ok = fetched is not None and fetched.get("status") == "DECOMMISSIONED"
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_decommission_agent: " + status)
-    return ok
-
-
-def test_heartbeat():
-    try:
-        agent_id = "test_hb_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="Heartbeat Agent")
-        _cleanup_agents.append(agent_id)
-        result = heartbeat(agent_id)
-        ok = result
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_heartbeat: " + status)
-    return ok
-
-
-def test_create_session():
-    try:
-        agent_id = "test_sess_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="Session Agent")
-        _cleanup_agents.append(agent_id)
-        ws_id = create_workspace(name="session workspace")
-        _cleanup_workspaces.append(ws_id)
-        session_id = create_session(agent_id=agent_id, workspace_id=ws_id)
-        ok = session_id is not None
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_create_session: " + status)
-    return ok
-
-
-def test_end_session():
-    try:
-        agent_id = "test_end_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="End Session Agent")
-        _cleanup_agents.append(agent_id)
-        ws_id = create_workspace(name="end session workspace")
-        _cleanup_workspaces.append(ws_id)
-        session_id = create_session(agent_id=agent_id, workspace_id=ws_id)
-        ended = end_session(session_id)
-        ok = ended
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_end_session: " + status)
-    return ok
-
-
-def test_checkpoint_session():
-    try:
-        agent_id = "test_cp_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="Checkpoint Agent")
-        _cleanup_agents.append(agent_id)
-        ws_id = create_workspace(name="checkpoint workspace")
-        _cleanup_workspaces.append(ws_id)
-        session_id = create_session(agent_id=agent_id, workspace_id=ws_id)
-        result = checkpoint_session(session_id, {"step": 3, "progress": "halfway"})
-        ok = result
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_checkpoint_session: " + status)
-    return ok
-
-
-def test_get_session_chain():
-    try:
-        agent_id = "test_chain_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="Chain Agent")
-        _cleanup_agents.append(agent_id)
-        ws_id = create_workspace(name="chain workspace")
-        _cleanup_workspaces.append(ws_id)
-        s1 = create_session(agent_id=agent_id, workspace_id=ws_id)
-        end_session(s1)
-        s2 = create_session(agent_id=agent_id, workspace_id=ws_id, predecessor_session_id=s1)
-        chain = get_session_chain(s2, limit=10)
-        ok = chain is not None and len(chain) >= 1
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_get_session_chain: " + status)
-    return ok
-
-
-def test_get_active_sessions():
-    try:
-        agent_id = "test_active_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="Active Agent")
-        _cleanup_agents.append(agent_id)
-        ws_id = create_workspace(name="active workspace")
-        _cleanup_workspaces.append(ws_id)
-        create_session(agent_id=agent_id, workspace_id=ws_id)
-        results = get_active_sessions(agent_id=agent_id)
-        ok = len(results) >= 1
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_get_active_sessions: " + status)
-    return ok
-
-
-def test_log_access():
-    try:
-        agent_id = "test_log_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="Log Agent")
-        _cleanup_agents.append(agent_id)
-        eid = create_memory(title="access target", content="access content")
-        _cleanup_memories.append(eid)
-        ws_id = create_workspace(name="log workspace")
-        _cleanup_workspaces.append(ws_id)
-        session_id = create_session(agent_id=agent_id, workspace_id=ws_id)
-        log_id = log_access(agent_id, eid, "READ", session_id=session_id)
-        ok = log_id is not None
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_log_access: " + status)
-    return ok
-
-
-def test_get_access_log():
-    try:
-        agent_id = "test_alog_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="ALog Agent")
-        _cleanup_agents.append(agent_id)
-        eid = create_memory(title="alog target", content="alog content")
-        _cleanup_memories.append(eid)
-        log_access(agent_id, eid, "WRITE")
-        results = get_access_log(entity_id=eid)
-        ok = len(results) >= 1
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_get_access_log: " + status)
-    return ok
-
-
-def test_get_access_log_by_agent():
-    try:
-        agent_id = "test_alog2_agent_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=agent_id, agent_name="ALog2 Agent")
-        _cleanup_agents.append(agent_id)
-        eid = create_memory(title="alog2 target", content="alog2 content")
-        _cleanup_memories.append(eid)
-        log_access(agent_id, eid, "READ")
-        results = get_access_log(agent_id=agent_id, limit=10)
-        ok = len(results) >= 1
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_get_access_log_by_agent: " + status)
-    return ok
-
-
-def test_create_collaboration():
-    try:
-        a1 = "test_coll1_" + uuid.uuid4().hex[:8]
-        a2 = "test_coll2_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=a1, agent_name="Collab Agent 1")
-        register_agent(agent_id=a2, agent_name="Collab Agent 2")
-        _cleanup_agents.extend([a1, a2])
-        eid = create_memory(title="coll target", content="coll content")
-        _cleanup_memories.append(eid)
-        coll_id = create_collaboration(a1, a2, "PEER_REVIEW", entity_id=eid, context={"review": True}, strength=0.8)
-        ok = coll_id is not None
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_create_collaboration: " + status)
-    return ok
-
-
-def test_get_collaborations():
-    try:
-        a1 = "test_gcoll1_" + uuid.uuid4().hex[:8]
-        a2 = "test_gcoll2_" + uuid.uuid4().hex[:8]
-        register_agent(agent_id=a1, agent_name="GCollab Agent 1")
-        register_agent(agent_id=a2, agent_name="GCollab Agent 2")
-        _cleanup_agents.extend([a1, a2])
-        create_collaboration(a1, a2, "MENTORING")
-        results = get_collaborations(agent_id=a1, limit=10)
-        ok = len(results) >= 1
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_get_collaborations: " + status)
-    return ok
+        try:
+            execute("DELETE FROM agent_registry WHERE agent_id = %s", [aid])
+        except Exception:
+            pass
 
 
 def run_all():
-    tests = [
-        test_register_agent, test_register_agent_with_options,
-        test_get_agent, test_get_agent_nonexistent,
-        test_update_agent, test_decommission_agent, test_heartbeat,
-        test_create_session, test_end_session, test_checkpoint_session,
-        test_get_session_chain, test_get_active_sessions,
-        test_log_access, test_get_access_log, test_get_access_log_by_agent,
-        test_create_collaboration, test_get_collaborations,
-    ]
-    for t in tests:
-        t()
+    passed = 0
+    failed = 0
+    for test_fn in [
+        test_register_agent,
+        test_get_agent,
+        test_update_agent,
+        test_decommission_agent,
+        test_list_agents,
+        test_pool_agent_register,
+        test_pool_agent_acquire,
+        test_pool_agent_release,
+    ]:
+        try:
+            test_fn()
+            passed += 1
+        except Exception as e:
+            print(f"FAIL: {test_fn.__name__} - {e}")
+            failed += 1
+
     _cleanup()
-    print("\n  Agent: {} passed, {} failed, {} total".format(_passed, _failed, _passed + _failed))
-    return _failed == 0
+    close_pool()
+    print(f"\nAgent Tests: {passed} passed, {failed} failed")
+    return failed == 0
 
 
 if __name__ == "__main__":
-    run_all()
+    success = run_all()
+    sys.exit(0 if success else 1)

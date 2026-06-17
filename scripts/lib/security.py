@@ -1,6 +1,7 @@
-"""PostgreSQL Memory System v2.3.1 - Security Module
+"""AI Agent Infra v3.6.2 - PG Community Edition - Security Module
 
-Data masking, context-aware masking, and reversible encryption.
+Data masking, context-aware masking, reversible encryption via pgcrypto,
+password hashing, and admin token management.
 """
 
 import re
@@ -9,7 +10,10 @@ import os
 import base64
 import json
 import logging
+import secrets
 from typing import Any, Dict, List, Optional, Tuple
+
+from .connection import execute_query, execute_query_one, execute
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +46,10 @@ class DataMaskingService:
         "SHARING": {"email", "phone", "credit_card", "ssn", "api_key", "jwt_token", "ip_address"},
     }
 
+    PATTERN_ORDER = ["credit_card", "ssn", "jwt_token", "api_key", "email", "ip_address", "phone"]
+
     def __init__(self, context_level: str = "LOGGING"):
         self.context_level = context_level
-
-    PATTERN_ORDER = ["credit_card", "ssn", "jwt_token", "api_key", "email", "ip_address", "phone"]
 
     def mask_text(self, text: str) -> str:
         if not text:
@@ -104,6 +108,30 @@ class ReversibleEncryption:
         self._key = key or os.urandom(32)
 
     def encrypt(self, plaintext: str) -> str:
+        try:
+            row = execute_query_one(
+                "SELECT encode(encrypt_iv(%s::bytea, %s::bytea, 'aes-cbc'), 'base64') AS ciphertext",
+                [plaintext.encode('utf-8'), self._key]
+            )
+            if row and row.get("ciphertext"):
+                return row["ciphertext"]
+        except Exception as e:
+            logger.debug("pgcrypto encrypt_iv failed, falling back to Python: %s", e)
+        return self._python_encrypt(plaintext)
+
+    def decrypt(self, ciphertext: str) -> str:
+        try:
+            row = execute_query_one(
+                "SELECT convert_from(decrypt_iv(decode(%s, 'base64'), %s::bytea, 'aes-cbc'), 'UTF8') AS plaintext",
+                [ciphertext, self._key]
+            )
+            if row and row.get("plaintext"):
+                return row["plaintext"]
+        except Exception as e:
+            logger.debug("pgcrypto decrypt_iv failed, falling back to Python: %s", e)
+        return self._python_decrypt(ciphertext)
+
+    def _python_encrypt(self, plaintext: str) -> str:
         iv = os.urandom(16)
         dk = hashlib.pbkdf2_hmac("sha256", self._key, iv, 100000)
         data = plaintext.encode("utf-8")
@@ -112,7 +140,7 @@ class ReversibleEncryption:
         encrypted = bytes(payload[i] ^ dk[i % len(dk)] ^ iv[i % len(iv)] for i in range(len(payload)))
         return base64.b64encode(iv + encrypted).decode("ascii")
 
-    def decrypt(self, ciphertext: str) -> str:
+    def _python_decrypt(self, ciphertext: str) -> str:
         raw = base64.b64decode(ciphertext)
         iv = raw[:16]
         encrypted = raw[16:]
@@ -142,6 +170,53 @@ def verify_password(password: str, stored_hash: str, salt_hex: str, iterations: 
     salt = bytes.fromhex(salt_hex)
     pw_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
     return pw_hash.hex() == stored_hash
+
+
+def generate_admin_token() -> str:
+    token = "AT_" + secrets.token_hex(32)
+    try:
+        row = execute_query_one(
+            "SELECT encode(encrypt_iv(%s::bytea, %s::bytea, 'aes-cbc'), 'base64') AS ciphertext",
+            [token.encode('utf-8'), _get_encryption_key()]
+        )
+        encrypted = row['ciphertext'] if row else token
+    except Exception:
+        encrypted = token
+
+    execute("""
+        INSERT INTO system_config (config_key, config_value, description)
+        VALUES ('admin.registration_token', %s, 'Admin token for Agent registration (encrypted)')
+        ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = CURRENT_TIMESTAMP
+    """, [encrypted])
+    logger.info("Generated new admin registration token")
+    return token
+
+
+def verify_admin_token(token: str) -> bool:
+    if not token or not token.startswith("AT_"):
+        return False
+    row = execute_query_one(
+        "SELECT config_value FROM system_config WHERE config_key = 'admin.registration_token'"
+    )
+    if not row:
+        return False
+    stored = row.get("config_value", "")
+    if stored.startswith("AT_"):
+        return secrets.compare_digest(stored, token)
+    try:
+        dec = execute_query_one(
+            "SELECT convert_from(decrypt_iv(decode(%s, 'base64'), %s::bytea, 'aes-cbc'), 'UTF8') AS plaintext",
+            [stored, _get_encryption_key()]
+        )
+        if dec and dec.get("plaintext"):
+            return secrets.compare_digest(dec["plaintext"], token)
+    except Exception:
+        pass
+    return False
+
+
+def _get_encryption_key() -> bytes:
+    return os.urandom(32)
 
 
 default_masking_service = DataMaskingService()

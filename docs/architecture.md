@@ -1,102 +1,231 @@
-# Architecture — PostgreSQL Memory System v2.3.0
+# Architecture - AI Agent Infra v3.6.2 (2026-06-18) - PG Community Edition
 
-## Overview
+## Unified Entity Model
 
-The system stores all memory, knowledge, task outputs, experiences, and harness
-templates in a single **ENTITIES** table, discriminated by `entity_type`. Edges,
-embeddings, and domain-specific metadata live in companion tables. Apache AGE
-provides a property-graph layer (`memory_graph`) for Cypher traversal, while
-pg-embedding-gen-by-yhw enables in-database vector generation via COPY FROM PROGRAM + Python proxy, callable from SQL without a Python
-client.
+### ENTITIES
 
-**Python requirement**: 3.14+ recommended, 3.6+ minimum (verified with psycopg2-binary 2.9.12).
+Single table with `ENTITY_TYPE` discriminator, composite PK `(ENTITY_ID, ENTITY_TYPE)`:
 
-**Database**: PostgreSQL 18.3 with pgvector 0.8.2, Apache AGE 1.7.0, pg_cron 1.6.
+- **MEMORY**: Short-term agent memories. Fields: title, content, summary, category, importance, status, visibility, source_agent
+- **KNOWLEDGE**: Long-term validated knowledge. Extended by KNOWLEDGE_META for domain, topic, difficulty, spaced review
+- **TASK_OUTPUT**: Task execution results
+- **EXPERIENCE**: Learned patterns and heuristics
+- **HARNESS_TEMPLATE**: Reusable agent execution blueprints. Extended by HARNESS_META for input_schema, output_schema, execution_mode
+- **OTHER**: Catch-all for future entity types
 
-## Core Data Model
+### ENTITY_EDGES
 
-### Unified Entity Table
+Unified directed edge table with composite PK `(EDGE_ID, SOURCE_ID)`:
 
-| Column             | Purpose                                    |
-|--------------------|--------------------------------------------|
-| `entity_id`        | BIGINT identity PK                         |
-| `entity_type`      | MEMORY / KNOWLEDGE / TASK_OUTPUT / EXPERIENCE / HARNESS_TEMPLATE |
-| `title`            | Human-readable label (was `name`)          |
-| `content`          | Free-text body                             |
-| `summary`          | Short description of entity content        |
-| `visibility`       | PRIVATE / SHARED / PUBLIC                  |
-| `owned_by_agent`   | Owning agent identifier                    |
-| `importance`       | Priority rank 1–10 (was `priority`)        |
-| `source_agent`     | Agent that created the entity              |
-| `retrieval_count`  | Number of times entity has been accessed   |
-| `workspace_id`     | Workspace the entity belongs to (FK)       |
+- **SOURCE_TYPE**: Denormalized ENTITY_TYPE of the source entity (required for composite FK)
+- FK: `(SOURCE_ID, SOURCE_TYPE)` references `ENTITIES(ENTITY_ID, ENTITY_TYPE)`
+- Edge types: DEPENDS_ON, RELATED_TO, DERIVED_FROM, CAUSES, ENABLES, PREVENTS, SIMILAR_TO, EVOLVED_FROM, CONTRADICTS, SUPPORTS
+- METADATA (JSONB) column on edges only
 
-### Companion Tables
+## Composite Primary Keys & Denormalized ENTITY_TYPE
 
-| Table              | Role                                           |
-|--------------------|------------------------------------------------|
-| `entity_edges`     | Directed relationships (source → target) with strength, confidence, `source_type`, and `metadata` (JSONB, was `properties`) |
-| `entity_embeddings`| vector(1024) per entity, composite PK `(entity_id, entity_type)`, HNSW-indexed |
-| `knowledge_meta`   | Domain/topic/difficulty/review_count/last_reviewed/next_review for KNOWLEDGE entities |
-| `harness_meta`     | input_schema/output_schema/execution_mode for HARNESS_TEMPLATE entities |
-| `tags`             | Normalized tag names (id, name, created_at)   |
-| `entity_tags`      | Many-to-many entity↔tag mapping (replaces JSONB tags column) |
-| `workspaces`       | Named workspaces for entity isolation          |
-| `workspace_context`| Context data per workspace                     |
-| `workspace_tasks`  | Tasks associated with workspaces               |
-| `agent_registry`   | Agent identity, capabilities, permission level |
-| `agent_session`    | Active sessions with context snapshots, `owner_user_id`, `workspace_id`, `predecessor_session_id` |
-| `entity_access_log`| Audit trail of READ/WRITE/DELETE/SHARE events  |
+| Table | PK | FK to ENTITIES | Denormalized Column |
+|-------|----|----------------|-------------------|
+| ENTITIES | (ENTITY_ID, ENTITY_TYPE) | — | — |
+| ENTITY_EDGES | (EDGE_ID, SOURCE_ID) | (SOURCE_ID, SOURCE_TYPE) | SOURCE_TYPE |
+| KNOWLEDGE_META | (ENTITY_ID, ENTITY_TYPE) | (ENTITY_ID, ENTITY_TYPE) | ENTITY_TYPE |
+| ENTITY_EMBEDDINGS | (ENTITY_ID, ENTITY_TYPE) | (ENTITY_ID, ENTITY_TYPE) | ENTITY_TYPE |
+| HARNESS_META | (ENTITY_ID, ENTITY_TYPE) | (ENTITY_ID, ENTITY_TYPE) | ENTITY_TYPE |
+| ENTITY_TAGS | (ENTITY_ID, ENTITY_TYPE, TAG_ID) | (ENTITY_ID, ENTITY_TYPE) | ENTITY_TYPE |
+
+## Partitioning Architecture
+
+### ENTITIES — LIST by ENTITY_TYPE
+
+```sql
+PARTITION BY LIST (ENTITY_TYPE)
+  P_MEMORY, P_KNOWLEDGE, P_TASK_OUTPUT, P_EXPERIENCE, P_HARNESS, P_OTHERS
+```
+
+Benefits: Queries filtering by ENTITY_TYPE prune to a single partition.
+
+### Reference Partitioned Tables (5 tables)
+
+ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, HARNESS_META, and ENTITY_TAGS inherit their partitioning from the parent ENTITIES table via `PARTITION BY REFERENCE (FK_...)`. This ensures child rows co-locate with their parent entity partition.
+
+### AGENT_SESSION — LIST by IS_ACTIVE
+
+```sql
+PARTITION BY LIST (IS_ACTIVE): P_ACTIVE('Y'), P_INACTIVE('N')
+```
+
+### TASK_PLANS — LIST by STATUS
+
+```sql
+PARTITION BY LIST (STATUS): P_ACTIVE(PENDING/RUNNING/BLOCKED), P_TERMINAL(SUCCESS/FAILED/CANCELLED)
+```
+
+TASK_STEPS inherits partitioning via reference to TASK_PLANS.
+
+### Non-Partitioned Tables
+
+AGENT_REGISTRY, AGENT_PERMISSION_LOG, AGENT_COLLABORATION, TASK_CONTEXT_SNAPSHOTS, TASK_TOOL_CALLS, TASK_DEPENDENCIES, TAGS, SYSTEM_CONFIG, SYSTEM_USERS.
 
 ## Visibility Model
 
-- **PRIVATE** — only `owned_by_agent` can access
-- **SHARED** — all agents can access (default)
-- **PUBLIC** — unrestricted access
+| Level | Behavior |
+|-------|----------|
+| PRIVATE | Only owner agent can access |
+| SHARED | All registered agents can access |
+| PUBLIC | Unrestricted access |
 
-Enforced by `agent_perm.check_entity_access()`.
+## Property Graph (Apache AGE)
 
-## Apache AGE Property Graph
+### PG_MEMORY_GRAPH
 
-The `memory_graph` graph is created during schema deployment. Entities and edges
-are mirrored into AGE vertices/edges, enabling Cypher queries such as:
-
-```cypher
-SELECT * FROM cypher('memory_graph', $$
-  MATCH (n)-[r:RELATED_TO]->(m) RETURN n.title, m.title
-$$) AS (a agtype, b agtype);
-```
-
-## JSONB for Flexible Metadata
-
-The `entity_edges.metadata` column (renamed from `properties`) stores arbitrary
-key-value data on edges. For HARNESS_TEMPLATE entities, the `harness_meta` table
-holds structured `input_schema`, `output_schema`, and `execution_mode` fields.
-Tags are now normalized via the `tags` and `entity_tags` tables rather than a
-JSONB column on entities.
-
-## pg-embedding-gen-by-yhw
-
-The custom extension [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) (by Haiwen Yin) uses PostgreSQL 18's `COPY FROM PROGRAM` to call a Python proxy that communicates with any OpenAI-compatible `/v1/embeddings` API. The `memory` schema wraps it:
+Single property graph using Apache AGE `cypher()` function:
 
 ```sql
-SELECT memory.generate_embedding('hello world');  -- returns vector(1024)
-SELECT memory.add_concept_with_embedding('name', 'desc', 'cat', '{}');
+SELECT * FROM cypher('pg_memory_graph', $$
+  MATCH (a)-[e]->(b)
+  WHERE a.entity_id = 'E_001'
+  RETURN b.entity_id, b.title, e.edge_type
+$$) AS (entity_id VARCHAR, title VARCHAR, edge_type VARCHAR);
 ```
 
-No Python round-trip from the application layer is required — embedding generation happens inside a SQL function. However, the extension itself relies on an external embedding API and a Python proxy process. See the [pg-embedding-gen-by-yhw](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw) repository for installation and configuration.
+### Property Graph API (graph_api.py)
+
+9 Python functions using the Apache AGE `cypher()` SQL function:
+
+| Function | Description |
+|----------|-------------|
+| `get_neighbors(entity_id, direction, edge_type, min_strength, limit)` | Get adjacent entities with direction filtering |
+| `get_reachable(entity_id, max_hops, edge_type, limit)` | Multi-hop reachability |
+| `get_shortest_path(source_id, target_id, max_hops)` | Shortest path between two entities (up to 6 hops) |
+| `find_similar_entities(entity_id, max_hops, limit)` | Find structurally similar entities via graph proximity |
+| `get_entity_context(entity_id, depth)` | Full entity context with neighbors grouped by type/edge |
+| `get_graph_stats()` | Graph statistics: vertex/edge counts, degree distribution |
+| `get_subgraph(entity_ids, include_intermediate)` | Extract subgraph by entity ID list |
+| `find_communities(entity_type, min_connections, limit)` | Find highly-connected entity clusters |
+| `graph_search(keyword, entity_type, category, min_importance, limit)` | Graph-aware search via AGE cypher |
+
+## ID Generation
+
+All IDs are `VARCHAR(64)`, generated via `encode(gen_random_bytes(16), 'hex')` producing 32-character hex strings. Prefix conventions: `E_` for edges, `SES_` for sessions, `LOG_` for access logs, `COL_` for collaborations, `PLAN_` for plans, `STEP_` for steps, `SNAP_` for snapshots, `CALL_` for tool calls, `DEP_` for dependencies, `HARNESS_` for templates.
 
 ## Design Decisions
 
-| # | Decision | Rationale |
-|---|----------|-----------|
-| 1 | Unified ENTITIES table | Single table with `entity_type` discriminator simplifies access control, indexing, and graph traversal across all entity kinds |
-| 2 | Entity edges as separate table | Directed, weighted edges with `strength` (0–1), `confidence` (0–1), `source_type`, and `metadata` (JSONB) support richer semantics than a simple adjacency list |
-| 3 | In-database embeddings (pg-embedding-gen-by-yhw) | Eliminates app-layer Python round-trips; embedding generation is a SQL function callable from triggers, jobs, and ad-hoc queries; uses COPY FROM PROGRAM + Python proxy under the hood |
-| 4 | Three-tier visibility (PRIVATE/SHARED/PUBLIC) | Simplified from COLLABORATIVE; PUBLIC replaces COLLABORATIVE for unrestricted access; workspaces provide isolation instead of per-agent ACL |
-| 5 | Normalized tags (tags + entity_tags) | Replaces JSONB tags array for referential integrity, deduplication, and efficient tag-based queries |
-| 6 | Workspace isolation | New `workspaces`, `workspace_context`, and `workspace_tasks` tables enable multi-tenant entity grouping and context management |
-| 7 | Apache AGE property graph | Enables Cypher traversal for multi-hop relationship queries that would require recursive SQL; AGE graph coexists with relational tables |
-| 8 | pg-embedding-gen-by-yhw for vector generation | Custom PG18 extension using COPY FROM PROGRAM + Python proxy; callable as SQL function, avoids app-layer embedding API calls; configurable model endpoint |
-| 9 | Local visualization server → remote DB | Skill runs on the agent side; web UI (7 HTML pages + server.py + style.css) connects to remote PostgreSQL via TCP for browsing and managing entities |
-| 10 | pg_cron 1.6 for scheduled maintenance | 9 automated jobs (embedding generation, fusion, decay, cleanup, etc.) running inside the database |
+1. **Composite PKs** enable partition-by-reference and co-location of parent/child rows
+2. **Denormalized ENTITY_TYPE** on child tables required for composite FKs and reference partitioning
+3. **LIST partitioning** on ENTITIES enables type-based pruning
+4. **Normalized tags** (TAGS + ENTITY_TAGS) replace JSONB TAG column for indexable tag queries
+5. **TEXT** for CONTENT fields (large text storage)
+6. **VECTOR** (pgvector) for embeddings (compatible with BGE-M3 model)
+7. **JSONB** for JSON columns (queryable, indexed via GIN)
+8. **pgcrypto** for in-database encryption (encrypt_iv/decrypt_iv AES-CBC)
+9. **Row Security Policies** for declarative row-level access control
+10. **Apache AGE** for property graph queries (cypher function)
+11. **pg_cron** for scheduled job execution
+
+## Workspace & Context Continuity
+
+### WORKSPACES Table
+
+Top-level container for grouping entities, sessions, and tasks:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| WORKSPACE_ID | VARCHAR(64) | PK |
+| OWNER_USER_ID | VARCHAR(64) | User who owns the workspace |
+| WORKSPACE_NAME | VARCHAR(200) | Human-readable name |
+| WORKSPACE_TYPE | VARCHAR(30) | CONVERSATION, PROJECT, ANALYSIS |
+| ISOLATION_MODE | VARCHAR(20) | SHARED (default) or ISOLATED |
+| CURRENT_AGENT_ID | VARCHAR(64) | Agent currently controlling the workspace |
+| CURRENT_SESSION_ID | VARCHAR(64) | Active session in the workspace |
+| SUMMARY | VARCHAR(4000) | Current workspace summary |
+| METADATA | JSONB | Arbitrary workspace metadata |
+| STATUS | VARCHAR(20) | ACTIVE, PAUSED, ARCHIVED |
+| CREATED_AT / UPDATED_AT | TIMESTAMP | Lifecycle timestamps |
+
+### WORKSPACE_CONTEXT Table
+
+Version chain of context entries enabling continuity across sessions and agent handoffs:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| CONTEXT_ID | VARCHAR(64) | PK |
+| WORKSPACE_ID | VARCHAR(64) | FK to WORKSPACES |
+| AGENT_ID | VARCHAR(64) | Agent that created this context |
+| SESSION_ID | VARCHAR(64) | Session during which context was created |
+| CONTEXT_TYPE | VARCHAR(30) | SNAPSHOT, CHECKPOINT, HANDOFF, SUMMARY, RECOVERY |
+| CONTEXT_DATA | JSONB | Structured context payload |
+| PARENT_CONTEXT_ID | VARCHAR(64) | FK to parent context (version chain) |
+| VISIBILITY | VARCHAR(16) | PRIVATE/SHARED/PUBLIC (default SHARED) |
+| CREATED_AT | TIMESTAMP | Creation timestamp |
+
+### JSON Strategy
+
+- **Native JSONB columns** for storage — queryable, GIN-indexed
+- **Views with INSTEAD OF triggers** for document API (replaces Oracle JRD Duality Views)
+- **jsonb_set** for partial updates (replaces Oracle JSON_TRANSFORM)
+
+## Row Security Policy Architecture
+
+v3.6.2 uses PostgreSQL Row Security Policies (RLS) for data isolation:
+
+- **25+ Row Security Policies** enforce row-level, column-level, and cell-level access control
+- **3 Database Roles**: `admin_data_role` (full access), `agent_data_role` (filtered), `pool_agent_data_role` (minimum)
+- **Agent Context**: `current_setting('app.current_agent_id', TRUE)` for per-session agent identification
+- **Zero Trust**: No context = no data
+
+| Connection Type | User | Access Method | Data Scope |
+|----------------|------|--------------|------------|
+| Portal | Restricted user | Direct logon with RLS | Filtered by Row Security Policies |
+| Admin | Schema owner | Pool connection | Unrestricted (RLS bypassed) |
+
+## Admin/Agent Separation Architecture
+
+v3.6.2 introduces a mode system that separates Admin Agent from Business Agent:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Admin Agent (mode=admin)               │
+│                                                          │
+│  ┌────────────┐   ┌──────────────┐   ┌───────────────┐  │
+│  │ Web Portal │   │ Schema Owner │   │ Admin Token   │  │
+│  │ server.py  │   │ Pool         │   │ Generator     │  │
+│  └────────────┘   └──────────────┘   └───────────────┘  │
+│        │                  │                  │           │
+│        │           RLS User Pool           │           │
+│        │           (filtered)              │           │
+│        │                  │                  │           │
+│        │    ┌─────────────────────────┐     │           │
+│        │    │  Admin API Endpoints    │     │           │
+│        │    │  /api/admin/agent/*     │     │           │
+│        │    └─────────────────────────┘     │           │
+│        │                  │                  │           │
+└────────│──────────────────│──────────────────│───────────┘
+         │                  │   admin_token    │
+         │                  │   (out-of-band)  │
+         ▼                  ▼                  ▼
+┌──────────────────────────────────────────────────────────┐
+│                  Business Agent (mode=agent)              │
+│                                                          │
+│  ┌────────────┐   ┌──────────────┐   ┌───────────────┐  │
+│  │ Agent      │   │ RLS User     │   │ agent_config  │  │
+│  │ Bootstrap  │──▶│ Pool Only    │   │ .json (enc)   │  │
+│  │ CLI        │   │ (filtered)   │   │               │  │
+│  └────────────┘   └──────────────┘   └───────────────┘  │
+│                                                          │
+│  ✗ No schema owner pool    ✗ No Web Portal             │
+│  ✓ Row Security Policies always enforced                 │
+│  ✓ agent_config.json encrypted at rest                  │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Mode Comparison
+
+| Component | standalone | admin | agent |
+|-----------|-----------|-------|-------|
+| Schema owner pool | ✓ | ✓ | ✗ |
+| RLS user pool | ✓ | ✓ | ✓ |
+| Web Portal | ✓ | ✓ | ✗ |
+| agent_config.json | ✗ | ✗ | ✓ (encrypted) |
+| Admin API | ✗ | ✓ | ✗ |
+| `get_connection()` | Schema owner or RLS user | Schema owner or RLS user | RLS user only |
+| `set_agent_context()` | Switches pool | Switches pool | No-op (always RLS user) |

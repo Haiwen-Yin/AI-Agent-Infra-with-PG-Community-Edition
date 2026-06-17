@@ -1,240 +1,202 @@
-# Migration Guide — v1.x → v2.0 → v2.3.0
+# Migration Guide - AI Agent Infra v3.6.2 (2026-06-18) - PG Community Edition
 
-## v2.0.0 → v2.2.0 Breaking Changes
+## Oracle to PostgreSQL Migration
 
-### Column Renames & Removals (entities table)
+This guide covers migrating from AI Agent Infra with OracleDB (Community Edition) to the PostgreSQL Community Edition.
 
-| v2.0 Column | v2.2 Column | Notes |
-|-------------|-------------|-------|
-| `name` | `title` | Renamed |
-| `priority` | `importance` | Renamed; now 1–10 scale (was 1–5) |
-| `description` | (removed) | Use `summary` instead |
-| `tags` (JSONB) | (removed) | Normalized into `tags` + `entity_tags` tables |
-| `metadata` (JSONB) | (removed) | Domain-specific metadata moved to companion tables |
-| `accessible_to` (JSONB) | (removed) | COLLABORATIVE visibility removed; use workspaces |
+### Key Technology Mapping
 
-### New Columns (entities table)
+| Oracle | PostgreSQL | Notes |
+|--------|-----------|-------|
+| oracledb 4.0.1+ | psycopg2 2.9+ | Python database driver |
+| `:name` named binds | `%s` positional binds | SQL parameter binding |
+| PL/SQL | PL/pgSQL + PL/Python3u | Stored procedures |
+| DBMS_CRYPTO | pgcrypto (`encrypt_iv`/`decrypt_iv`) | In-database encryption |
+| VECTOR_DISTANCE | pgvector `<=>` operator | Vector similarity search |
+| CONTAINS + SCORE | ts_vector + ts_rank | Full-text search |
+| GRAPH_TABLE (SQL/PGQ) | Apache AGE `cypher()` | Property graph queries |
+| Data Grants | Row Security Policies (RLS) | Row-level access control |
+| Oracle Scheduler | pg_cron | Scheduled jobs |
+| JRD Duality Views | Views with INSTEAD OF triggers | Updatable document views |
+| RAWTOHEX(SYS_GUID()) | encode(gen_random_bytes(16), 'hex') | ID generation |
+| JSON_OBJECT / JSON_ARRAYAGG | jsonb_build_object / jsonb_agg | JSON construction |
+| SYSTIMESTAMP | CURRENT_TIMESTAMP | Current timestamp |
+| NUMTODSINTERVAL | INTERVAL | Time intervals |
+| VARCHAR2 | VARCHAR | String type |
+| CLOB | TEXT | Large text type |
+| NUMBER | INTEGER / NUMERIC | Numeric types |
+| RAW | BYTEA | Binary data |
+| JSON (OSON) | JSONB | JSON storage |
+| DSN `host:port/service` | host + port + dbname | Connection parameters |
+| `~/.oracle-infra/master.key` | `~/.pg-infra/master.key` | Master key directory |
+| AUTHID DEFINER | SECURITY DEFINER | Privilege escalation |
+| DBMS_RLS (VPD) | CREATE POLICY (RLS) | Row-level security |
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `summary` | TEXT | Short description replacing `description` |
-| `source_agent` | VARCHAR(64) | Agent that created the entity |
-| `retrieval_count` | INT DEFAULT 0 | Access counter |
-| `workspace_id` | BIGINT FK | Workspace membership |
+### Schema Migration
 
-### Visibility Change
+#### Data Type Mapping
 
-| v2.0 | v2.2 | Notes |
-|------|------|-------|
-| `PRIVATE` | `PRIVATE` | Unchanged |
-| `SHARED` | `SHARED` | Unchanged |
-| `COLLABORATIVE` | `PUBLIC` | Renamed; no per-agent ACL; use workspaces for isolation |
+| Oracle Type | PostgreSQL Type | Example |
+|-------------|----------------|---------|
+| VARCHAR2(64) | VARCHAR(64) | entity_id columns |
+| VARCHAR2(512) | VARCHAR(512) | title |
+| VARCHAR2(2000) | VARCHAR(2000) | summary |
+| CLOB | TEXT | content |
+| NUMBER(3,0) | SMALLINT | importance (1-10) |
+| NUMBER(10,0) | INTEGER | retrieval_count |
+| TIMESTAMP | TIMESTAMP | created_at, updated_at |
+| JSON | JSONB | context_data, metadata |
+| RAW | BYTEA | encryption data |
+| VECTOR | VECTOR(1024) | embedding (pgvector) |
 
-### entity_edges Changes
-
-| Change | Details |
-|--------|---------|
-| `properties` → `metadata` | Column renamed to JSONB `metadata` |
-| New `source_type` column | VARCHAR identifying the source entity type |
-
-### entity_embeddings Change
-
-| Change | Details |
-|--------|---------|
-| PK: `entity_id` | Now composite PK `(entity_id, entity_type)` |
-
-### knowledge_meta Restructure
-
-v2.2.0 **adds** new columns to knowledge_meta while **retaining** all v2.0 columns. The old columns are not renamed — they coexist:
-
-| New v2.2 Column | Type | Purpose |
-|-----------------|------|---------|
-| `domain` | VARCHAR | Knowledge domain (e.g., AI, Security, DevOps) |
-| `topic` | VARCHAR | Specific topic within domain |
-| `difficulty` | VARCHAR | Difficulty level |
-| `review_count` | INT | Number of review iterations |
-| `last_reviewed` | TIMESTAMPTZ | Timestamp of last review |
-| `next_review` | TIMESTAMPTZ | Scheduled next review date |
-
-Retained v2.0 columns: `source_type`, `source_entity_ids`, `validation_status`, `confidence`, `version`, `is_current`, `validated_at`, `deprecated_at`.
-
-### harness_meta Restructure
-
-| v2.0 Column | v2.2 Column | Notes |
-|-------------|-------------|-------|
-| `template_version` | `input_schema` | JSONB schema for template inputs |
-| `template_status` | `output_schema` | JSONB schema for template outputs |
-| `variables` | `execution_mode` | VARCHAR execution mode |
-| `changelog` | (removed) | |
-
-### New Tables
-
-| Table | Purpose |
-|-------|---------|
-| `tags` | Normalized tag names (id, name, created_at) |
-| `entity_tags` | Many-to-many entity↔tag mapping |
-| `workspaces` | Named workspaces for entity isolation |
-| `workspace_context` | Context data per workspace |
-| `workspace_tasks` | Tasks associated with workspaces |
-
-### agent_session New Columns
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `owner_user_id` | VARCHAR(64) | User who owns the session |
-| `workspace_id` | BIGINT FK | Workspace context for session |
-| `predecessor_session_id` | VARCHAR(128) | Links to previous session |
-
-### New PL/pgSQL Schema
-
-`workspace_manager` — 6 functions for workspace CRUD and task management.
-
-### New Python Modules
-
-- `graph_api.py` — 9 functions for AGE graph operations
-- `workspace_api.py` — 11 functions for workspace management
-
-### pg_cron Jobs
-
-7 → 9 jobs (2 new workspace-related scheduled tasks).
-
-### Test Suites
-
-5 → 8 suites (added: test_graph, test_workspace, test_harness).
-
----
-
-## v1.x → v2.0.0 Migration
-
-## Table Mapping
-
-| v1.x Table | v2.0 Table | Notes |
-|------------|------------|-------|
-| `knowledge_concepts` | `entities` (entity_type='KNOWLEDGE') + `knowledge_meta` | Core columns in `entities`; domain/topic/difficulty in `knowledge_meta` |
-| `knowledge_graph` | `entity_edges` | `source_concept_id` → `source_id`, `target_concept_id` → `target_id` |
-| `knowledge_versions` | `knowledge_api.create_concept_version()` | Versions are now separate KNOWLEDGE entities linked by `EVOLVED_FROM` edges |
-| `knowledge_tags` | `tags` | Unchanged structure |
-| `knowledge_concept_tags` | `entity_tags` | `concept_id` → `entity_id` |
-| `knowledge_distillation_log` | (removed) | Use `knowledge_meta.source_type = 'EXTRACTED'` and `memory_fusion.extract_knowledge_from_memories()` |
-| `knowledge_search_history` | (removed) | Search analytics no longer persisted |
-| `memory.concepts` | `entities` (entity_type='MEMORY') + `entity_embeddings` | Embeddings moved to separate table |
-| `memory.relations` | `entity_edges` | Unified edge table |
-| `agent_registry` (SERIAL PK) | `agent_registry` (VARCHAR PK) | `agent_id` changed from SERIAL to VARCHAR(64) |
-| `agent_memory_access` | `entities.visibility` + workspaces | Visibility columns on entities replace separate ACL table; workspaces provide isolation |
-| `agent_session` (SERIAL PK) | `agent_session` (VARCHAR PK) | `session_id` changed from SERIAL to VARCHAR(128) |
-| `agent_collaboration` | `agent_collaboration` | Column renames: `source_agent_id` → `sharing_agent`, `target_agent_id` → `receiving_agent`, `memory_id` → `memory_id` (now references `entities`) |
-
-## Column Renames
-
-| v1.x Column | v2.0 Column | Table |
-|-------------|-------------|-------|
-| `concept_id` | `entity_id` | concepts → entities |
-| `concept_name` | `name` | knowledge_concepts → entities |
-| `concept_type` | `category` | knowledge_concepts → entities |
-| `from_concept_id` | `source_id` | relations → entity_edges |
-| `to_concept_id` | `target_id` | relations → entity_edges |
-| `relation_type` | `edge_type` | relations → entity_edges |
-| `relationship_id` | `edge_id` | knowledge_graph → entity_edges |
-| `source_concept_id` | `source_id` | knowledge_graph → entity_edges |
-| `target_concept_id` | `target_id` | knowledge_graph → entity_edges |
-| `relationship_type` | `edge_type` | knowledge_graph → entity_edges |
-| `relationship_strength` | `strength` | knowledge_graph → entity_edges |
-| `source_agent_id` | `sharing_agent` | agent_collaboration |
-| `target_agent_id` | `receiving_agent` | agent_collaboration |
-
-## Dropped Objects
-
-| Object | Type | Replacement |
-|--------|------|-------------|
-| `knowledge_concepts` | table | `entities` + `knowledge_meta` |
-| `knowledge_graph` | table | `entity_edges` |
-| `knowledge_versions` | table | `knowledge_api.create_concept_version()` |
-| `knowledge_distillation_log` | table | `memory_fusion.extract_knowledge_from_memories()` |
-| `knowledge_search_history` | table | (none) |
-| `agent_memory_access` | table | `entities.visibility` + workspaces |
-| `memory.concepts` | table | `entities` |
-| `memory.relations` | table | `entity_edges` |
-| `memory.v_concepts_with_relations` | view | `v_entity_graph` |
-| `memory.v_relations_with_names` | view | `v_entity_graph` |
-| `v_knowledge_concepts_active` | view | `v_knowledge_entities` |
-| `v_knowledge_graph_summary` | view | `knowledge_api.get_unvalidated()` |
-
-## Migration Strategies
-
-### Clean Install (Recommended for new deployments)
-
-```bash
-createdb memory_graph
-psql -d memory_graph -f scripts/deploy/1_schema.sql
-psql -d memory_graph -f scripts/deploy/2_api.sql
-psql -d memory_graph -f scripts/deploy/3_jobs.sql
-psql -d memory_graph -f scripts/deploy/4_harness_templates.sql
-```
-
-### Data Migration (Existing v1.x data)
+#### SQL Syntax Changes
 
 ```sql
--- 1. Migrate knowledge_concepts → entities + knowledge_meta
-INSERT INTO entities (entity_id, entity_type, title, summary, content,
-                      category, status, importance, source_agent,
-                      created_at, updated_at)
-SELECT concept_id, 'KNOWLEDGE', concept_name, description, content,
-       category,
-       CASE WHEN deprecated_at IS NOT NULL THEN 'DEPRECATED'
-            WHEN is_current THEN 'ACTIVE' ELSE 'ARCHIVED' END,
-       5, source_type,
-       created_at, updated_at
-FROM knowledge_concepts;
+-- Oracle
+INSERT INTO entities (entity_id, ...) VALUES (:eid, ...);
+SELECT RAWTOHEX(SYS_GUID()) FROM DUAL;
+UPDATE agent_registry SET last_seen_at = SYSTIMESTAMP - NUMTODSINTERVAL(1, 'HOUR');
+SELECT VECTOR_DISTANCE(embedding, TO_VECTOR(:vec), COSINE) FROM entity_embeddings;
+SELECT CONTAINS(title, :ftq, 1), SCORE(1) FROM entities;
 
-INSERT INTO knowledge_meta (entity_id, domain, topic, difficulty,
-                            review_count, last_reviewed, next_review)
-SELECT concept_id, source_type,
-       CASE WHEN source_memory_ids IS NOT NULL
-            THEN source_memory_ids
-            ELSE NULL END,
-       CASE WHEN confidence >= 0.8 THEN 'advanced'
-            WHEN confidence >= 0.5 THEN 'intermediate'
-            ELSE 'beginner' END,
-       0, validated_at, NULL
-FROM knowledge_concepts;
-
--- 2. Migrate knowledge_graph → entity_edges
-INSERT INTO entity_edges (source_id, target_id, edge_type, strength,
-                          confidence, source_type, metadata, created_at)
-SELECT source_concept_id, target_concept_id, relationship_type,
-       relationship_strength, confidence, 'KNOWLEDGE', properties, created_at
-FROM knowledge_graph;
-
--- 3. Migrate memory.concepts → entities (entity_type='MEMORY')
-INSERT INTO entities (entity_type, title, summary, category, importance, created_at, updated_at)
-SELECT 'MEMORY', name, description, category, 5, created_at, updated_at
-FROM memory.concepts;
-
--- 4. Migrate embeddings (composite PK: entity_id, entity_type)
-INSERT INTO entity_embeddings (entity_id, entity_type, embedding)
-SELECT c.concept_id, 'MEMORY', c.embedding
-FROM memory.concepts c
-WHERE c.embedding IS NOT NULL;
-
--- 5. Migrate JSONB tags → normalized tags + entity_tags
-INSERT INTO tags (name)
-SELECT DISTINCT jsonb_array_elements_text(tags)
-FROM entities
-WHERE tags IS NOT NULL
-ON CONFLICT (name) DO NOTHING;
-
-INSERT INTO entity_tags (entity_id, tag_id)
-SELECT e.entity_id, t.id
-FROM entities e, jsonb_array_elements_text(e.tags) AS tag_name
-JOIN tags t ON t.name = tag_name
-WHERE e.tags IS NOT NULL;
-
--- 6. Drop old schema
-DROP SCHEMA memory CASCADE;
-DROP TABLE IF EXISTS knowledge_concepts, knowledge_graph,
-                    knowledge_versions, knowledge_distillation_log,
-                    knowledge_search_history, agent_memory_access;
+-- PostgreSQL
+INSERT INTO entities (entity_id, ...) VALUES (%s, ...);
+SELECT encode(gen_random_bytes(16), 'hex');
+UPDATE agent_registry SET last_seen_at = CURRENT_TIMESTAMP - INTERVAL '1 hour';
+SELECT embedding <=> %s::vector FROM entity_embeddings;
+SELECT ts_rank(to_tsvector('english', title), to_tsquery(%s)) FROM entities;
 ```
 
-After migration, re-run Phase 2–4 to install the v2.2 API functions and
-scheduled jobs.
+### Python Code Migration
+
+#### Connection Setup
+
+```python
+# Oracle
+import oracledb
+pool = oracledb.create_pool(user=..., password=..., dsn="host:1521/service")
+
+# PostgreSQL
+import psycopg2
+from psycopg2 import pool
+pool = psycopg2.pool.ThreadedConnectionPool(
+    minconn=1, maxconn=5,
+    host="localhost", port=5432, dbname="ai_agent", user=..., password=...
+)
+```
+
+#### Query Execution
+
+```python
+# Oracle (named binds)
+cursor.execute("SELECT * FROM entities WHERE entity_id = :eid", {"eid": "ABC123"})
+cursor.execute("INSERT INTO entities VALUES (:eid, :etype, :title)",
+               {"eid": "X", "etype": "MEMORY", "title": "test"})
+
+# PostgreSQL (%s positional binds)
+cursor.execute("SELECT * FROM entities WHERE entity_id = %s", ["ABC123"])
+cursor.execute("INSERT INTO entities VALUES (%s, %s, %s)",
+               ["X", "MEMORY", "test"])
+```
+
+#### JSON Handling
+
+```python
+# Oracle: oracledb returns dict for JSON columns; str for JSON expressions
+row = cursor.fetchone()
+data = row["CONTEXT_DATA"]  # Already a dict
+
+# PostgreSQL: psycopg2 returns dict for JSONB columns
+row = cursor.fetchone()
+data = row["context_data"]  # Already a dict (lowercase column names)
+```
+
+### Encryption Migration
+
+```sql
+-- Oracle (DBMS_CRYPTO)
+v_cipher := DB_CRYPTO.encrypt(v_plain);
+v_plain := DB_CRYPTO.decrypt(v_cipher);
+
+-- PostgreSQL (pgcrypto)
+SELECT encode(encrypt_iv(%s::bytea, %s::bytea, 'aes-cbc'), 'base64');
+SELECT convert_from(decrypt_iv(decode(%s, 'base64'), %s::bytea, 'aes-cbc'), 'UTF8');
+```
+
+### Row-Level Security Migration
+
+```sql
+-- Oracle (Data Grants)
+CREATE DATA GRANT entities_agent_own
+  ON ENTITIES TO agent_data_role
+  WITH PREDICATE (...);
+
+-- PostgreSQL (Row Security Policies)
+CREATE POLICY entities_agent_own ON entities
+  FOR SELECT TO agent_data_role
+  USING (...);
+
+ALTER TABLE entities ENABLE ROW LEVEL SECURITY;
+```
+
+### Scheduler Job Migration
+
+```sql
+-- Oracle (DBMS_SCHEDULER)
+DBMS_SCHEDULER.CREATE_JOB(job_name => 'MEMORY_FUSION_JOB', ...);
+
+-- PostgreSQL (pg_cron)
+SELECT cron.schedule('memory_fusion_job', '0 2 * * *', $$SELECT memory_fusion_engine_fuse()$$);
+```
+
+### Property Graph Migration
+
+```sql
+-- Oracle (SQL/PGQ GRAPH_TABLE)
+SELECT * FROM GRAPH_TABLE(ORACLE_MEMORY_GRAPH
+  MATCH (a)-[e]->(b)
+  COLUMNS(a.entity_id, b.entity_id, e.edge_type));
+
+-- PostgreSQL (Apache AGE cypher)
+SELECT * FROM cypher('pg_memory_graph', $$
+  MATCH (a)-[e]->(b)
+  RETURN a.entity_id, b.entity_id, e.edge_type
+$$) AS (a_id VARCHAR, b_id VARCHAR, edge_type VARCHAR);
+```
+
+### Configuration Migration
+
+```json
+// Oracle config.json
+{
+  "database": {"user": "openclaw", "password": "hermes", "dsn": "10.10.10.130:1521/openclaw"}
+}
+
+// PostgreSQL config.json
+{
+  "database": {"user": "postgres", "password": "secret", "host": "10.10.10.130", "port": 5432, "dbname": "ai_agent"}
+}
+```
+
+### Master Key Directory
+
+```bash
+# Oracle
+~/.oracle-infra/master.key
+
+# PostgreSQL
+~/.pg-infra/master.key
+```
+
+## Full Migration Steps
+
+1. **Install PostgreSQL 18.3** with required extensions (pgvector, age, pg_cron, pgcrypto, plpython3u)
+2. **Create the database**: `createdb -U postgres ai_agent`
+3. **Deploy schema**: `psql -U postgres -d ai_agent -f scripts/deploy/1_schema.sql`
+4. **Deploy API functions**: `psql -U postgres -d ai_agent -f scripts/deploy/2_api.sql`
+5. **Deploy scheduled jobs**: `psql -U postgres -d ai_agent -f scripts/deploy/3_jobs.sql`
+6. **Export Oracle data** using custom ETL scripts (data pump not compatible)
+7. **Transform and load** data with type mappings applied
+8. **Update config.json** for PostgreSQL connection parameters
+9. **Update master key directory** from `~/.oracle-infra/` to `~/.pg-infra/`
+10. **Run tests**: `cd scripts && python -m tests.test_all`

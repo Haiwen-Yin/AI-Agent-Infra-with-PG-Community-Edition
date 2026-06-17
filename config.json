@@ -2,7 +2,7 @@
   "database": {
     "host": "10.10.10.131",
     "port": 5432,
-    "database": "memory_graph",
+    "dbname": "ai_agent",
     "user": "pgsql",
     "password": "",
     "min_conn": 2,
@@ -10,18 +10,12 @@
   },
   "server": {
     "host": "0.0.0.0",
-    "port": 8000,
+    "port": 18080,
     "session_timeout": 300
   },
   "embedding": {
     "api_url": "http://10.10.10.1:12345/v1/embeddings",
     "model": "text-embedding-bge-m3",
     "dimension": 1024
-  },
-  "security": {
-    "masking_enabled": true,
-    "pbkdf2_iterations": 100000,
-    "max_login_attempts": 5,
-    "lockout_minutes": 15
   }
 }

@@ -1,67 +1,75 @@
-# Web Visualization - PostgreSQL Memory System v2.3.0
+# Web Visualization - AI Agent Infra v3.6.2 (2026-06-18) - PG Community Edition
 
-## Status
+## Server
 
-Web visualization is **implemented**. Run locally with `python3.14 scripts/visualization/server.py`.
-
-## Architecture
-
-The visualization server runs **locally** (Agent side), connecting to the remote PostgreSQL 18 database on 10.10.10.131 via psycopg2 over TCP. No web server runs on the database host.
-
-```
-[Local Machine]                    [10.10.10.131]
-+------------------+               +------------------+
-| python3.14       |  TCP 5432     | PostgreSQL 18    |
-| server.py :8000  |-------------->| memory_graph DB  |
-| vis.js (local)   |               |                  |
-+------------------+               +------------------+
-```
-
-## Starting
-
-```bash
-cd /root/memory-pg18-by-yhw
-python3.14 scripts/visualization/server.py
-# Open http://localhost:8000 in browser
-# Login: admin / admin123 (or any system_users account)
-```
+`server.py` provides a web interface for browsing entities, relationships, agents, task plans, and graph data.
 
 ## Pages
 
 | Page | Route | Description |
 |------|-------|-------------|
-| Knowledge Graph | `/knowledge` | Interactive vis.js graph of KNOWLEDGE entities and edges; domain-colored nodes, importance-sized, click for detail panel |
-| Memory Graph | `/memory` | Interactive vis.js graph of MEMORY entities and edges; category-colored nodes, search/filter bar |
-| Agent Dashboard | `/agents` | 3-tab dashboard: Agent Registry, Active Sessions, Collaboration Requests; status badges |
-| Task Plans | `/tasks` | Status filter, keyword search, Bootstrap accordion with expandable step tables; status-colored badges |
-| Workspaces | `/workspaces` | Workspace table with expandable context chain timeline and linked tasks; context_data JSON modal |
-| Graph Explorer | `/graph` | Stats cards, keyword/type search, click result to load vis.js network (center + neighbors grouped by type), detail panel |
+| Knowledge Graph | `/knowledge` | Interactive vis.js graph of KNOWLEDGE entities and edges |
+| Memory Content | `/memory` | Interactive vis.js graph of MEMORY entities and edges |
+| Agent Collaboration | `/agents` | 3-tab dashboard: Agent Registry, Active Sessions, Collaboration Requests |
+| Task Plans | `/tasks` | Status filter, keyword search, accordion plan list with expandable step tables |
+| Property Graph | `/graph` | Graph API explorer for entity context, paths, and communities (Apache AGE) |
+
+All pages share: bilingual UI (zh/en), session auth with auto-logout timer, `/api/stats` sidebar.
 
 ## API Routes
 
-| Route | Method | Auth | Description |
-|-------|--------|------|-------------|
-| `/api/health` | GET | No | `{status: "ok", version: "2.2.1"}` |
-| `/api/login` | POST | No | `{username, password}` → `{success, session_id}` |
-| `/api/logout` | GET | Yes | Clear session cookie |
-| `/api/knowledge` | GET | Yes | `{nodes: [...], edges: [...]}` for vis.js |
-| `/api/memory` | GET | Yes | `{nodes: [...], edges: [...]}` for vis.js |
-| `/api/agents` | GET | Yes | `{agents: [...], sessions: [...], collaborations: [...]}` |
-| `/api/tasks` | GET | Yes | `{plans: [{...steps...}]}` |
-| `/api/workspaces` | GET | Yes | `{workspaces: [...]}` |
-| `/api/stats` | GET | Yes | `{entity_counts: {...}, edge_count, workspace_count, agent_count}` |
-| `/api/graph/neighbors` | GET | Yes | `?entity_id=X` — neighbor data |
-| `/api/graph/context` | GET | Yes | `?entity_id=X` — entity context with grouped neighbors |
-| `/api/graph/stats` | GET | Yes | Graph statistics JSON |
-| `/api/graph/search` | GET | Yes | `?q=X` — search results JSON |
-| `/api/graph/all` | GET | Yes | All entities + edges for full graph rendering |
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/health` | GET | Health check (no auth required) |
+| `/api/knowledge` | GET | Knowledge graph JSON (nodes + edges) |
+| `/api/knowledge/refresh` | GET | Force refresh knowledge cache |
+| `/api/memory` | GET | Memory graph JSON (nodes + edges) |
+| `/api/memory/refresh` | GET | Force refresh memory cache |
+| `/api/agents` | GET | Agent registry, sessions, collaborations JSON |
+| `/api/tasks` | GET | Task plans + steps JSON (query params: `status`, `keyword`) |
+| `/api/stats` | GET | Entity counts by type + edge count |
+| `/api/login` | POST | Authenticate (form: username + password) |
+| `/api/logout` | GET | Clear session cookie, redirect to login |
+| `/api/graph/neighbors` | GET | Graph neighbors for entity (param: `entity_id`, `direction`) |
+| `/api/graph/path` | GET | Shortest path between entities (params: `source_id`, `target_id`) |
+| `/api/graph/context` | GET | Entity context with grouped neighbors (param: `entity_id`) |
+| `/api/graph/stats` | GET | Graph statistics (vertex/edge counts, distributions) |
+| `/api/graph/search` | GET | Graph-aware search (params: `keyword`, `entity_type`, `category`) |
+| `/api/graph/subgraph` | GET | Subgraph extraction (param: `entity_ids`, `include_intermediate`) |
+| `/api/graph/communities` | GET | Community detection (params: `entity_type`, `min_connections`) |
 
-## Tech Stack
+## UI Column Updates
 
-- **Server**: Python `http.server` (standard library only, no Flask/Django)
-- **Graph Rendering**: vis.js Network (served as local static file `/static/vis-network.min.js`)
-- **CSS Framework**: Bootstrap 5 from CDN
-- **Auth**: Session-based via cookies, passwords from `system_users` table (PBKDF2-SHA256)
-- **i18n**: Bilingual (Chinese/English) toggle with `data-zh`/`data-en` attributes
-- **Theme**: Dark theme (CSS variables)
-- **DB Connection**: psycopg2 ThreadedConnectionPool via `scripts/lib/connection.py`
+New columns displayed:
+- **Summary**: Entity summary text
+- **Source Agent**: Creating agent ID
+- **Retrieval Count**: Access counter
+- **Execution Mode**: On harness templates (SEQUENTIAL/PARALLEL/CONDITIONAL)
+
+## Agent Collaboration Page
+
+Three tabbed sections:
+
+- **Agent Registry** — Table with Agent ID, Name, Type, Status (colored badge), Active Sessions count, Last Seen, Created timestamp
+- **Active Sessions** — Recent 50 sessions with Session ID (truncated), Agent Name, Active (Y/N badge), Start Time
+- **Collaboration Requests** — Recent 50 requests with From/To agent names, Type, Entity ID, Strength, Created timestamp
+
+Status badges: ACTIVE=green, INACTIVE=gray, SUSPENDED=orange, DECOMMISSIONED=red.
+
+## Quick Start
+
+```bash
+./start_web_server.sh start    # Start (daemon mode)
+./start_web_server.sh status   # Show status + config
+./start_web_server.sh stop     # Stop server
+
+# Open http://localhost:18080 in browser
+# Login: admin / admin123
+```
+
+## Configuration
+
+Via `config.json` or environment variables:
+- `MEMORY_SERVER_HOST` (default: 0.0.0.0)
+- `MEMORY_SERVER_PORT` (default: 18080)
+- `MEMORY_SESSION_TIMEOUT` (default: 300 seconds)

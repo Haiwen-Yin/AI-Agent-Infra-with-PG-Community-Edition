@@ -1,257 +1,194 @@
-"""PostgreSQL Memory System v2.3.1 - Credential & Pool Agent API Tests"""
+"""AI Agent Infra v3.6.2 - PG Community Edition - Credential & Config Tests"""
+
 import sys
 import os
-import uuid
-
+import json
+import tempfile
+import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from lib.agent_api import (
-    register_agent, get_agent,
-    issue_credential, verify_credential, get_credentials_for_user,
-    revoke_credential, hibernate_agent, wake_agent,
-    register_pool_agent, assign_pool_agent,
+from lib.connection_crypto import (
+    encrypt_credential_for_distribution,
+    decrypt_credential_from_distribution,
+    save_agent_config,
+    load_agent_config,
+    encrypt_section,
+    decrypt_section,
+    generate_admin_token as crypto_generate_admin_token,
+    verify_admin_token as crypto_verify_admin_token,
+    rotate_admin_token,
 )
-from lib.connection import execute
+from lib.agent_api import (
+    generate_admin_token,
+    verify_admin_token,
+)
+from lib.connection import close_pool
 
-_cleanup_agents = []
-_cleanup_credentials = []
-_passed = 0
-_failed = 0
-
-
-def _cleanup():
-    for agent_id in _cleanup_agents:
-        try:
-            execute("DELETE FROM agent_credentials WHERE agent_id = %s", (agent_id,))
-            execute("DELETE FROM agent_collaboration WHERE source_agent_id = %s OR target_agent_id = %s", (agent_id, agent_id))
-            execute("DELETE FROM entity_access_log WHERE agent_id = %s", (agent_id,))
-            execute("DELETE FROM agent_session WHERE agent_id = %s", (agent_id,))
-            execute("DELETE FROM agent_registry WHERE agent_id = %s", (agent_id,))
-        except Exception:
-            pass
-    for cred_id in _cleanup_credentials:
-        try:
-            execute("DELETE FROM agent_credentials WHERE credential_id = %s", (cred_id,))
-        except Exception:
-            pass
-    _cleanup_agents.clear()
-    _cleanup_credentials.clear()
+TS = str(int(time.time()))
 
 
-def _record(ok):
-    global _passed, _failed
-    if ok:
-        _passed += 1
-    else:
-        _failed += 1
+def test_encrypt_decrypt_credential():
+    cred_data = {
+        "username": "PG_TEST_USER",
+        "password": "pg_test_password_123",
+        "host": "10.10.10.131",
+        "port": "5432",
+        "dbname": "ai_agent",
+    }
+    token = "AT_test_distribution_token"
+    encrypted = encrypt_credential_for_distribution(cred_data, token)
+    assert "credential_encrypted" in encrypted
+    assert "salt" in encrypted
+
+    decrypted = decrypt_credential_from_distribution(
+        encrypted["credential_encrypted"],
+        encrypted["salt"],
+        token,
+    )
+    assert decrypted["username"] == "PG_TEST_USER"
+    assert decrypted["password"] == "pg_test_password_123"
+    assert decrypted["host"] == "10.10.10.131"
+    assert decrypted["port"] == "5432"
+    assert decrypted["dbname"] == "ai_agent"
+    print("PASS: test_encrypt_decrypt_credential")
 
 
-def _make_agent(prefix="cred_agent"):
-    agent_id = "test-agent-" + uuid.uuid4().hex[:8]
-    register_agent(agent_id=agent_id, agent_name=prefix + " agent")
-    _cleanup_agents.append(agent_id)
-    return agent_id
-
-
-def test_issue_credential():
+def test_encrypt_with_wrong_key_fails():
+    cred_data = {"username": "X", "password": "Y", "host": "Z", "port": "5432", "dbname": "db"}
+    encrypted = encrypt_credential_for_distribution(cred_data, "AT_correct_token")
     try:
-        agent_id = _make_agent("cred_issue")
-        user_id = "test_user_" + uuid.uuid4().hex[:8]
-        cred_id = issue_credential(
-            agent_id=agent_id,
-            user_id=user_id,
-            cred_type="API_KEY",
-            scope={"access_level": "READ"},
-            expires_hours=24,
+        decrypt_credential_from_distribution(
+            encrypted["credential_encrypted"],
+            encrypted["salt"],
+            "AT_wrong_token",
         )
-        ok = cred_id is not None and isinstance(cred_id, int)
-        if ok:
-            _cleanup_credentials.append(cred_id)
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_issue_credential: " + status)
-    return ok
+        assert False, "Should have raised ValueError"
+    except ValueError:
+        pass
+    print("PASS: test_encrypt_with_wrong_key_fails")
 
 
-def test_verify_credential():
+def test_save_agent_config():
+    cred_data = {
+        "username": "PG_CONFIG_TEST",
+        "password": "config_test_pwd",
+        "host": "10.10.10.131",
+        "port": "5432",
+        "dbname": "ai_agent",
+    }
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+        config_path = f.name
+
     try:
-        agent_id = _make_agent("cred_verify")
-        user_id = "test_user_" + uuid.uuid4().hex[:8]
-        cred_id = issue_credential(
-            agent_id=agent_id,
-            user_id=user_id,
-            cred_type="SESSION",
-            scope={"access_level": "FULL"},
-            expires_hours=24,
-        )
-        _cleanup_credentials.append(cred_id)
-        result = verify_credential(cred_id)
-        ok = result is not None and result.get("credential_id") == cred_id and result.get("is_active") is True
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_verify_credential: " + status)
-    return ok
+        save_agent_config("config-test-agent-" + TS, cred_data, config_path)
+        with open(config_path) as f:
+            raw = json.load(f)
+        assert "end_user" in raw
+        assert "_encrypted" in raw["end_user"]
+        assert "password" not in json.dumps(raw)
+
+        loaded = load_agent_config(config_path)
+        assert loaded["username"] == "PG_CONFIG_TEST"
+        assert loaded["password"] == "config_test_pwd"
+        assert loaded["host"] == "10.10.10.131"
+        assert loaded["port"] == "5432"
+        assert loaded["dbname"] == "ai_agent"
+        print("PASS: test_save_agent_config")
+    finally:
+        os.unlink(config_path)
 
 
-def test_verify_expired_credential():
+def test_load_agent_config():
+    cred_data = {
+        "username": "PG_LOAD_TEST",
+        "password": "load_test_pwd",
+        "host": "10.10.10.131",
+        "port": "5432",
+        "dbname": "ai_agent",
+    }
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+        config_path = f.name
+
     try:
-        agent_id = _make_agent("cred_exp")
-        user_id = "test_user_" + uuid.uuid4().hex[:8]
-        cred_id = issue_credential(
-            agent_id=agent_id,
-            user_id=user_id,
-            cred_type="TEMP",
-            scope={"access_level": "LIMITED"},
-            expires_hours=0,
-        )
-        _cleanup_credentials.append(cred_id)
-        result = verify_credential(cred_id)
-        ok = result is None
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_verify_expired_credential: " + status)
-    return ok
+        save_agent_config("load-test-agent-" + TS, cred_data, config_path)
+        loaded = load_agent_config(config_path)
+        assert loaded["agent_id"] == "load-test-agent-" + TS
+        assert loaded["username"] == "PG_LOAD_TEST"
+        print("PASS: test_load_agent_config")
+    finally:
+        os.unlink(config_path)
 
 
-def test_get_credentials_for_user():
+def test_load_nonexistent_config():
     try:
-        agent_id = _make_agent("cred_user")
-        user_id = "test_user_" + uuid.uuid4().hex[:8]
-        c1 = issue_credential(agent_id=agent_id, user_id=user_id, cred_type="API_KEY", scope={"r": True})
-        c2 = issue_credential(agent_id=agent_id, user_id=user_id, cred_type="SESSION", scope={"w": True})
-        _cleanup_credentials.extend([c1, c2])
-        results = get_credentials_for_user(user_id)
-        ok = results is not None and len(results) >= 2
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_get_credentials_for_user: " + status)
-    return ok
+        load_agent_config("/tmp/pg_nonexistent_config_" + TS + ".json")
+        assert False, "Should have raised FileNotFoundError"
+    except (FileNotFoundError, OSError):
+        pass
+    print("PASS: test_load_nonexistent_config")
 
 
-def test_revoke_credential():
-    try:
-        agent_id = _make_agent("cred_revoke")
-        user_id = "test_user_" + uuid.uuid4().hex[:8]
-        cred_id = issue_credential(
-            agent_id=agent_id,
-            user_id=user_id,
-            cred_type="API_KEY",
-            scope={"access_level": "FULL"},
-            expires_hours=24,
-        )
-        _cleanup_credentials.append(cred_id)
-        revoked = revoke_credential(cred_id)
-        result = verify_credential(cred_id)
-        ok = revoked and result is None
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_revoke_credential: " + status)
-    return ok
+def test_generate_admin_token():
+    token = generate_admin_token()
+    assert token is not None
+    assert token.startswith("AT_")
+    assert len(token) > 10
+    print(f"PASS: test_generate_admin_token (token={token[:16]}...)")
 
 
-def test_hibernate_agent():
-    try:
-        agent_id = _make_agent("cred_hib")
-        hibernated = hibernate_agent(agent_id)
-        fetched = get_agent(agent_id)
-        ok = hibernated and fetched is not None and fetched.get("status") == "DORMANT"
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_hibernate_agent: " + status)
-    return ok
+def test_verify_admin_token():
+    token = generate_admin_token()
+    assert verify_admin_token(token)
+    assert not verify_admin_token("AT_invalid_token_12345")
+    assert not verify_admin_token("")
+    print("PASS: test_verify_admin_token")
 
 
-def test_wake_agent():
-    try:
-        agent_id = _make_agent("cred_wake")
-        hibernate_agent(agent_id)
-        woken = wake_agent(agent_id)
-        fetched = get_agent(agent_id)
-        ok = woken and fetched is not None and fetched.get("status") == "ACTIVE"
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_wake_agent: " + status)
-    return ok
+def test_rotate_admin_token():
+    old_token = generate_admin_token()
+    assert verify_admin_token(old_token)
+
+    new_token = generate_admin_token()
+    assert verify_admin_token(new_token)
+    assert not verify_admin_token(old_token)
+    print("PASS: test_rotate_admin_token")
 
 
-def test_register_pool_agent():
-    try:
-        agent_id = register_pool_agent(
-            agent_name="test pool agent " + uuid.uuid4().hex[:8],
-            capabilities={"task_type": "general"},
-            skills_tags=["python", "testing"],
-        )
-        ok = agent_id is not None
-        if ok:
-            _cleanup_agents.append(agent_id)
-            fetched = get_agent(agent_id)
-            ok = fetched is not None and fetched.get("status") == "POOL"
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_register_pool_agent: " + status)
-    return ok
-
-
-def test_assign_pool_agent():
-    try:
-        agent_id = register_pool_agent(
-            agent_name="test assign pool " + uuid.uuid4().hex[:8],
-            capabilities={"task_type": "coding"},
-            skills_tags=["python", "coding"],
-        )
-        _cleanup_agents.append(agent_id)
-        user_id = "test_user_" + uuid.uuid4().hex[:8]
-        assigned_id = assign_pool_agent(user_id, required_skills=["python"])
-        ok = assigned_id is not None
-        if ok:
-            fetched = get_agent(assigned_id)
-            ok = fetched is not None and fetched.get("status") == "ACTIVE"
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_assign_pool_agent: " + status)
-    return ok
+def test_verify_invalid_token():
+    assert not verify_admin_token("")
+    assert not verify_admin_token("not_a_token")
+    assert not verify_admin_token("AT_")
+    print("PASS: test_verify_invalid_token")
 
 
 def run_all():
-    tests = [
-        test_issue_credential, test_verify_credential,
-        test_verify_expired_credential, test_get_credentials_for_user,
-        test_revoke_credential, test_hibernate_agent, test_wake_agent,
-        test_register_pool_agent, test_assign_pool_agent,
-    ]
-    for t in tests:
-        t()
-    _cleanup()
-    print("\n  Credential: {} passed, {} failed, {} total".format(_passed, _failed, _passed + _failed))
-    return _failed == 0
+    passed = 0
+    failed = 0
+    for test_fn in [
+        test_encrypt_decrypt_credential,
+        test_encrypt_with_wrong_key_fails,
+        test_save_agent_config,
+        test_load_agent_config,
+        test_load_nonexistent_config,
+        test_generate_admin_token,
+        test_verify_admin_token,
+        test_rotate_admin_token,
+        test_verify_invalid_token,
+    ]:
+        try:
+            test_fn()
+            passed += 1
+        except Exception as e:
+            print(f"FAIL: {test_fn.__name__} - {e}")
+            import traceback
+            traceback.print_exc()
+            failed += 1
+
+    close_pool()
+    print(f"\nCredential Tests: {passed} passed, {failed} failed")
+    return failed == 0
 
 
 if __name__ == "__main__":
-    run_all()
+    success = run_all()
+    sys.exit(0 if success else 1)

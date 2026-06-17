@@ -1,444 +1,317 @@
 ---
-name: memory-pg18-by-yhw
-version: v2.3.1
+name: ai-agent-infra-pg-community
+version: v3.6.2
 author: Haiwen Yin
-description: "PostgreSQL AI Database Memory System v2.3.1 - Embedding Python API, Spec Driven Development, Agent Elastic Management, Collaboration Groups, Workspace & context continuity, Apache AGE property graph, pgvector HNSW, pg-embedding-gen-by-yhw, psycopg2 driver, 4-phase SQL deployment, normalized tags, 27 tables, 7 PL/pgSQL schemas"
-tags: [postgresql, memory-system, knowledge-base, vector-search, psycopg2, property-graph, multi-agent, pg18, age, pg-embedding-gen-by-yhw, workspace, context-continuity, handoff, normalized-tags, jsonb, sdd, elastic-agents, collab-groups]
+description: "AI Agent Infra with PostgreSQL - Community Edition v3.6.2 - AI Agent的基础设施架构"
+tags: [postgresql, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, psycopg2, property-graph, apache-age, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, spec-driven, elastic-agent, collaboration, admin-agent-separation, pgvector, pg-cron, plpython3u, pgcrypto, row-security-policies]
+related_skills: [postgresql-18, psycopg2-execution-methodology]
 ---
 
-# PostgreSQL AI Database Memory System v2.3.1
+# AI Agent Infra with PostgreSQL - Community Edition v3.6.2
 
-**Author**: Haiwen Yin
-**Version**: v2.3.1 - 2026-05-26
-**License**: Apache License 2.0
+**Author:** Haiwen Yin
+**Version:** v3.6.2 - 2026-06-18
+**License:** Apache License 2.0 (Community Edition)
 
----
+## ⚠️ CRITICAL: Database & Driver Requirements
 
-## Prerequisites
+### PostgreSQL Version
 
-| Component | Version | Purpose |
-|-----------|---------|---------|
-| PostgreSQL | 18+ | Core database |
-| pgvector | 0.8+ | VECTOR type and HNSW index for semantic search |
-| Apache AGE | 1.7+ | Property graph and Cypher query support |
-| pg-embedding-gen-by-yhw | 1.0+ | Custom extension for in-database embedding generation ([GitHub](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)) |
-| Python | 3.14+ | Python API, web visualization (3.6+ for API only) |
-| Python `psycopg2-binary` | 2.9+ | PostgreSQL database driver |
-| Python `requests` | Any | HTTP client for pg-embedding-gen-by-yhw proxy |
+**Minimum required version: PostgreSQL 18.3**
 
-**pg-embedding-gen-by-yhw** ([GitHub](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)) is a custom PostgreSQL 18 extension developed by Haiwen Yin. It is **not** a built-in database feature or a standard PostgreSQL extension. It uses PostgreSQL 18's `COPY FROM PROGRAM` mechanism to call a Python proxy (`embedding_proxy.py`) that communicates with any OpenAI-compatible `/v1/embeddings` API endpoint. Key capabilities:
+v3.6.2 uses PostgreSQL features that require version 18.3 or later: pgvector for vector similarity search, Apache AGE for property graph queries, pgcrypto for in-database encryption, Row Security Policies for data isolation, and pg_cron for scheduled jobs.
 
-- Multi-model profile management via SQL (`embedding_register_model`, `embedding_list_models`, etc.)
-- Auto-detection of vector dimensions on first use
-- Three call modes: default profile, named profile, or inline (model_id + api_url)
-- Base64-encoded input for shell-safe special character handling
-- Automatic retry with exponential backoff
-- Health check, vector validation, batch generation, cosine similarity
-- Request logging and statistics
+```sql
+SELECT version();
+-- Must return: PostgreSQL 18.3 or higher
+```
 
-Installation: `sudo bash scripts/install.sh` then `psql -d your_db -f sql/install.sql` (from the pg-embedding-gen-by-yhw project).
+### Python psycopg2 Driver
+
+**Required version: psycopg2 2.9+**
+
+```bash
+pip install psycopg2-binary>=2.9
+```
+
+**Key differences from Oracle edition:**
+- **Bind variables**: PostgreSQL uses `%s` positional binds (not `:name` named binds)
+- **Connection**: `psycopg2.pool.ThreadedConnectionPool` (not `oracledb` pool)
+- **JSON columns**: PostgreSQL native `JSONB` (not Oracle OSON)
+- **Encryption**: `pgcrypto` extension `encrypt_iv`/`decrypt_iv` (not Oracle `DBMS_CRYPTO`)
+- **Property Graph**: Apache AGE `cypher()` function (not Oracle SQL/PGQ `GRAPH_TABLE`)
+- **Full-text**: PostgreSQL `ts_vector`/`ts_query` (not Oracle Text `CONTAINS`/`SCORE`)
+- **Row Security**: PostgreSQL Row Security Policies (not Oracle Data Grants)
+- **Scheduling**: `pg_cron` extension (not Oracle Scheduler)
+- **Vector**: `pgvector` extension `<=>` operator (not Oracle `VECTOR_DISTANCE`)
+- **Stored Procedures**: PL/pgSQL and PL/Python3u (not Oracle PL/SQL)
 
 ## Architecture Overview
 
 ```
-+------------------------------------------------------------------+
-|                     PostgreSQL AI Memory System                  |
-+------------------------------------------------------------------+
-|                                                                  |
-|  +-----------------------------------------------------------+   |
-|  |           ENTITIES (unified, BIGINT IDENTITY PK)          |   |
-|  |  +----------+----------+----------+--------+--------------+   |
-|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_     |   |
-|  |  |          |          |PUT       |ENCE    | TEMPLATE     |   |
-|  |  +----------+----------+----------+--------+--------------+   |
-|  |  COL: WORKSPACE_ID -> WORKSPACES                          |   |
-|  +-----------------------------------------------------------+   |
-|                         |                                        |
-|  +-----------------------------------------------+               |
-|  |  ENTITY_EDGES (unified directed edges)        |               |
-|  |  SOURCE_TYPE denormalized for AGE + queries   |               |
-|  +-----------------------------------------------+               |
-|                                                                  |
-|  +-----------------------------------------------+               |
-|  |  WORKSPACES (v2.2.0)                          |               |
-|  |  |-- WORKSPACE_CONTEXT (append-only JSONB)    |               |
-|  |  +-- WORKSPACE_TASKS (workspace <-> plan link)|               |
-|  +-----------------------------------------------+               |
-|                                                                  |
-|  +-----------------------------------------------+               |
-|  |  AGENT_SESSION (handoff chain)                |               |
-|  |  PREDECESSOR_SESSION_ID -> self (chain)       |               |
-|  |  WORKSPACE_ID -> WORKSPACES                   |               |
-|  +-----------------------------------------------+               |
-|                                                                  |
-+------------------------------------------------------------------+
++-----------------------------------------------------------------+
+|                AI Agent Infra with PostgreSQL                   |
+|                   Community Edition v3.6.2                      |
++-----------------------------------------------------------------+
+|                                                                 |
+|  +-----------------------------------------------------------+  |
+|  |  ENTITIES (unified, LIST partitioned)                     |  |
+|  |  +----------+----------+----------+--------+-----------+  |  |
+|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_  |  |  |
+|  |  |          |          |PUT       |ENCE    | TEMPLATE  |  |  |
+|  |  +----------+----------+----------+--------+-----------+  |  |
+|  |  PK: (ENTITY_ID, ENTITY_TYPE)                             |  |
+|  |  COL: WORKSPACE_ID -> WORKSPACES                          |  |
+|  +-----------------------------------------------------------+  |
+|                         |                                       |
+|  +----------------------------------------------+               |
+|  |  ENTITY_EDGES (REFERENCE partitioned)        |               |
+|  |  PK: (EDGE_ID, SOURCE_ID)                    |               |
+|  |  FK: -> ENTITIES(ENTITY_ID, ENTITY_TYPE)     |               |
+|  |  + 4 other reference-partitioned children    |               |
+|  +----------------------------------------------+               |
+|                                                                 |
+|  +----------------------------------------------+               |
+|  |  WORKSPACES                                  |               |
+|  |  |-- WORKSPACE_CONTEXT (append-only JSONB)   |               |
+|  |  +-- WORKSPACE_TASKS (updatable)             |               |
+|  +----------------------------------------------+               |
+|                                                                 |
+|  +----------------------------------------------+               |
+|  |  AGENT_SESSION (handoff chain)               |               |
+|  |  PREDECESSOR_SESSION_ID -> self (chain)      |               |
+|  +----------------------------------------------+               |
+|                                                                 |
++-----------------------------------------------------------------+
 ```
 
-## v2.3.1 Key Addition: Embedding Python API
+## Database Access Security
 
-| Feature | Description |
-|---------|-------------|
-| **Embedding Python API** | embedding_api.py (12 functions): generate, store, search, batch, stats via pgvector + pg-embedding-gen-by-yhw |
-| **EMBEDDING_GENERATION_JOB** | pg_cron job every 2 hours for MEMORY/KNOWLEDGE entity embedding generation |
-| **19 New Embedding Tests** | 162/162 tests passing, 12 test suites |
+Five-plus-one-layer database access security model with Row Security Policies:
 
-## v2.3.0 Key Additions: SDD, Elastic Agents, Collaboration Groups
+| Layer | Component | Description |
+|-------|-----------|-------------|
+| L1 | **SKILL.md Policy** | Prohibits direct SQL/DML/DDL except during initial deployment |
+| L2 | **4_grants.sql** | Restricted `agent_api` user: EXECUTE on functions + SELECT on tables only |
+| L3 | **SECURITY DEFINER** | All PL/pgSQL functions execute with schema owner privileges |
+| L4 | **Row Security Policies** | Declarative row-level access control via PostgreSQL RLS; zero-trust (no context = no data) |
+| L5 | **Audit logging** | Audit trigger for direct DML bypass detection |
+| L6 | **`_sanitize_context_data()`** | Auto-redacts sensitive fields in `save_context()` |
 
-| Feature | Description |
-|---------|-------------|
-| **Spec Driven Development (SDD)** | spec_meta + spec_plan_links tables, SPEC entity type, spec_api.py (10 functions), spec_manager PL/pgSQL schema (6 functions) |
-| **Agent Elastic Management** | agent_credentials table, DORMANT/POOL agent states, 8 new agent_api functions (hibernate/wake/pool), dormant_agent_job, credential_cleanup_job |
-| **Collaboration Groups** | collab_groups + collab_group_members tables, collab_api.py (10 functions), collab_group_manager PL/pgSQL schema (7 functions), auto-created shared/personal workspaces, collab_group_cleanup_job |
-| **5 New Tables** | spec_meta, spec_plan_links, agent_credentials, collab_groups, collab_group_members |
-| **agent_registry Expanded** | +5 columns (created_by_agent_id, agent_role, current_user_id, pool_config, last_active_at), DORMANT/POOL status |
-| **workspaces Expanded** | +2 workspace types (COLLAB_GROUP, PERSONAL_IN_GROUP) |
-| **entities Expanded** | +SPEC entity_type |
-| **162 Tests** | 162/162 passing, 12 test suites |
+### Row Security Policies — Agent Usage Guide
 
-## v2.2.0 Key Addition: Workspace & Context Continuity
+v3.6.2 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provides declarative row-level access control using `current_setting('app.current_agent_id', TRUE)` to enforce per-agent data filtering.
 
-| Feature | Description |
-|---------|-------------|
-| WORKSPACES | Isolated execution environments for agents with SHARED/ISOLATED modes |
-| ISOLATION_MODE | SHARED (cross-workspace visibility) or ISOLATED (strict boundary) |
-| WORKSPACE_CONTEXT | Append-only context chain (CHECKPOINT, HANDOFF, SUMMARY, ERROR_STATE, AUTO_SAVE) |
-| Agent Handoff | Session chain via PREDECESSOR_SESSION_ID; context auto-loaded on create_session |
-| ENTITIES.WORKSPACE_ID | FK to WORKSPACES; all entity queries scoped by workspace when ISOLATED |
-| workspace_manager Schema | 10 PL/pgSQL functions for workspace lifecycle, context chain, handoff, recovery |
+**Zero trust**: If no agent context is set, Row Security Policies return **no data**.
 
-## Quick Start
+#### Current Enforcement Status (v3.6.2)
 
-### 1. Deploy Schema (4 phases)
-```bash
-psql -d memory_graph -f scripts/deploy/1_schema.sql
-psql -d memory_graph -f scripts/deploy/2_api.sql
-psql -d memory_graph -f scripts/deploy/3_jobs.sql
-psql -d memory_graph -f scripts/deploy/4_harness_templates.sql
+| Security Mechanism | Deployed? | Enforcing? | Details |
+|---|---|---|---|
+| 25+ Row Security Policies | ✅ Yes | ✅ Yes | Queries filtered by `current_setting('app.current_agent_id', TRUE)` predicates |
+| 3 Database Roles | ✅ Yes | ✅ Yes | `admin_data_role`, `agent_data_role`, `pool_agent_data_role` |
+| Agent Context via current_setting | ✅ Yes | ✅ Yes | `connection.py` sets `app.current_agent_id` per session |
+| SECURITY DEFINER functions | ✅ Yes | ✅ Yes | Functions execute with schema owner privileges |
+| Restricted user (agent_api) | ✅ Yes | ✅ Yes | No DML/DDL, EXECUTE-only on functions |
+| Audit trigger | ✅ Yes | ✅ Yes | Audits direct DML on protected tables |
+
+#### Data Access Summary for Agents
+
+| Table | Agent Can See | Agent Cannot See |
+|-------|--------------|-----------------|
+| AGENT_REGISTRY | Own row only | Other agents' rows |
+| WORKSPACE_CONTEXT | Own workspaces + collab groups; own context always visible; other agents' SHARED/PUBLIC context visible in collab workspaces; other agents' PRIVATE context blocked | Other agents' PRIVATE context in collab workspaces |
+| ENTITIES | PUBLIC + own PRIVATE + shared in workspace | Other agents' PRIVATE entities |
+| AGENT_CREDENTIALS | Own rows (CREDENTIAL_VALUE masked) | Other agents' credentials |
+| SYSTEM_CONFIG | Nothing (admin only) | All rows |
+| SKILL_META | All skills (read-only) | Cannot modify |
+| CONTEXT_BRANCHES | Own workspaces + collab groups | Other agents' branches |
+| TASK_PLANS | Own tasks + collab branches | Other agents' tasks |
+| COLLAB_GROUP_MEMBERS | Own membership rows | Other agents' membership rows |
+| COLLAB_GROUPS | Groups where member belongs | Groups without membership |
+
+## Admin/Agent Separation Architecture
+
+v3.6.2 introduces a mode system that separates Admin Agent (runs Web Portal, holds schema owner credentials) from Business Agent (independent process, only holds restricted user credentials).
+
+### Modes
+
+| Mode | Process | Schema Owner Credentials | Web Portal | Use Case |
+|------|---------|------------------------|------------|----------|
+| `standalone` | Single process | Yes | Yes | Development, single-node (default, backward compatible) |
+| `admin` | Admin Agent | Yes | Yes | Production Admin node |
+| `agent` | Business Agent | No (restricted user only) | No | Production Business Agent |
+
+### Key APIs
+
+| API | Module | Description |
+|-----|--------|-------------|
+| `generate_admin_token()` | agent_api | Generate admin registration token (AT_ + 32hex) |
+| `verify_admin_token(token)` | agent_api | Constant-time verify admin token |
+| `register_agent_via_admin(agent_id, name, token)` | agent_api | Register agent + return recovery codes |
+| `recover_agent_via_admin(agent_id, code, token)` | agent_api | Recover agent with recovery code |
+| `generate_recovery_codes(agent_id)` | agent_api | Generate 8 one-time RC-XXXX-XXXX-XXXX codes |
+| `verify_recovery_code(agent_id, code)` | agent_api | Verify + consume one-time recovery code |
+| `encrypt_credential_for_distribution(cred, token)` | connection_crypto | Encrypt credential using admin_token via PBKDF2 |
+| `decrypt_credential_from_distribution(enc_cred, token)` | connection_crypto | Decrypt distributed credential using admin_token |
+| `save_agent_config(config, path)` | connection_crypto | Encrypt and save agent config to local file |
+| `load_agent_config(path)` | connection_crypto | Load and decrypt agent config |
+
+### Admin API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/agent/register` | POST | Register Business Agent with admin token; returns recovery codes |
+| `/api/admin/agent/recover` | POST | Recover agent with recovery code; returns recovery confirmation |
+| `/api/admin/token/generate` | POST | Generate new admin registration token (admin session required) |
+| `/api/admin/token/rotate` | POST | Rotate admin token; Business Agents must re-register |
+| `/api/admin/skill/list` | GET | List available skills (admin_token + optional filters) |
+| `/api/admin/skill/{id}/acquire` | GET | Acquire skill content (admin_token, optional resource=1 for ZIP) |
+| `/api/admin/skill/create` | POST | Create new skill (admin_token + metadata) |
+| `/api/admin/skill/update` | POST | Update skill metadata (admin_token + skill_id + fields) |
+| `/api/admin/skill/delete` | POST | Delete skill (admin_token + skill_id) |
+| `/api/admin/skill/upload` | POST | Upload resource file (admin_token + skill_id + base64 content) |
+
+## Context Branching
+
+Context Branching enables forking, merging, abandoning, and resuming conversation context branches within a workspace.
+
+### Branch Lifecycle
+
+```
+fork → work → merge (success) → branch merged into target
+fork → work → abandon (failure) → branch preserved as lesson reference
+fork → work → pause → resume → continue work
 ```
 
-### 2. Install Python Dependencies
-```bash
-pip install psycopg2-binary
+### Key APIs
+
+| API | Description |
+|-----|-------------|
+| `fork_branch(workspace_id, fork_context_id, branch_type, branch_name)` | Create a new branch from an existing context point |
+| `merge_branch(source_branch_id, target_branch_id)` | Merge source branch into target; auto-detect conflicts |
+| `abandon_branch(branch_id)` | Mark branch as ABANDONED (read-only, preserved as lesson) |
+| `pause_branch(branch_id)` | Temporarily suspend work on a branch |
+| `resume_branch(branch_id)` | Resume a paused branch |
+| `diff_branches(branch_id_1, branch_id_2)` | Compare two branches and return differences |
+| `detect_conflicts(source_branch_id, target_branch_id)` | Auto-detect entity conflicts between branches |
+| `mark_as_lesson(branch_id)` | Manually mark a branch as a lesson reference |
+| `extract_lessons(workspace_id)` | Automatically extract learnings from abandoned branches |
+
+## Multi-Agent Collaboration
+
+Multi-Agent Collaboration integrates Collaboration Groups with Branches, SDD (Spec), Task Plans, and Harness for coordinated multi-agent workflows.
+
+### Key APIs
+
+| API | Module | Description |
+|-----|--------|-------------|
+| `create_collab_group(branch_id, spec_id)` | collab_api | Create group associated with a branch and spec |
+| `add_group_member(branch_id)` | collab_api | Add member with their branch |
+| `get_member_branches(group_id)` | collab_api | Get all members' branch info |
+| `validate_group_against_spec(group_id)` | collab_api | Validate group progress against spec |
+| `sync_group_context(group_id)` | collab_api | Sync member branch summaries to shared workspace |
+| `fork_parallel_branches(workspace_id, agent_ids)` | branch_api | Create PARALLEL branches for multiple agents |
+| `merge_parallel_branches(source_branch_ids, target_branch_id)` | branch_api | Merge multiple parallel branches with conflict detection |
+| `get_parallel_diff(branch_ids)` | branch_api | Pairwise diff of parallel branches |
+| `add_step(assigned_agent_id)` | task_plan_api | Assign a plan step to a specific agent |
+| `distribute_plan_to_group(plan_id, group_id)` | task_plan_api | Distribute steps to group members round-robin |
+| `create_spec_for_group(title, group_id)` | spec_api | Create a spec for a collaboration group |
+| `validate_group_progress(spec_id, group_id)` | spec_api | Validate group's overall spec progress |
+| `share_harness_to_group(entity_id, group_id)` | harness_api | Share a harness template to a group |
+| `instantiate_harness_for_member(entity_id, member_agent_id, group_id)` | harness_api | Instantiate harness for a group member |
+
+## Community vs Enterprise Feature Matrix
+
+| Feature | Community | Enterprise |
+|---------|-----------|------------|
+| Memory & Knowledge System | Yes | Yes |
+| 5-Signal Unified Search | Yes | Yes |
+| Spec Driven Development | Yes | Yes |
+| Agent Elastic Management | Yes | Yes |
+| Collaboration Groups | Yes | Yes |
+| Multi-Agent Collaboration (Branch+Spec+Plan+Harness) | Yes | Yes |
+| Workspace & Context | Yes | Yes |
+| Admin/Agent Separation | Yes | Yes |
+| Recovery Codes + Agent Recovery | Yes | Yes |
+| Private Skill Backup | Yes | Yes |
+| Skill Storage & Distribution | Yes (basic) | Yes (secure token) |
+| Encrypted DB Credentials | Yes | Yes |
+| Workspace Context Audit | No | Yes |
+| License | Apache 2.0 | BSL 1.1 |
+
+## Agent Retrieval Guide
+
+When an AI Agent needs to search for information, **always prefer `unified_sql` strategy** — it fuses all 5 signals in a single database call:
+
+```python
+from lib.search_api import search
+
+# RECOMMENDED: Single-SQL 5-signal fusion (production)
+results = search("database partitioning", strategy="unified_sql", top_k=10)
+
+# With filters
+results = search("encryption", strategy="unified_sql", domain="security", category="database")
+
+# DEBUGGING ONLY: Multi-round fusion
+results = search("database partitioning", strategy="unified", top_k=10)
+
+# CONVENIENCE: Auto-detect best strategy
+results = search("partition*", strategy="auto")
 ```
 
-### 3. Configure
-Edit `config.json` or set environment variables:
-- `MEMORY_DB_HOST`, `MEMORY_DB_PORT`, `MEMORY_DB_NAME`, `MEMORY_DB_USER`, `MEMORY_DB_PASSWORD`
-- `MEMORY_EMBEDDING_API`, `MEMORY_SERVER_PORT`
+## ⚠️ CRITICAL: Database Access Policy
 
-### 4. Run Tests
-```bash
-cd scripts && python3 -m tests.test_all
+### 1. NEVER Bypass the API Layer
+
+**All data operations MUST go through the Python API layer (`scripts/lib/*.py`) or PL/pgSQL functions. Direct SQL/DML/DDL operations on database tables are STRICTLY PROHIBITED except during initial schema deployment (`scripts/deploy/*.sql`).**
+
+### 2. Database Connection Credentials Must Not Be Injected into Agent Context
+
+When saving context via `save_context()`, any context_data containing keys like `password`, `host`, `connection`, `credential`, `secret`, `key`, or `token` will be automatically masked by `DataMaskingService`. Agents MUST NOT store database connection strings or credentials in WORKSPACE_CONTEXT.
+
+### 3. Use the Restricted Database User for Agent Connections
+
+A restricted `agent_api` database user should be used for runtime connections. This user:
+- Has **EXECUTE only** on PL/pgSQL functions (no direct table DML)
+- Has **SELECT only** on tables needed for read operations
+- **Cannot** CREATE TABLE, CREATE VIEW, ALTER, DROP, INSERT, UPDATE, DELETE directly on tables
+- All writes go through `SECURITY DEFINER` PL/pgSQL functions which execute with schema owner privileges while enforcing business rules
+
+### 4. Deployment Scripts Are the Only Exception
+
+The `scripts/deploy/*.sql` scripts are the ONLY authorized direct SQL operations.
+
+## ⚠️ CRITICAL: Pre-Deployment Safety Check
+
+**Before running ANY deploy script, an Agent MUST check whether the database already has an existing deployment.**
+
+```python
+from lib.deploy_api import check_deployment
+result = check_deployment()
+if result["deployed"]:
+    # DO NOT run deploy scripts!
+    pass
+else:
+    # Safe to deploy from scratch
+    pass
 ```
 
-## Project Structure
+### Agent Decision Flow
 
 ```
-scripts/
-  deploy/
-    1_schema.sql    # Tables, indexes, AGE graph, views, helper functions
-    2_api.sql       # PL/pgSQL functions (7 schemas, 44+ functions)
-    3_jobs.sql      # pg_cron jobs (13 automated jobs)
-    4_harness_templates.sql  # HARNESS_META + 5 built-in harness templates
-  lib/
-    config.py       # Unified Config with env var overrides
-    connection.py   # psycopg2 ThreadedConnectionPool
-    memory_api.py   # Memory CRUD on ENTITIES (entity_type='MEMORY')
-    knowledge_api.py # Knowledge CRUD + graph on ENTITIES+KNOWLEDGE_META+ENTITY_EDGES
-    agent_api.py    # Agent registration, sessions, collaboration, access log
-    task_plan_api.py # Task plans, steps, snapshots, tool calls, dependencies
-    security.py     # DataMaskingService, ReversibleEncryption, password hashing
-    harness_api.py  # Harness template CRUD, instantiate, variable extraction
-    spec_api.py    # Spec Driven Development: spec CRUD, plan linking, status management (10 functions)
-    collab_api.py  # Collaboration groups: group CRUD, membership, shared workspaces (10 functions)
-    embedding_api.py # Embedding generation, storage, search, batch, stats (12 functions)
-    graph_api.py    # Property graph traversal via Apache AGE Cypher + SQL fallback (9 functions)
-    workspace_api.py # Workspace lifecycle, context chain, handoff, recovery (11 functions)
-  tests/
-    test_connection.py
-    test_memory.py
-    test_knowledge.py
-    test_agent.py
-    test_graph.py
-    test_harness.py
-    test_security.py
-    test_workspace.py
-    test_spec.py
-    test_collab.py
-    test_embedding.py
-    test_all.py
-docs/
-  architecture.md
-  api-reference.md
-  deployment.md
-  migration.md
-  security.md
-  harness.md
-  workspace.md
-  minimum-privileges.md
-  visualization.md
-  introduction_v2.3.1_zh.md
-config.json         # Database, server, embedding, security config
+Agent receives Skill → check_deployment() → deployed?
+  Yes → Register Skill only (DO NOT deploy)
+  No  → Deploy from scratch
 ```
 
-## Database Schema (27 Tables)
+## PostgreSQL Extension Requirements
 
-### Core Tables (8)
-
-| Table | Purpose |
-|-------|---------|
-| entities | Unified store: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE, SPEC |
-| entity_edges | Unified directed edges with strength/confidence |
-| knowledge_meta | Domain, topic, difficulty, review scheduling, validation, versioning |
-| harness_meta | Template versioning, input/output schema, execution mode |
-| entity_embeddings | vector(1024) embeddings (pg-embedding-gen-by-yhw) |
-| tags | Normalized tag definitions (tag_id, tag_name, tag_group) |
-| entity_tags | Entity-tag associations (composite PK: entity_id + entity_type + tag_id) |
-| agent_permission_log | Permission change audit |
-
-### Agent Tables (5)
-
-| Table | Purpose |
-|-------|---------|
-| agent_registry | Agent identity, capabilities, permissions, elastic states (ACTIVE/DORMANT/POOL) |
-| agent_session | Session tracking with context snapshots, handoff chain (PREDECESSOR_SESSION_ID) |
-| agent_credentials | Agent credential store for hibernate/wake lifecycle |
-| entity_access_log | Audit trail for all entity access |
-| agent_collaboration | Cross-agent sharing requests |
-
-### Task Tables (5)
-
-| Table | Purpose |
-|-------|---------|
-| task_plans | Multi-step task definitions |
-| task_steps | Plan steps with status tracking |
-| task_context_snapshots | Breakpoint/recovery snapshots |
-| task_tool_calls | Tool invocation audit |
-| task_dependencies | Inter-plan dependency graph |
-
-### Workspace Tables (3)
-
-| Table | Purpose |
-|-------|---------|
-| workspaces | Workspace lifecycle (ACTIVE/PAUSED/ARCHIVED), isolation mode, ownership (incl. COLLAB_GROUP, PERSONAL_IN_GROUP) |
-| workspace_context | Append-only context chain (CHECKPOINT, HANDOFF, SUMMARY, ERROR_STATE, AUTO_SAVE) |
-| workspace_tasks | Junction: workspace <-> task plans |
-
-### Spec Tables (2 NEW)
-
-| Table | Purpose |
-|-------|---------|
-| spec_meta | Spec metadata for Spec Driven Development (spec_type, status, priority) |
-| spec_plan_links | Spec-to-plan linking for SDD traceability |
-
-### Collaboration Tables (2 NEW)
-
-| Table | Purpose |
-|-------|---------|
-| collab_groups | Collaboration group definitions (name, owner, settings) |
-| collab_group_members | Collaboration group membership (agent_id, role, joined_at) |
-
-### System Tables (2)
-
-| Table | Purpose |
-|-------|---------|
-| system_config | System configuration key-value store |
-| system_users | System user accounts with roles |
-
-## PL/pgSQL API (7 Schemas, 44+ Functions)
-
-| Schema | Function | Purpose |
-|--------|----------|---------|
-| memory | generate_embedding() | Generate embedding via pg-embedding-gen-by-yhw |
-| memory | add_concept_with_embedding() | Create knowledge with auto-embedding |
-| memory | search_similar() | Vector similarity search |
-| memory_fusion | fuse_similar_memories() | Merge similar memories |
-| memory_fusion | extract_knowledge_from_memories() | Extract knowledge from patterns |
-| memory_fusion | decay_old_memories() | Decay old memory priorities |
-| memory_fusion | get_fusion_stats() | Fusion statistics as JSONB |
-| knowledge_api | validate_concept() | Mark knowledge as validated |
-| knowledge_api | deprecate_concept() | Deprecate knowledge concept |
-| knowledge_api | create_concept_version() | Create new version of concept |
-| knowledge_api | get_unvalidated() | List unvalidated concepts |
-| knowledge_api | get_concept_lineage() | Get concept ancestry/descendants |
-| knowledge_api | record_review() | Record knowledge review with spaced repetition |
-| knowledge_api | get_due_reviews() | Get concepts due for review |
-| agent_perm | check_entity_access() | Check agent access to entity |
-| agent_perm | grant_access() | Grant entity access to agent |
-| agent_perm | revoke_access() | Revoke entity access |
-| agent_perm | cleanup_expired_sessions() | Clean expired sessions |
-| agent_perm | process_collaboration_requests() | Expire stale requests |
-| session_cleanup | purge_access_logs() | Delete old access logs |
-| session_cleanup | purge_inactive_sessions() | Delete closed sessions |
-| session_cleanup | archive_old_entities() | Archive low-priority memories |
-| session_cleanup | update_tag_counts() | Recalculate tag usage counts |
-| workspace_manager | create_workspace() | Create a new workspace |
-| workspace_manager | get_workspace() | Get workspace details as JSONB |
-| workspace_manager | update_workspace_status() | Update workspace lifecycle status |
-| workspace_manager | delete_workspace() | Delete workspace (cascades) |
-| workspace_manager | add_context_entry() | Add context entry to workspace |
-| workspace_manager | get_context_chain() | Get workspace context chain |
-| workspace_manager | create_handoff() | Create agent handoff session |
-| workspace_manager | recover_to_checkpoint() | Recover workspace to checkpoint |
-| workspace_manager | get_workspace_summary() | Get workspace summary as JSONB |
-| workspace_manager | cleanup_abandoned() | Archive abandoned workspaces |
-| spec_manager | create_spec() | Create a new spec |
-| spec_manager | get_spec() | Get spec details as JSONB |
-| spec_manager | update_spec_status() | Update spec lifecycle status |
-| spec_manager | link_spec_to_plan() | Link spec to a task plan |
-| spec_manager | get_spec_plans() | Get all plans linked to a spec |
-| spec_manager | cleanup_orphaned_specs() | Clean up specs with no linked plans |
-| collab_group_manager | create_collab_group() | Create a collaboration group |
-| collab_group_manager | get_collab_group() | Get group details as JSONB |
-| collab_group_manager | add_member() | Add agent to group |
-| collab_group_manager | remove_member() | Remove agent from group |
-| collab_group_manager | get_group_members() | Get all members of a group |
-| collab_group_manager | get_agent_groups() | Get all groups for an agent |
-| collab_group_manager | cleanup_empty_groups() | Remove groups with no members |
-
-## Python API (13 Modules)
-
-| Module | Functions | Purpose |
-|--------|-----------|---------|
-| config.py | 4 config classes | Unified configuration with env var overrides |
-| connection.py | 8 | psycopg2 ThreadedConnectionPool, Unix socket support |
-| memory_api.py | 10 | Memory CRUD + tags + count on ENTITIES (entity_type='MEMORY') |
-| knowledge_api.py | 13 | Knowledge CRUD + edges + reviews + tags + count |
-| agent_api.py | 22 | Agent registration, sessions, collaboration, access log, hibernate/wake/pool |
-| task_plan_api.py | 12 | Task plans, steps, snapshots, tool calls, dependencies |
-| security.py | 2 | Password hashing and verification (hash_password, verify_password) |
-| harness_api.py | 8 | Template CRUD, instantiate, variable extraction, count |
-| graph_api.py | 9 | Property graph traversal via Apache AGE Cypher + SQL fallback |
-| workspace_api.py | 11 | Workspace lifecycle, context chain, handoff, recovery |
-| spec_api.py | 10 | Spec CRUD, plan linking, status management (SDD) |
-| collab_api.py | 10 | Collaboration group CRUD, membership, shared workspaces |
-| embedding_api.py | 12 | Embedding generation, storage, search, batch, stats (pgvector + pg-embedding-gen-by-yhw) |
-
-## Scheduled Jobs (13)
-
-| Job | Schedule | Action |
-|-----|----------|--------|
-| memory_fusion_job | Daily 02:00 | Fuse similar memories + decay priorities |
-| knowledge_extraction_job | Daily 03:00 | Extract knowledge from memory patterns |
-| knowledge_review_job | Daily 06:00 | Schedule knowledge spaced-repetition reviews |
-| session_cleanup_job | Every 30 min | Cleanup expired sessions |
-| access_log_purge_job | Weekly Sun 04:00 | Purge logs >90 days |
-| entity_archive_job | Weekly Sun 05:00 | Archive low-priority memories >180 days |
-| collab_expiry_job | Daily 00:30 | Expire stale collaboration requests |
-| workspace_cleanup_job | Daily 01:00 | Archive abandoned workspaces |
-| stale_workspace_detect_job | Hourly | Pause workspaces inactive >7 days |
-| dormant_agent_job | Daily 04:00 | Hibernate agents inactive >30 days |
-| credential_cleanup_job | Weekly Sun 06:00 | Purge expired agent credentials |
-| collab_group_cleanup_job | Daily 05:00 | Remove empty collaboration groups |
-| embedding_generation_job | Every 2 hours | Generate embeddings for MEMORY/KNOWLEDGE entities |
-
-**Note**: pg_cron is not installed on the target server; jobs are defined but will not run automatically until pg_cron is installed.
-
-## Harness Templates (5 Built-in)
-
-| Template | Category | Execution Mode |
-|----------|----------|---------------|
-| Research Analyst | research | SEQUENTIAL |
-| Code Assistant | development | SEQUENTIAL |
-| Data Analyst | analytics | PARALLEL |
-| Task Planner | orchestration | CONDITIONAL |
-| Security Auditor | security | SEQUENTIAL |
-
-## CONTEXT_DATA Structures (v2.2.0)
-
-### CHECKPOINT
-```json
-{
-  "progress": "Step 3 of 7 complete",
-  "intermediate_results": {},
-  "pending_actions": ["Run validation", "Generate report"]
-}
-```
-
-### HANDOFF
-```json
-{
-  "from_agent": "agent-1",
-  "to_agent": "agent-2",
-  "reason": "Specialist handoff for code review",
-  "current_state": "Analysis complete, review pending",
-  "instructions": "Review the generated SQL queries"
-}
-```
-
-### SUMMARY
-```json
-{
-  "session_id": "session-abc123",
-  "duration_minutes": 45,
-  "entities_created": 5,
-  "tasks_completed": 1,
-  "key_findings": "Identified 3 optimization opportunities"
-}
-```
-
-### ERROR_STATE
-```json
-{
-  "error_type": "ConnectionError",
-  "error_message": "Failed to connect to embedding API",
-  "stack_trace": "...",
-  "recovery_hints": ["Check API endpoint", "Retry with backoff"]
-}
-```
-
-### AUTO_SAVE
-```json
-{
-  "incremental_state": "partial state delta",
-  "last_operation": "embedding generation for entity 42",
-  "timestamp": "2026-05-22T14:30:00Z"
-}
-```
-
-## Critical Constraints
-
-- **Database**: PostgreSQL 18 on 10.10.10.131, user=`pgsql`, trust auth, Unix socket at `/tmp`
-- **Connection**: When config `host` is `localhost` or empty, connect via Unix socket (`host='/tmp'`), not TCP
-- **AGE graph name**: Cannot start with `pg_` (reserved); use `memory_graph`
-- **pg_cron**: Installed and configured on 10.10.10.131 (`cron.database_name = 'memory_graph'`). 13 scheduled jobs defined in `3_jobs.sql`.
-- **Embedding API**: http://10.10.10.1:12345/v1, model `text-embedding-bge-m3`, 1024 dimensions
-- **Python**: 3.14 on local machine (primary); 3.6 on remote server. psycopg2-binary 2.9+ on local, 2.8.6 on remote.
-- **Web Visualization**: `./start_web_server.sh start` — runs locally, connects to remote DB. Port 8000. Session auth via system_users table. 9 pages: Knowledge, Memory, Agents, Tasks, Workspaces, Graph Explorer, Specs, Collab, Login. 16 REST API endpoints.
-- **Entity types**: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE, SPEC — stored in `entities.entity_type`
-- **Knowledge category**: Stored in `entities.category`, NOT in `knowledge_meta` (no concept_type column there)
-- **Task status mapping**: Python API maps SUCCESS→COMPLETED, IN_PROGRESS→ACTIVE to match schema CHECK constraints
-- **Visibility**: PRIVATE (owner only), SHARED (all agents), PUBLIC (unrestricted) — COLLABORATIVE removed in v2.1
-- **Edge strength**: 0.0–1.0 (v2.1 normalized from v2.0's 0–2 range); confidence: 0.0–1.0
-- **Knowledge difficulty**: BEGINNER / INTERMEDIATE / ADVANCED / EXPERT (CHECK constraint on knowledge_meta.difficulty)
-- **Spec plan link types**: DRIVES / VALIDATES / CONSTRAINS / EXTENDS (CHECK constraint on spec_plan_links.link_type)
-- **Collab member roles**: LEAD / CONTRIBUTOR / OBSERVER (LEAD/CONTRIBUTOR get auto-created PERSONAL_IN_GROUP workspaces)
-- **API signatures**: `create_spec(entity_data=dict, spec_meta=dict)` — two dict params, NOT positional args; `create_plan(agent_id, goal, priority)` — agent_id first; `add_step(plan_id, plan_status, description, step_order, tool_name)` — plan_status and step_order required
-
-## PostgreSQL-Specific Features
-
-- **pg-embedding-gen-by-yhw** ([GitHub](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw)): Custom PostgreSQL 18 extension (by Haiwen Yin) for in-database embedding generation. Uses PG18's `COPY FROM PROGRAM` mechanism + Python proxy to call any OpenAI-compatible `/v1/embeddings` API — no C compilation required. Supports multi-model profiles, auto-dimension detection, batch generation, health checks, cosine similarity, and request logging. Not a built-in database feature; requires separate installation from [GitHub](https://github.com/Haiwen-Yin/pg-embedding-gen-by-yhw).
-- **pgvector HNSW**: Hardware-accelerated vector similarity search with `vector_cosine_ops`
-- **Apache AGE Cypher**: Graph traversal queries on unified entity graph (`memory_graph`)
-- **JSONB**: Native JSON operations with GIN indexing for flexible metadata
-- **IDENTITY columns**: Clean auto-increment (`BIGINT GENERATED ALWAYS AS IDENTITY`) without explicit sequences
-
-## Key Design Decisions
-
-| # | Decision | Rationale |
-|---|----------|-----------|
-| 1 | BIGINT IDENTITY PKs | Clean auto-increment without sequence management; sufficient for all use cases |
-| 2 | No partitioning | PG18 partitioning adds complexity without proportional benefit at expected scale; B-tree indexes sufficient |
-| 3 | JSONB for flexible schema | Native JSONB columns + PL/pgSQL provide document-style operations without rigid schema constraints |
-| 4 | Apache AGE for graph | AGE provides Cypher query capability on PG18; use `_run_cypher()` wrapper for graph traversal |
-| 5 | psycopg2 driver | ThreadedConnectionPool (min=2, max=5) provides 4500x speedup over psql subprocess; well-supported on Python 3.6+; use psycopg2-binary 2.9+ for Python 3.14 |
-| 6 | JSONB for context | WORKSPACE_CONTEXT.CONTEXT_DATA uses JSONB for append-only context chain; flexible schemaless storage |
-| 7 | Normalized tags | TAGS + ENTITY_TAGS replace JSON tag arrays; indexable, queryable, countable |
-| 8 | Simplified visibility | PRIVATE/SHARED/PUBLIC replaces v2.0's PRIVATE/SHARED/COLLABORATIVE; collaboration via AGENT_COLLABORATION table |
-| 9 | Edge strength 0-1 | Normalized from v2.0's 0-2 range for consistency with confidence scale |
-| 10 | ON DELETE CASCADE | All child FKs use CASCADE for clean workspace/entity deletion; PostgreSQL supports this natively |
-| 11 | Local-first Skill | Skill runs locally (Agent side), connects to remote DB via TCP; visualization server runs locally too |
-| 12 | Web Visualization | Standard library HTTP server + local vis-network.min.js; no Flask/Django; bilingual (zh/en); session auth via system_users; 5-min auto-logout |
-| 13 | Spec Driven Development | SPEC entity type + spec_meta table unify spec lifecycle with entity model; spec_plan_links provides traceability from spec to implementation |
-| 14 | Agent Elastic Management | DORMANT/POOL states in agent_registry enable resource-efficient agent hibernation; agent_credentials table stores encrypted credentials for wake/resume |
-| 15 | Collaboration Groups | collab_groups + collab_group_members decouple group logic from agent_registry; auto-created COLLAB_GROUP/PERSONAL_IN_GROUP workspaces provide isolated execution |
+| Extension | Version | Purpose |
+|-----------|---------|---------|
+| pgvector | 0.7+ | Vector similarity search (`<=>` cosine distance) |
+| pgcrypto | 1.3+ | In-database encryption (`encrypt_iv`/`decrypt_iv`) |
+| age | 1.5+ | Property graph queries (Apache AGE `cypher()`) |
+| pg_cron | 1.6+ | Scheduled job execution |
+| plpython3u | — | Python stored procedures for embedding generation |
+| tsvector | built-in | Full-text search (`to_tsvector`/`to_tsquery`) |

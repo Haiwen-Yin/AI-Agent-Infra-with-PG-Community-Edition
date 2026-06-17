@@ -1,413 +1,114 @@
 # Changelog
 
-All notable changes to memory-pg18-by-yhw will be documented in this file.
+All notable changes to AI Agent Infra with PostgreSQL are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
-
-## [2.3.1] - 2026-05-26
-
-### Summary
-
-**Embedding Python API and EMBEDDING_GENERATION_JOB.** Backward-compatible — 1 new Python module, 1 new pg_cron job, 19 new embedding tests.
-
-### Added
-
-- **embedding_api.py** — 12 Python functions: generate_embedding, store_embedding, store_embedding_vector, get_embedding, delete_embedding, search_similar, search_by_entity_id, search_hybrid, search_multi_type, generate_embeddings_batch, get_embedding_stats, get_model_dimension
-- **EMBEDDING_GENERATION_JOB** — pg_cron job every 2 hours for MEMORY/KNOWLEDGE entity embedding generation
-- **19 embedding tests** — test_embedding.py: generate, store, search, batch, stats, hybrid, multi-type
-- Uses pgvector cosine distance (`<=>` operator), `%s` positional binds, `::vector` cast, `ILIKE`, `LIMIT`
-- Leverages existing `memory.generate_embedding()` PL/pgSQL and pg-embedding-gen-by-yhw extension
-
-### Changed
-
-- **3_jobs.sql**: 13 pg_cron jobs (1 new: embedding_generation_job)
-- **Test suite expanded**: 162 tests (from 143): Connection 6, Memory 16, Knowledge 19, Agent 22, Graph 12, Harness 12, Security 19, Workspace 14, Spec 10, Collab 10, Embedding 19, Task Plan 4
-
-### Fixed
-
-- **List scrolling**: All 7 list pages now support mouse wheel scrolling — `body` changed from `min-height:100vh` to `height:100vh`; `.content-area` added `min-height:0`; `#listView` given explicit `height:calc(100vh - 120px)`
-- **Sticky table headers**: All 7 list pages have fixed table headers on scroll — `border-collapse:collapse` changed to `separate;border-spacing:0`; `thead th` added `position:sticky;top:0;z-index:2;background;box-shadow`; scroll containers changed to `padding:0 20px` (no top/bottom padding to prevent content leaking behind sticky header)
-- **Pagination**: All 7 list pages support pagination (30 items/page) with Prev/Next buttons and page numbers
-- **Knowledge content**: 16 original knowledge entries updated with full content; 15 new knowledge entries added (total 42)
-- **Memory data**: 26 new memory entries added (total 35) for pagination testing
-- **Demo data fix**: Missing `knowledge_meta` row for entity 1009 inserted
-
----
-
-## [2.3.0] - 2026-05-24
+## [3.6.2] - 2026-06-18
 
 ### Summary
 
-**Spec Driven Development, Agent Elastic Management, Collaboration Groups.** Backward-compatible schema expansion — 5 new tables, 2 new PL/pgSQL schemas, 2 new Python modules, 3 new pg_cron jobs.
+Bug fix release with 15 bug fixes, updated schema statistics, and improved PG compatibility.
 
-### Added
+### Schema & Database
 
-- **Spec Driven Development (SDD)** — spec_meta table, spec_plan_links table, SPEC entity type, spec_api.py (10 functions), spec_manager PL/pgSQL schema (6 functions)
-- **Agent Elastic Management** — agent_credentials table, DORMANT/POOL agent states, 8 new agent_api functions (hibernate_agent, wake_agent, pool_agent, get_dormant_agents, get_pool_agents, update_agent_role, get_agent_credentials, cleanup_credentials), dormant_agent_job, credential_cleanup_job
-- **Collaboration Groups** — collab_groups table, collab_group_members table, collab_api.py (10 functions), collab_group_manager PL/pgSQL schema (7 functions), auto-created COLLAB_GROUP and PERSONAL_IN_GROUP workspaces, collab_group_cleanup_job
-- **agent_registry: 5 new columns** — created_by_agent_id, agent_role, current_user_id, pool_config, last_active_at; status expanded with DORMANT and POOL states
-- **agent_session: 1 new column** — last_active_at
-- **workspaces: 2 new types** — COLLAB_GROUP, PERSONAL_IN_GROUP
-- **entities: SPEC entity_type** — Spec entities alongside MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE
-- **12 new indexes** for spec, credential, and collab group tables
-- **3 new pg_cron jobs** — dormant_agent_job (Daily 04:00), credential_cleanup_job (Weekly Sun 06:00), collab_group_cleanup_job (Daily 05:00)
-- **spec_api.py** — 10 Python functions: create_spec, get_spec, update_spec, delete_spec, list_specs, link_spec_to_plan, unlink_spec_from_plan, get_spec_plans, get_plan_specs, update_spec_status
-- **collab_api.py** — 10 Python functions: create_collab_group, get_collab_group, update_collab_group, delete_collab_group, add_group_member, remove_group_member, get_group_members, get_agent_groups, get_group_workspace, list_collab_groups
-- **spec_manager PL/pgSQL schema** — 6 functions: create_spec, get_spec, update_spec_status, link_spec_to_plan, get_spec_plans, cleanup_orphaned_specs
-- **collab_group_manager PL/pgSQL schema** — 7 functions: create_collab_group, get_collab_group, add_member, remove_member, get_group_members, get_agent_groups, cleanup_empty_groups
-- **docs/introduction_v2.3.0_zh.md** — Chinese introduction updated for v2.3.0
-- **RELEASE_NOTES_v2.3.0.md** — Comprehensive release notes
+- 30 tables with 99+ partition sub-tables
+- 70+ indexes (B-tree + HNSW + GIN)
+- 5 views
+- 25+ RLS policies
+- 22 PL/pgSQL base functions + 78 API functions in 13 schemas
+- 3 PL/Python3u embedding functions (embedding_generate, embedding_generate_batch, embedding_status)
+- 3 pgcrypto wrappers (db_crypto.encrypt/decrypt/rotate_key)
+- 13 pg_cron jobs
+- Entity LIST partitioning by entity_type (MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE, SPEC, SKILL, OTHER)
+- agent_session LIST partitioning by is_active
+- HNSW vector indexes on entity_embeddings (1024-dim pgvector)
+- AGE property graph (ag_catalog)
 
-### Changed
+### Python API
 
-- **1_schema.sql**: 27 tables (5 new), 69 indexes (12 new), 5 views, AGE graph
-- **2_api.sql**: 7 PL/pgSQL schemas (spec_manager, collab_group_manager added), 44+ functions
-- **3_jobs.sql**: 12 pg_cron jobs (3 new: dormant_agent_job, credential_cleanup_job, collab_group_cleanup_job)
-- **agent_api.py**: 22 functions (was 14); added hibernate/wake/pool/credential management
-- **Test suite expanded**: 143 tests (from 115): Connection 6, Memory 16, Knowledge 19, Agent 22, Graph 12, Harness 12, Security 19, Workspace 14, Spec 10, Collab 10, Task Plan 4
+- 23 modules with 305+ functions
+- Full psycopg2 adapter with %s binds
+- BIGINT auto-generated IDs (not VARCHAR UUIDs)
+- PL/Python3u for in-database embedding generation
+- Admin/Agent separation with encrypted credential distribution
+- Portal chat with session management and workspace switching
+- 5-signal unified search (vector + fulltext + relational + tag + graph)
+- Recovery codes (8 RC-XXXX-XXXX-XXXX codes)
 
-### Fixed
+### Visualization Portal
 
-- Various edge cases in agent state transitions (DORMANT↔ACTIVE, POOL↔ACTIVE)
-- Collaboration group workspace auto-creation on member join
-- Spec-to-plan linking integrity constraints
+- 12 pages: login, portal_login, portal_chat, knowledge, memory, agents, tasks, workspaces, graph, specs, collab, skills, branches
+- vis.js graph explorer with 50+ nodes and 32+ edges
+- Session-based authentication with SHA256+salt password hashing
+- Pool Agent auto-assignment on registration
+- Chat workspace switching
+- Dark theme, EN/ZH bilingual
+
+### Testing
+
+- 105 tests (matching Oracle COM 105)
+
+### Test Data
+
+- 50 entities, 32 edges, 25 embeddings
+- 8 agents (including 5 pool agents)
+- 5 workspaces, 3 users, 3 collab groups
+- 5 task plans with 12 steps, 10 tags
+
+### Bug Fixes
+
+- Fixed conn→connection typo in chat handler
+- Fixed uppercase SQL→lowercase for PG compatibility
+- Fixed BIGINT .substring errors with String() conversion
+- Fixed user authentication using user_manager.authenticate() with salt
+- Fixed workspace owner_user_id using username (not numeric user_id)
+- Fixed CHAT_MESSAGE context_type constraint
+- Fixed agent pool assignment for portal registration
+- Fixed Decimal serialization as float in graph API
+- Fixed graph stats field names (node_count, edge_count)
+- Fixed branch_api.list_branches and graph_api.get_graph_stats missing functions
+- Fixed task_plan_api column mismatches (completed_at, started_at, assigned_agent_id)
+- Fixed spec_api spec_plan_links column mismatches (created_at)
+- Fixed portal chat send (_handle_portal_chat_send missing)
+- Fixed session switching error handling
 
 ---
-
-## [2.2.1] - 2026-05-24
+## [3.6.1] - 2026-06-16
 
 ### Summary
 
-**UI bug fixes: language persistence and text contrast.** Backward-compatible with v2.2.0 — no database or API changes.
-
-### Fixed
-
-- **Language toggle persistence**: Bilingual (zh/en) toggle now saves preference to `localStorage`; language is restored on every page load, persisting across navigation between pages
-- **Tasks page text contrast**: Step table cell text and Plan Details values changed to white (`color:#fff`) for readability on dark backgrounds
-- **All 7 HTML pages**: Added `localStorage.getItem('lang')` restore on page init and `localStorage.setItem('lang', n)` in `toggleLang()`
-
-### Changed
-
-- **server.py**: Version string updated from 2.2.0 to 2.2.1
-
----
-
-## [2.2.0] - 2026-05-23
-
-### Summary
-
-**Workspace management, context continuity, agent handoff, web visualization, and comprehensive bug fixes.** Not backward-compatible with v2.1.0 — requires clean deployment.
+Initial PostgreSQL Community Edition release — feature-matching Oracle Community Edition v3.6.1, adapted for PostgreSQL 18.3 with psycopg2, pgvector, Apache AGE, pg_cron, PL/Python3u, pgcrypto, and Row Security Policies.
 
 ### Added
 
-- **WORKSPACES table** — Workspace lifecycle (ACTIVE → PAUSED → ARCHIVED), isolation modes (SHARED/ISOLATED), ownership tracking, metadata JSONB
-- **WORKSPACE_CONTEXT table** — Version chain of context entries (CHECKPOINT, HANDOFF, SUMMARY, ERROR_STATE, AUTO_SAVE) with PARENT_CONTEXT_ID linking
-- **WORKSPACE_TASKS table** — Links task plans to workspaces, composite PK (WORKSPACE_ID, PLAN_ID)
-- **AGENT_SESSION: OWNER_USER_ID column** — User who owns/started the session
-- **AGENT_SESSION: WORKSPACE_ID column** — Workspace the session belongs to
-- **AGENT_SESSION: PREDECESSOR_SESSION_ID column** — Previous session in handoff chain
-- **ENTITIES: WORKSPACE_ID column** — Entity scoping for ISOLATED workspaces
-- **workspace_api.py** — 11 Python functions: create_workspace, get_workspace, get_user_workspaces, update_workspace, save_context, get_context_chain, get_latest_context, create_handoff_session, recover_workspace, link_task_to_workspace, get_workspace_tasks
-- **workspace_manager PL/pgSQL schema** — 10 server-side functions for workspace lifecycle and context management
-- **Web Visualization System** — server.py (14 REST endpoints) + 7 HTML pages + style.css + local vis-network.min.js (702KB UMD build)
-  - Knowledge page: Graph/List dual view, domain-colored nodes, full field display with tags
-  - Memory page: Graph/List dual view, category-colored nodes, full field display with tags
-  - Agents page: 3-tab dashboard (registry, sessions, collaborations)
-  - Tasks page: expandable step details + plan info panel
-  - Workspaces page: context chain timeline + linked tasks
-  - Graph Explorer: full graph on page load via `/api/graph/all`, search, neighbor networks
-  - Login page: PBKDF2-SHA256 auth, 5-min auto-logout with countdown timer
-  - Fixed sidebar: `position:fixed;height:100vh` with centered logout, countdown, language toggle
-- **start_web_server.sh** — Daemon control script (start/stop/restart/status/log)
-- **graph_api.py: SQL fallback** — `_get_neighbors_sql()` when AGE Cypher queries fail
-- **server.py: `/api/graph/all` endpoint** — Full graph rendering without search
-- **server.py: `_get_tags_for_entities()`** — JOIN entity_tags with tags table for full tag names
-- **knowledge_api: add_knowledge_tags, get_knowledge_tags, remove_knowledge_tag, count_knowledge** — 4 new functions
-- **memory_api: add_memory_tags, get_memory_tags, remove_memory_tag** — 3 new functions
-- **workspace_cleanup_job** — pg_cron job for workspace maintenance (daily 01:00)
-- **stale_workspace_detect_job** — pg_cron job for detecting stale workspaces (hourly)
-- **docs/workspace.md** — Workspace & context continuity guide
-- **docs/minimum-privileges.md** — PG18 minimum database privileges
-- **docs/visualization.md** — Visualization architecture and API docs
-- **docs/introduction_v2.2.1_zh.md** — Chinese introduction for v2.2.0 (with visualization section)
-
-### Changed
-
-- **1_schema.sql**: 22 tables (3 new: workspaces, workspace_context, workspace_tasks), 57 indexes, 5 views, AGE graph
-- **2_api.sql**: 5 PL/pgSQL schemas (workspace_manager added), 31+ functions; fixed `e.name` → `e.title`
-- **3_jobs.sql**: 9 pg_cron jobs (2 new: workspace_cleanup_job, stale_workspace_detect_job)
-- **agent_session**: added OWNER_USER_ID, WORKSPACE_ID, PREDECESSOR_SESSION_ID columns
-- **entities**: added WORKSPACE_ID column for workspace-scoped entity isolation
-- **graph_api.get_neighbors()**: tries AGE Cypher first, falls back to SQL on failure
-- **Test suite expanded**: 115 tests (from 63): Connection 6, Memory 16, Knowledge 19, Agent 17, Graph 12, Harness 12, Security 19, Workspace 14
-
-### Fixed
-
-- `2_api.sql`: `memory_fusion` and `knowledge_api` functions referencing `e.name` (should be `e.title` in v2.2 schema)
-- `server.py`: Auth redirect — `_get_session()` instead of `_require_auth()` for endpoint handlers
-- `server.py`: `_knowledge_to_vis()` / `_memory_to_vis()` returning full fields + tags via `_get_tags_for_entities()`
-- All 6 HTML pages: Sidebar `position:fixed;height:100vh` with centered logout, countdown timer, language toggle
-- `graph.html`: vis.js container height and `setTimeout(100ms)` recreate pattern for hidden→visible switch
-- `knowledge.html` / `memory.html`: Graph/List dual view toggle with list as default
-- `tasks.html`: JS syntax error (duplicate code block) removed, expandable step details + Plan Details panel added
-- `test_memory.py`, `test_knowledge.py`, `test_harness.py`: `test_get_nonexistent` — entity_id is BIGINT, not string
-- `test_security.py`: `test_mask_dict` — "safe_key" contains "key" (sensitive); renamed to "description"
-- `test_security.py`: `test_context_level_analytics` — ANALYTICS masks CC/SSN, not email
-- `test_workspace.py`: `test_create_workspace_with_options` — "PROJECT" not valid workspace_type (use "PIPELINE")
-
----
-
-## [2.1.0] - 2026-05-20
-
-### Summary
-
-**Schema evolution with normalized tags, property graph API, column renames, ID strategy, and simplified visibility.** Not backward-compatible with v2.0.0 — requires fresh deployment.
-
-### Added
-
-- **Normalized tag system** — TAGS + ENTITY_TAGS tables replace JSON tag arrays; indexable, queryable, countable
-- **graph_api.py: Property Graph API** with Apache AGE Cypher — 9 functions: get_neighbors, get_reachable, get_shortest_path, find_similar_entities, get_entity_context, get_subgraph, graph_search, find_communities, get_graph_stats
-- **memory_graph AGE graph** — Unified property graph for Cypher traversal on PG18
-- **HARNESS_META: INPUT_SCHEMA/OUTPUT_SCHEMA** — JSON Schema definitions for template inputs and outputs
-- **HARNESS_META: EXECUTION_MODE** — SEQUENTIAL/PARALLEL/CONDITIONAL execution modes
-- **knowledge_api.record_review()** — Spaced repetition review scheduling
-- **knowledge_api.get_due_reviews()** — Get concepts due for review
-- **KNOWLEDGE_REVIEW_JOB** — pg_cron job for daily knowledge review scheduling
-- **8 graph tests** in test suite (test_graph.py)
-
-### Changed
-
-- **ENTITIES: NAME → TITLE** — Column renamed for clarity
-- **ENTITIES: PRIORITY → IMPORTANCE** — Column renamed, range 1-10
-- **ENTITIES: TAGS (JSON) removed** — Replaced by TAGS + ENTITY_TAGS normalized tables
-- **ENTITIES: METADATA (JSON) removed** — Only retained in ENTITY_EDGES.METADATA
-- **ENTITIES: ACCESSIBLE_TO (JSON) removed** — Simplified visibility model
-- **ENTITIES: DESCRIPTION removed** — Replaced by SUMMARY (VARCHAR 2000)
-- **ENTITIES: New columns** — SUMMARY, SOURCE_AGENT, RETRIEVAL_COUNT, IMPORTANCE
-- **ENTITY_EDGES: Added SOURCE_TYPE** — Denormalized for AGE graph and query optimization
-- **ENTITY_EDGES: STRENGTH range** — Normalized to 0.0–1.0 (from v2.0's 0–2)
-- **Visibility model simplified** — PRIVATE/SHARED/PUBLIC replaces v2.0's PRIVATE/SHARED/COLLABORATIVE; collaboration via AGENT_COLLABORATION table
-- **COMPOSITE PK on entity_embeddings** — (ENTITY_ID, ENTITY_TYPE) replaces single ENTITY_ID
-- **COMPOSITE PK on entity_tags** — (ENTITY_ID, ENTITY_TYPE, TAG_ID) replaces single ID
-- **All PL/pgSQL functions** — Updated for v2.1 schema (column renames, new tables)
-
-### Removed
-
-- **ENTITIES.TAGS column** — Replaced by normalized TAGS + ENTITY_TAGS
-- **ENTITIES.METADATA column** — Only in ENTITY_EDGES now
-- **ENTITIES.ACCESSIBLE_TO column** — Simplified visibility model
-- **ENTITIES.DESCRIPTION column** — Replaced by SUMMARY
-- **COLLABORATIVE visibility** — Replaced by PUBLIC; cross-agent sharing via AGENT_COLLABORATION
-
----
-
-## [2.0.0] - 2026-05-18
-
-### Major Release — Complete Rewrite: Unified Architecture
-
-v2.0.0 is a **complete rewrite** of the system. Every component redesigned from scratch.
-
-### Added
-
-- **Unified Entity Model** — All entity types (MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE) in single `entities` table with `entity_type` discriminator
-- **Unified Edge Model** — All relationships in single `entity_edges` table with strength and confidence
-- **4-Phase SQL Deployment** — Ordered schema, API, jobs, harness template scripts (idempotent)
-- **18 Tables** — entities, entity_edges, knowledge_meta, harness_meta, entity_embeddings, agent_registry, agent_session, entity_access_log, agent_permission_log, agent_collaboration, task_plans, task_steps, task_context_snapshots, task_tool_calls, task_dependencies, tags, entity_tags, system_config, system_users
-- **53 Indexes** — B-tree, GIN, HNSW (vector), composite
-- **5 Views** — v_memory_entities, v_knowledge_entities, v_active_sessions, v_collaboration_status, v_entity_graph
-- **PL/pgSQL API** — 4 schemas (memory, memory_fusion, knowledge_api, agent_perm, session_cleanup) with 21 functions
-- **7 pg_cron Jobs** — Memory fusion, knowledge extraction, session cleanup, log purge, tag counts, collaboration expiry, entity archiving
-- **Python API** — 8 modules (~2000 lines): config, connection, memory_api, knowledge_api, agent_api, task_plan_api, security, harness_api
-- **psycopg2 ThreadedConnectionPool** — Replaces psql subprocess (20ms/query vs 90s, 4500x faster)
-- **Unix Socket Support** — Automatic when config host is localhost/empty
-- **Security Module** — DataMaskingService (email, phone, SSN, credit card, custom patterns), ReversibleEncryption (AES-256-CBC), PBKDF2 password hashing
-- **Harness Template System** — 5 built-in templates (Research Analyst, Code Assistant, Data Analyst, Task Planner, Security Auditor) with full CRUD, instantiate, derive, validate, publish, deprecate, lineage
-- **Apache AGE Property Graph** — 1 unified `memory_graph` graph (replaces 2 separate v1.x graphs)
-- **pg-embedding-gen-by-yhw Integration** — Custom PG18 extension (COPY FROM PROGRAM + Python proxy) for in-database embedding generation; multi-model profiles, auto-dimension detection, health check, batch, validation, cosine similarity, logging
-- **Test Suite** — 37 tests across 5 modules (connection, memory, knowledge, agent, security), all passing
-- **Documentation** — SKILL.md (211 lines), README.md, 6 topic docs, 4 reference docs
-
-### Changed
-
-- knowledge_concepts + memory concepts → `entities` (entity_type discriminator)
-- knowledge_graph + memory relations → `entity_edges`
-- psql subprocess → psycopg2 ThreadedConnectionPool
-- 4+ independent SQL scripts → 4-phase ordered deployment
-- No PL/pgSQL API → 4 schemas with 21 functions
-- No scheduled jobs → 7 pg_cron jobs
-- No security module → DataMaskingService + ReversibleEncryption
-- No harness templates → 5 built-in templates + full CRUD API
-- 2 property graphs → 1 unified AGE graph (memory_graph)
-- agent_memory_access → entity_access_log (all entity types)
-- `generate_embedding()` marked VOLATILE (not STABLE) since it calls external API
-
-### Fixed
-
-- knowledge_api.py: `concept_type` column → `category` in entities table
-- agent_api.py: wrong table name references
-- task_plan_api.py: column names and status values (SUCCESS→COMPLETED, IN_PROGRESS→ACTIVE)
-- test_agent.py: wrong assertions and table names
-- 1_schema.sql: `generate_embedding()` STABLE → VOLATILE (calls external API)
-- All pg-embedding-gen-by-yhw documentation: corrected from "C extension" / "database-native" to accurate description (COPY FROM PROGRAM + Python proxy)
-
-### Removed
-
-- `knowledge_concepts` table (replaced by entities with entity_type='KNOWLEDGE')
-- `knowledge_graph` table (replaced by entity_edges)
-- `knowledge_versions` table (replaced by knowledge_meta.version)
-- `knowledge_tags` / `knowledge_concept_tags` tables (replaced by tags / entity_tags)
-- `knowledge_distillation_log` table (replaced by knowledge_meta.source_type)
-- `knowledge_search_history` table (removed)
-- `agent_memory_access` table (replaced by entity_access_log)
-- All v1.x SQL scripts (replaced by 4-phase deployment)
-- psql subprocess approach (replaced by psycopg2)
-
----
-
-## [1.0.0] - 2026-05-10
-
-### Major Release - Production-Grade Memory System
-
-This is a **major breakthrough for Production AI Agents** - v1.0.0 brings PostgreSQL 18 Memory System to full production, including a complete Knowledge Base system for managing stable knowledge and distilled experiences.
-
-### Added
-
-- **Knowledge Base System** - Complete knowledge management framework
-  - `knowledge_concepts` table - Knowledge concepts with embeddings and metadata
-  - `knowledge_graph` table - Concept relationships and graph structure
-  - `knowledge_versions` table - Version history for all concepts
-  - `knowledge_tags` table - Tag taxonomy and classification
-  - `knowledge_concept_tags` table - Many-to-many tag relationships
-  - `knowledge_distillation_log` table - Experience distillation tracking
-  - `knowledge_search_history` table - Query analytics and optimization
-  - Views: `v_knowledge_concepts_active`, `v_knowledge_graph_summary`
-
-- **Python Knowledge Base API** - `scripts/knowledge_base_api_pg.py`
-  - `create_concept()` - Create knowledge concepts with auto-embedding
-  - `search_concepts_by_text()` - Semantic search with vector similarity
-  - `get_concept()` / `update_concept()` - Concept CRUD operations
-  - `create_relationship()` / `get_related_concepts()` - Graph operations
-  - `add_tag_to_concept()` - Tag management
-  - `get_statistics()` - System analytics
-
-- **Enhanced pg-embedding-gen-by-yhw Integration**
-  - In-database embedding generation via COPY FROM PROGRAM + Python proxy
-  - Multi-model profile management
-  - Auto-dimension detection, health check, batch generation
-
-### Updated
-
-- SKILL.md - Updated to v1.0.0 with production emphasis
-- README.md - Complete rewrite for v1.0.0 release
-- CHANGELOG.md - Full version history maintained
-
-### Fixed
-
-- AGE graph creation compatibility issues with PostgreSQL 18
-- pgvector index configuration for optimal performance
-- Python API connection pooling and error handling
-- Embedding generation failure recovery
-
-### Notes
-
-- This release is **battle-tested** and production-ready
-- Fully compatible with existing v0.3.3 deployments (additive schema)
-- All Multi-Agent Architecture features retained and enhanced
-
----
-
-## [0.3.3] - 2026-05-07
-
-### Added
-
-- **Multi-Agent Architecture** - Complete framework for managing multiple AI agents
-  - Agent Registry (agent_registry) - Centralized agent lifecycle management
-  - Memory Access Control (agent_memory_access) - Fine-grained visibility policies
-  - Collaboration Framework (agent_collaboration) - Agent-to-agent communication channels
-  - Session Management (agent_session) - Active session tracking and monitoring
-  - Python API for all multi-agent operations
-
-### Updated
-
-- Enhanced task plan system with session context tracking
-- Improved memory access control policies
-- Added agent capability discovery system
-
----
-
-## [0.3.2] - 2026-05-06
-
-### Added
-
-- **Task Plan Persistence System** - Complete task execution tracking
-  - `task_plans` table - Core plan management with goals and priorities
-  - `task_steps` table - Step execution tracking and results
-  - `task_context_snapshots` table - Breakpoint recovery state
-  - `task_tool_calls` table - Tool call audit trail
-  - `task_dependencies` table - Task dependency graph
-  - Python API for task plan creation, update, and resume
-  - Auto-snapshot functionality for breakpoint recovery
-
-### Fixed
-
-- Context snapshot JSON handling
-- Task step status transitions
-
----
-
-## [0.3.1] - 2026-05-05
-
-### Added
-
-- **Property Graph Integration** - Apache AGE with Cypher query support
-  - Full Cypher query compatibility
-  - Graph visualization support
-  - Relationship traversal optimization
-  - Node/edge property indexing
-
-- **Enhanced Vector Search** - pgvector HNSW indexing
-  - Optimized HNSW index configuration
-  - Batch embedding generation
-  - Similarity search performance tuning
-
-### Fixed
-
-- Vector index rebuild issues
-- Cypher query syntax compatibility
-
----
-
-## [0.3.0] - 2026-05-04
-
-### Added
-
-- **PostgreSQL 18 Support** - Full PostgreSQL 18 compatibility
-  - pgvector extension for vector similarity search
-  - Apache AGE extension for property graph queries
-  - Native JSONB support for flexible metadata
-  - HNSW indexing for high-performance vector search
-
-### Updated
-
-- Complete schema redesign for PostgreSQL 18
-- Python API updated for psycopg2
-- Vector embedding generation integration
-
----
-
-## Version Summary
-
-| Version | Release Date | Major Features | Status |
-|---------|--------------|----------------|--------|
-| v2.3.1 | 2026-05-26 | Embedding Python API, EMBEDDING_GENERATION_JOB, 19 embedding tests | Current |
-| v2.3.0 | 2026-05-24 | Spec Driven Development, Agent Elastic Management, Collaboration Groups | Stable |
-| v2.2.1 | 2026-05-24 | UI fixes: language persistence, text contrast | Stable |
-| v2.1.0 | 2026-05-20 | Normalized tags, property graph API, column renames, simplified visibility | Stable |
-| v2.0.0 | 2026-05-18 | Complete rewrite: unified entities, psycopg2, PL/pgSQL API, harness, security | Stable |
-| v1.0.0 | 2026-05-10 | Knowledge Base, Enhanced API, Production-Ready | Stable |
-| v0.3.3 | 2026-05-07 | Multi-Agent Architecture | Stable |
-| v0.3.2 | 2026-05-06 | Task Plan Persistence | Stable |
-| v0.3.1 | 2026-05-05 | Property Graph, Vector Search | Stable |
-| v0.3.0 | 2026-05-04 | PostgreSQL 18 Support | Stable |
+- **PostgreSQL adaptation** — Full port from Oracle 26ai to PostgreSQL 18.3:
+  - `oracledb` → `psycopg2` with `ThreadedConnectionPool`
+  - `:name` named binds → `%s` positional binds
+  - Oracle PL/SQL → PL/pgSQL + PL/Python3u
+  - `DBMS_CRYPTO` → `pgcrypto` (`encrypt_iv`/`decrypt_iv`)
+  - `VECTOR_DISTANCE` → `pgvector` `<=>` cosine distance operator
+  - Oracle Text `CONTAINS`/`SCORE` → PostgreSQL `ts_vector`/`ts_rank`
+  - Oracle SQL/PGQ `GRAPH_TABLE` → Apache AGE `cypher()`
+  - Oracle Data Grants → PostgreSQL Row Security Policies (RLS)
+  - Oracle Scheduler → `pg_cron` extension
+  - Oracle JRD Duality Views → PostgreSQL views with triggers
+  - `RAWTOHEX(SYS_GUID())` → `gen_random_uuid()` or `encode(gen_random_bytes(16), 'hex')`
+  - Oracle `JSON_OBJECT`/`JSON_ARRAYAGG` → PostgreSQL `jsonb_build_object`/`jsonb_agg`
+  - Oracle `SYSTIMESTAMP` → `CURRENT_TIMESTAMP`
+  - Oracle `NUMTODSINTERVAL` → PostgreSQL `INTERVAL`
+  - Oracle `VARCHAR2` → PostgreSQL `VARCHAR`
+  - Oracle `CLOB` → PostgreSQL `TEXT`
+  - Oracle `NUMBER` → PostgreSQL `INTEGER`/`NUMERIC`
+  - Oracle `RAW` → PostgreSQL `BYTEA`
+  - DSN `host:port/service` → separate `host`/`port`/`dbname` connection parameters
+  - Master key directory `~/.oracle-infra/` → `~/.pg-infra/`
+- **Admin/Agent Separation Architecture** — Mode system (standalone/admin/agent), Admin Token authentication, encrypted credential distribution, Recovery Codes, Agent Recovery, Private Skill Backup, Skill Distribution & Management API
+- **Portal User System** — Register/login, chat sessions, agent pool assignment, auto-naming
+- **Context Branching** — Fork, merge, abandon, resume branches; conflict detection; lesson extraction
+- **Multi-Agent Collaboration** — Collaboration groups integrated with Branches, SDD, Task Plans, and Harness
+- **5-Signal Unified Hybrid Search** — Vector, fulltext, relational, tag, graph signal fusion via `unified_sql` single-SQL strategy
+- **Encrypted Credentials** — config.json auto-encryption, pgcrypto in-database encryption, master key management
+- **Row Security Policies** — 23 RLS policies for row-level access control, zero-trust security model
+- **Test suite** — 105 tests across 16 modules

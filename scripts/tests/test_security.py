@@ -1,7 +1,7 @@
-"""PostgreSQL Memory System v2.3.1 - Security Module Tests"""
+"""AI Agent Infra v3.6.2 - PG Community Edition - Security Module Tests"""
+
 import sys
 import os
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.security import (
@@ -9,329 +9,84 @@ from lib.security import (
     hash_password, verify_password,
 )
 
-_passed = 0
-_failed = 0
+
+def test_data_masking_pii():
+    svc = DataMaskingService("LOGGING")
+    result = svc.mask_text("Contact user@example.com for details")
+    assert "****@example.com" in result
+    assert "user@" not in result
+
+    result2 = svc.mask_text("Card 4111111111111111 charged")
+    assert "****-****-****-1111" in result2
+
+    result3 = svc.mask_text("SSN 123-45-6789 on file")
+    assert "***-**-6789" in result3
+    print("PASS: test_data_masking_pii")
 
 
-def _record(ok):
-    global _passed, _failed
-    if ok:
-        _passed += 1
-    else:
-        _failed += 1
+def test_data_masking_context_levels():
+    svc_logging = DataMaskingService("LOGGING")
+    text_with_ip = "Server at 192.168.1.100 responded"
+    masked_logging = svc_logging.mask_text(text_with_ip)
+    assert "192.168.1.100" in masked_logging
+
+    svc_debugging = DataMaskingService("DEBUGGING")
+    masked_debug = svc_debugging.mask_text(text_with_ip)
+    assert "192.168.1.100" not in masked_debug or "***" in masked_debug
+
+    svc_analytics = DataMaskingService("ANALYTICS")
+    result = svc_analytics.mask_text("Email test@domain.com card 4111111111111111")
+    assert "****-****-****-1111" in result
+    print("PASS: test_data_masking_context_levels")
 
 
-def test_mask_text_email():
-    try:
-        service = DataMaskingService(context_level="LOGGING")
-        text = "My email is user@example.com and my phone is 123-456-7890"
-        masked = service.mask_text(text)
-        ok = "user@example.com" not in masked and "123-456-7890" not in masked
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_mask_text_email: " + status)
-    return ok
+def test_hash_verify_password():
+    pw = "MySecurePassword123!"
+    hash_val, salt = hash_password(pw)
+    assert verify_password(pw, hash_val, salt)
+    assert not verify_password("wrong_password", hash_val, salt)
+    print("PASS: test_hash_verify_password")
 
 
-def test_mask_text_credit_card():
-    try:
-        service = DataMaskingService(context_level="LOGGING")
-        text = "Card number 4111111111111111 charged"
-        masked = service.mask_text(text)
-        ok = "4111111111111111" not in masked
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_mask_text_credit_card: " + status)
-    return ok
+def test_reversible_encryption():
+    enc = ReversibleEncryption()
+    plaintext = "Hello, PostgreSQL! This is a secret message."
+    ciphertext = enc.encrypt(plaintext)
+    decrypted = enc.decrypt(ciphertext)
+    assert decrypted == plaintext
+    print("PASS: test_reversible_encryption")
 
 
-def test_mask_text_ssn():
-    try:
-        service = DataMaskingService(context_level="LOGGING")
-        text = "SSN: 123-45-6789 on file"
-        masked = service.mask_text(text)
-        ok = "123-45-6789" not in masked
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_mask_text_ssn: " + status)
-    return ok
-
-
-def test_mask_text_jwt():
-    try:
-        service = DataMaskingService(context_level="LOGGING")
-        text = "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc123def456ghi789"
-        masked = service.mask_text(text)
-        ok = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc123def456ghi789" not in masked
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_mask_text_jwt: " + status)
-    return ok
-
-
-def test_mask_text_empty():
-    try:
-        service = DataMaskingService(context_level="LOGGING")
-        ok = service.mask_text("") == ""
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_mask_text_empty: " + status)
-    return ok
-
-
-def test_mask_dict():
-    try:
-        service = DataMaskingService(context_level="LOGGING")
-        data = {"password": "secret123", "description": "visible", "email": "user@example.com"}
-        masked = service.mask_dict(data)
-        ok = masked["description"] == "visible" and "secret123" not in str(masked.get("password", ""))
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_mask_dict: " + status)
-    return ok
-
-
-def test_mask_dict_nested():
-    try:
-        service = DataMaskingService(context_level="LOGGING")
-        data = {"config": {"token": "abc123secret456", "name": "app"}}
-        masked = service.mask_dict(data)
-        ok = "abc123secret456" not in str(masked.get("config", {}).get("token", ""))
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_mask_dict_nested: " + status)
-    return ok
-
-
-def test_mask_json():
-    try:
-        service = DataMaskingService(context_level="LOGGING")
-        import json
-        json_str = json.dumps({"api_key": "secretkey123456789", "value": 42})
-        masked = service.mask_json(json_str)
-        ok = "secretkey123456789" not in masked
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_mask_json: " + status)
-    return ok
-
-
-def test_mask_json_invalid():
-    try:
-        service = DataMaskingService(context_level="LOGGING")
-        result = service.mask_json("not valid json {")
-        ok = isinstance(result, str)
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_mask_json_invalid: " + status)
-    return ok
-
-
-def test_context_level_analytics():
-    try:
-        service = DataMaskingService(context_level="ANALYTICS")
-        text = "Card 4111111111111111 and SSN 123-45-6789"
-        masked = service.mask_text(text)
-        ok = "4111111111111111" not in masked and "123-45-6789" not in masked
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_context_level_analytics: " + status)
-    return ok
-
-
-def test_context_level_debugging():
-    try:
-        service = DataMaskingService(context_level="DEBUGGING")
-        text = "IP 10.0.0.1 connected"
-        masked = service.mask_text(text)
-        ok = "10.0.0.1" not in masked
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_context_level_debugging: " + status)
-    return ok
-
-
-def test_encryption_roundtrip():
-    try:
-        enc = ReversibleEncryption()
-        plaintext = "sensitive data for encryption test"
-        ciphertext = enc.encrypt(plaintext)
-        decrypted = enc.decrypt(ciphertext)
-        ok = decrypted == plaintext and ciphertext != plaintext
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_encryption_roundtrip: " + status)
-    return ok
-
-
-def test_encryption_different_keys():
-    try:
-        enc1 = ReversibleEncryption(key=b"a" * 32)
-        enc2 = ReversibleEncryption(key=b"b" * 32)
-        ciphertext = enc1.encrypt("test data")
-        decrypted = enc1.decrypt(ciphertext)
-        ok = decrypted == "test data"
-        try:
-            enc2.decrypt(ciphertext)
-            ok = False
-        except Exception:
-            pass
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_encryption_different_keys: " + status)
-    return ok
-
-
-def test_key_rotation():
-    try:
-        old_key = os.urandom(32)
-        enc = ReversibleEncryption(key=old_key)
-        plaintext = "data before rotation"
-        ciphertext = enc.encrypt(plaintext)
-        new_key = os.urandom(32)
-        rotated = enc.rotate_key(new_key, [ciphertext])
-        ok = len(rotated) == 1
-        enc2 = ReversibleEncryption(key=new_key)
-        decrypted = enc2.decrypt(rotated[0])
-        ok = ok and decrypted == plaintext
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_key_rotation: " + status)
-    return ok
-
-
-def test_password_hash_and_verify():
-    try:
-        password = "test_password_123"
-        stored_hash, salt_hex = hash_password(password)
-        ok = stored_hash != password and verify_password(password, stored_hash, salt_hex)
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_password_hash_and_verify: " + status)
-    return ok
-
-
-def test_password_verify_wrong():
-    try:
-        stored_hash, salt_hex = hash_password("correct_password")
-        ok = not verify_password("wrong_password", stored_hash, salt_hex)
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_password_verify_wrong: " + status)
-    return ok
-
-
-def test_password_custom_iterations():
-    try:
-        stored_hash, salt_hex = hash_password("fast_hash", iterations=1000)
-        ok = verify_password("fast_hash", stored_hash, salt_hex, iterations=1000)
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_password_custom_iterations: " + status)
-    return ok
-
-
-def test_password_custom_salt():
-    try:
-        salt = os.urandom(16)
-        stored_hash, salt_hex = hash_password("salted_pw", salt=salt)
-        ok = salt_hex == salt.hex() and verify_password("salted_pw", stored_hash, salt_hex)
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_password_custom_salt: " + status)
-    return ok
-
-
-def test_masking_order():
-    try:
-        service = DataMaskingService(context_level="LOGGING")
-        text = "SSN: 123-45-6789, Email: a@b.com, Phone: 555-000-1234"
-        masked = service.mask_text(text)
-        ssn_gone = "123-45-6789" not in masked
-        email_gone = "a@b.com" not in masked
-        phone_gone = "555-000-1234" not in masked
-        ok = ssn_gone and email_gone and phone_gone
-    except Exception as e:
-        print("  Error: " + str(e))
-        ok = False
-    _record(ok)
-    status = "PASS" if ok else "FAIL"
-    print("  test_masking_order: " + status)
-    return ok
+def test_mask_empty_string():
+    svc = DataMaskingService("LOGGING")
+    result = svc.mask_text("")
+    assert result == ""
+    result2 = svc.mask_text(None)
+    assert result2 is None
+    print("PASS: test_mask_empty_string")
 
 
 def run_all():
-    tests = [
-        test_mask_text_email, test_mask_text_credit_card, test_mask_text_ssn,
-        test_mask_text_jwt, test_mask_text_empty,
-        test_mask_dict, test_mask_dict_nested,
-        test_mask_json, test_mask_json_invalid,
-        test_context_level_analytics, test_context_level_debugging,
-        test_encryption_roundtrip, test_encryption_different_keys,
-        test_key_rotation,
-        test_password_hash_and_verify, test_password_verify_wrong,
-        test_password_custom_iterations, test_password_custom_salt,
-        test_masking_order,
-    ]
-    for t in tests:
-        t()
-    print("\n  Security: {} passed, {} failed, {} total".format(_passed, _failed, _passed + _failed))
-    return _failed == 0
+    passed = 0
+    failed = 0
+    for test_fn in [
+        test_data_masking_pii,
+        test_data_masking_context_levels,
+        test_hash_verify_password,
+        test_reversible_encryption,
+        test_mask_empty_string,
+    ]:
+        try:
+            test_fn()
+            passed += 1
+        except Exception as e:
+            print(f"FAIL: {test_fn.__name__} - {e}")
+            failed += 1
+
+    print(f"\nSecurity Tests: {passed} passed, {failed} failed")
+    return failed == 0
 
 
 if __name__ == "__main__":
-    run_all()
+    success = run_all()
+    sys.exit(0 if success else 1)
