@@ -149,7 +149,7 @@ No breaking changes. The Loop Engineering feature is additive — existing funct
 ## System Requirements
 
 Unchanged from v3.7.0:
-- PostgreSQL 18.3 version 23.26.2.0.0 or later
+- PostgreSQL 18.3 version or later
 - Python 3.6+ with psycopg2
 
 ### Bug Fixes
