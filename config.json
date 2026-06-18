@@ -17,5 +17,12 @@
     "api_url": "http://10.10.10.1:12345/v1/embeddings",
     "model": "text-embedding-bge-m3",
     "dimension": 1024
+  },
+  "llm_judge": {
+    "enabled": false,
+    "api_url": "http://10.10.10.1:12345/v1/chat/completions",
+    "model": "gpt-4o",
+    "timeout": 60,
+    "min_score": 7
   }
 }

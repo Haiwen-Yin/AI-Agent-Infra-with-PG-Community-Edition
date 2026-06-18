@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.6.2 - PG Community Edition - Embedding API
+"""AI Agent Infra v3.7.0 - PG Community Edition - Embedding API
 
 Generate, store, and search vector embeddings for entities.
 Uses external Embedding API (OpenAI-compatible) + pgvector for storage.

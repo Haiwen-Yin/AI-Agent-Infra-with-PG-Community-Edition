@@ -1,19 +1,41 @@
-# AI Agent Infra with PostgreSQL - Community Edition v3.6.2
+# AI Agent Infra with PostgreSQL - Community Edition v3.7.0
 
-[![Version](https://img.shields.io/badge/version-v3.6.2-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.7.0-blue.svg)](CHANGELOG.md)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.3-blue.svg)](https://www.postgresql.org/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on PostgreSQL 18.3.**
 
-> **v3.6.2 (2026-06-18): Bug fix release — 15 bug fixes including conn→connection typo, SQL case compatibility, BIGINT substring errors, user authentication, workspace owner_user_id, portal chat send, graph stats field names, branch_api/graph_api missing functions, task_plan_api/spec_api column mismatches, session switching error handling. See [CHANGELOG.md](CHANGELOG.md) for details.**
+> **v3.7.0 (2026-06-18): Bug fix release — 15 bug fixes including conn→connection typo, SQL case compatibility, BIGINT substring errors, user authentication, workspace owner_user_id, portal chat send, graph stats field names, branch_api/graph_api missing functions, task_plan_api/spec_api column mismatches, session switching error handling. See [CHANGELOG.md](CHANGELOG.md) for details.**
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.6.2.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.0.md)**
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
 ---
+
+
+## Loop Engineering
+
+Loop Engineering is the 4th generation AI engineering paradigm (after Prompt Engineering, Context Engineering, and Harness Engineering), proposed by Peter Steinberger in June 2026. This project implements it with:
+
+- **4 new tables**: loop_meta, loop_runs, loop_iterations, loop_hooks
+- **loop_manager** PL/pgSQL schema with ~22 functions for loop lifecycle management
+- **loop_api.py** Python module with 25 functions including evaluation engine
+- **4 evaluation types**: TEST (run command, check exit code), DIFF (analyze git diff), LLM_JUDGE (LLM scoring, configurable), MANUAL (human review)
+- **Stop conditions**: max_iterations, max_tokens, max_duration_seconds
+- **Lifecycle hooks**: PRE_RUN, POST_ITERATION, ON_STOP, ON_FAIL, ON_TIMEOUT
+- **3 pg_cron jobs**: loop_trigger_job, loop_stuck_check_job, loop_cleanup_job
+
+### The 5-Stage Loop Cycle
+
+1. **Intent** - Define goal
+2. **Context** - Gather information
+3. **Action** - Execute tools
+4. **Observe** - Get results
+5. **Adjust** - Refine and repeat
+
 
 ## 5-Signal Unified Hybrid Search
 
@@ -139,7 +161,7 @@ UPDATE system_config SET config_value = '10' WHERE config_key = 'dormant_timeout
 | Data Masking | Yes | Yes |
 | **Database** | | |
 | Tables | 30 | 35 |
-| PL/pgSQL Functions/Packages | 22 base + 78 API in 13 schemas | 22 base + 91 API in 16 schemas |
+| PL/pgSQL Functions/Packages | 22 base + 78 API in 14 schemas | 22 base + 91 API in 16 schemas |
 | pg_cron Jobs | 13 | 17 |
 | Row Security Policies | 25+ | 31 |
 | Tests | 105 | 135 |
@@ -251,9 +273,9 @@ cd scripts && python -m tests.test_all
 ai-agent-infra-pg-community/
   scripts/
     deploy/
-      1_schema.sql              # 30 tables, indexes, property graph (AGE), seed data
+      1_schema.sql              # 34 tables, indexes, property graph (AGE), seed data
       2_api.sql                 # 13 PL/pgSQL function groups
-      3_jobs.sql                # 13 pg_cron jobs
+      3_jobs.sql                # 16 pg_cron jobs
     lib/
       config.py                 # Unified Config with encrypted DB credentials
       connection.py             # psycopg2 connection pool (decrypts config)
@@ -278,7 +300,7 @@ ai-agent-infra-pg-community/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.6.2
+      server.py                 # HTTP server v3.7.0
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/

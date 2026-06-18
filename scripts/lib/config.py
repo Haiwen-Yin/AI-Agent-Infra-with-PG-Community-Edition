@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.6.2 - PG Community Edition - Unified Configuration Manager
+"""AI Agent Infra v3.7.0 - PG Community Edition - Unified Configuration Manager
 
 Reads from config.json with environment variable overrides.
 Priority: Environment Variables > config.json > Built-in defaults
@@ -14,7 +14,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-VERSION = "3.6.2"
+VERSION = "3.7.0"
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 

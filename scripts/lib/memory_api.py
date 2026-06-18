@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.6.2 - PG Community Edition - Memory API
+"""AI Agent Infra v3.7.0 - PG Community Edition - Memory API
 
 Unified memory management using psycopg2 with %s positional binds.
 Operates on the entities table (entity_type='MEMORY').

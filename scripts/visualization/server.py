@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.6.2 - Community Edition (PG) - Web Visualization Server
+"""AI Agent Infra v3.7.0 - Community Edition (PG) - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -21,10 +21,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib import connection, memory_api, knowledge_api, agent_api
 from lib import task_plan_api, workspace_api, harness_api, graph_api
-from lib import spec_api, collab_api, branch_api
+from lib import spec_api, collab_api, branch_api, loop_api, loop_api
 from lib import security, config, user_api
 
-VERSION = "3.6.2"
+VERSION = "3.7.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -43,6 +43,7 @@ PAGE_ROUTES = {
     '/collab': 'collab.html',
     '/skills': 'skills.html',
     '/branches': 'branches.html',
+    '/loops': 'loops.html',
 }
 
 PUBLIC_API = {'/api/health', '/api/login', '/portal/api/register', '/portal/api/login', '/api/admin/agent/register', '/api/admin/agent/recover', '/api/admin/token/generate', '/api/admin/token/rotate', '/api/admin/skill/list', '/api/admin/skill/acquire', '/api/admin/skill/create', '/api/admin/skill/update', '/api/admin/skill/delete', '/api/admin/skill/upload'}
@@ -542,6 +543,32 @@ class VisHandler(BaseHTTPRequestHandler):
             self._handle_admin_skill_upload()
             return
 
+
+        if path == '/api/loops/create':
+            self._api_loops_create()
+            return
+        if path == '/api/loops/delete':
+            self._api_loops_delete()
+            return
+        if path == '/api/loops/runs/start':
+            self._api_loops_run_start()
+            return
+        if path == '/api/loops/runs/pause':
+            self._api_loops_run_pause()
+            return
+        if path == '/api/loops/runs/resume':
+            self._api_loops_run_resume()
+            return
+        if path == '/api/loops/runs/stop':
+            self._api_loops_run_stop()
+            return
+        if path == '/api/loops/iterate':
+            self._api_loops_iterate()
+            return
+        if path == '/api/loops/hooks/add':
+            self._api_loops_hook_add()
+            return
+
         self._send_error(404, 'Not found')
 
     def _handle_login(self):
@@ -630,6 +657,22 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._send_json(graph_api.graph_search(keyword=q if q else None, entity_type=et))
             elif path == '/api/graph/all':
                 self._send_json(_graph_all())
+            elif path == '/api/loops':
+                self._api_loops_list(qs)
+            elif path == '/api/loops/stats':
+                self._api_loops_stats_all(qs)
+            elif path.startswith('/api/loops/runs/') and path.endswith('/iterations'):
+                self._api_loop_run_iterations(path)
+            elif path.startswith('/api/loops/runs/'):
+                self._api_loop_run_get(path)
+            elif path.startswith('/api/loops/') and path.endswith('/stats'):
+                self._api_loop_stats(path)
+            elif path.startswith('/api/loops/') and path.endswith('/runs'):
+                self._api_loop_runs(path)
+            elif path.startswith('/api/loops/') and path.endswith('/hooks'):
+                self._api_loop_hooks(path)
+            elif path.startswith('/api/loops/'):
+                self._api_loop_get(path)
             elif path == '/api/branches':
                 self._api_branch_list(qs)
             elif path.startswith('/api/branch/tree/'):
@@ -1985,6 +2028,113 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._send_error(404, 'Not found')
         except Exception as e:
             self._send_json({'error': str(e)}, 500)
+
+
+    def _api_loops_list(self, qs):
+        loops = loop_api.list_loops(limit=100)
+        self._send_json({"loops": loops})
+
+    def _api_loops_stats_all(self, qs):
+        loops = loop_api.list_loops(limit=100)
+        stats = [{"loop_id": l["loop_id"], "title": l["title"], "stats": loop_api.get_loop_stats(l["loop_id"])} for l in loops]
+        self._send_json({"stats": stats})
+
+    def _api_loop_get(self, path):
+        loop_id = int(path.split('/')[-1])
+        loop = loop_api.get_loop(loop_id)
+        if loop:
+            self._send_json(loop)
+        else:
+            self._send_error(404, 'Loop not found')
+
+    def _api_loop_stats(self, path):
+        loop_id = int(path.split('/')[-2])
+        self._send_json(loop_api.get_loop_stats(loop_id))
+
+    def _api_loop_runs(self, path):
+        loop_id = int(path.split('/')[-2])
+        self._send_json({"runs": loop_api.list_runs(loop_id=loop_id)})
+
+    def _api_loop_hooks(self, path):
+        loop_id = int(path.split('/')[-2])
+        self._send_json({"hooks": loop_api.list_hooks(loop_id)})
+
+    def _api_loop_run_get(self, path):
+        run_id = int(path.split('/')[-1])
+        run = loop_api.get_run(run_id)
+        if run:
+            self._send_json(run)
+        else:
+            self._send_error(404, 'Run not found')
+
+    def _api_loop_run_iterations(self, path):
+        parts = path.split('/')
+        run_id = int(parts[-2])
+        self._send_json({"iterations": loop_api.list_iterations(run_id)})
+
+    def _api_loops_create(self):
+        body = self._read_body()
+        data = json.loads(body)
+        loop_id = loop_api.create_loop(
+            title=data.get('title', 'Untitled Loop'),
+            goal_definition=data.get('goal_definition', {}),
+            stop_conditions=data.get('stop_conditions', {}),
+            evaluation_config=data.get('evaluation_config', {}),
+            summary=data.get('summary'),
+            trigger_config=data.get('trigger_config'),
+            owned_by_agent=data.get('owned_by_agent'),
+            workspace_id=data.get('workspace_id'),
+        )
+        self._send_json({"success": True, "loop_id": loop_id})
+
+    def _api_loops_delete(self):
+        body = self._read_body()
+        data = json.loads(body)
+        loop_api.delete_loop(int(data['loop_id']))
+        self._send_json({"success": True})
+
+    def _api_loops_run_start(self):
+        body = self._read_body()
+        data = json.loads(body)
+        run_id = loop_api.start_run(int(data['loop_id']), data.get('agent_id', 'system'))
+        self._send_json({"success": True, "run_id": run_id})
+
+    def _api_loops_run_pause(self):
+        body = self._read_body()
+        data = json.loads(body)
+        loop_api.pause_run(int(data['run_id']))
+        self._send_json({"success": True})
+
+    def _api_loops_run_resume(self):
+        body = self._read_body()
+        data = json.loads(body)
+        loop_api.resume_run(int(data['run_id']))
+        self._send_json({"success": True})
+
+    def _api_loops_run_stop(self):
+        body = self._read_body()
+        data = json.loads(body)
+        loop_api.stop_run(int(data['run_id']), data.get('reason'))
+        self._send_json({"success": True})
+
+    def _api_loops_iterate(self):
+        body = self._read_body()
+        data = json.loads(body)
+        result = loop_api.execute_loop_iteration(
+            int(data['run_id']), data.get('agent_id', 'system'),
+            plan_data=data.get('plan_data'), actions=data.get('actions'),
+            observations=data.get('observations'), token_usage=data.get('token_usage', 0),
+        )
+        self._send_json(result)
+
+    def _api_loops_hook_add(self):
+        body = self._read_body()
+        data = json.loads(body)
+        hook_id = loop_api.add_hook(
+            int(data['loop_id']), data['hook_event'], data['hook_type'],
+            data.get('hook_config'), data.get('priority', 5),
+        )
+        self._send_json({"success": True, "hook_id": hook_id})
 
     def _serve_template(self, filename):
         filepath = os.path.join(TEMPLATES_DIR, filename)

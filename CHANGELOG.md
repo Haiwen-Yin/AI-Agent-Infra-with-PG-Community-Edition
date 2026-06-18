@@ -1,3 +1,28 @@
+## v3.7.0 (2026-06-18)
+
+### New Feature: Loop Engineering
+- Added Loop Engineering as the 4th generation AI engineering methodology
+- 4 new tables: LOOP_META, LOOP_RUNS, LOOP_ITERATIONS, LOOP_HOOKS
+- LOOP_MANAGER package/schema with ~22 functions for loop lifecycle management
+- loop_api.py Python module with 25 functions including evaluation engine
+- 4 evaluation types: TEST (command), DIFF (git diff), LLM_JUDGE (LLM scoring), MANUAL (human review)
+- Stop conditions: max_iterations, max_tokens, max_duration_seconds
+- Lifecycle hooks: PRE_RUN, POST_ITERATION, ON_STOP, ON_FAIL, ON_TIMEOUT
+- 3 new scheduler jobs: LOOP_TRIGGER_JOB, LOOP_STUCK_CHECK_JOB, LOOP_CLEANUP_JOB
+- loops.html template with loop management dashboard
+- docs/loop-engineering.md documentation
+- config.json llm_judge section (disabled by default)
+- [ENT only] LOOP_AUDIT table for audit trail
+### Bug Fixes (v3.7.0)
+
+- **COM navigation** — Added loops link to Community Edition sidebar (loops is a core feature)
+- **Loop detail close button** — Added ❌ close button to loop detail panel header
+- **PG authentication** — Fixed `user_manager.authenticate()` hash comparison by adding `upper()` for case-insensitive matching
+- **PG ENT audit** — Created missing audit_api.py, audit.html template, /audit route and /api/audit endpoint
+- **Server startup** — Fixed server startup script using `nohup` instead of `setsid` to prevent shell timeout deadlocks
+- **Loop seed data** — Added realistic loop definitions with runs, iterations, and hooks to all editions
+
+
 # Changelog
 
 All notable changes to AI Agent Infra with PostgreSQL are documented in this file.

@@ -1,4 +1,4 @@
-# Workspace & Context Continuity - AI Agent Infra v3.6.2 (2026-06-18) - PG Community Edition
+# Workspace & Context Continuity - AI Agent Infra v3.7.0 (2026-06-18) - PG Community Edition
 
 ## Design Philosophy: Views with INSTEAD OF Triggers vs Native JSONB
 

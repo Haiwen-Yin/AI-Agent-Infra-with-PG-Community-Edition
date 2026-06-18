@@ -1,5 +1,7 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- ============================================================
--- AI Agent Infra v3.6.1 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
+-- AI Agent Infra v3.7.0 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
 -- ============================================================
 
 -- ============================================================
@@ -2209,7 +2211,8 @@ BEGIN
         RETURN jsonb_build_object('authenticated', FALSE, 'reason', 'user_not_found');
     END IF;
 
-    v_test_hash := 'SHA256:' || encode(digest(p_password || v_user.salt, 'sha256'), 'hex');
+    v_salt := COALESCE(v_user.salt, '');
+    v_test_hash := 'SHA256:' || upper(encode(digest(p_password || v_salt, 'sha256'), 'hex'));
 
     IF v_test_hash != v_user.password_hash THEN
         RETURN jsonb_build_object('authenticated', FALSE, 'reason', 'invalid_password');
@@ -2360,5 +2363,135 @@ $$;
 
 
 -- ============================================================
--- AI Agent Infra v3.6.1 - Community Edition - PostgreSQL 18.3 API Deployment Complete
+-- 14. loop_manager schema [NEW v3.7.0]
+-- ============================================================
+
+CREATE SCHEMA IF NOT EXISTS loop_manager;
+
+-- Check stop conditions for a run
+CREATE OR REPLACE FUNCTION loop_manager.check_stop_conditions(p_run_id BIGINT)
+RETURNS VARCHAR
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_run        RECORD;
+    v_stop       JSONB;
+    v_max_iter   INT;
+    v_max_tokens BIGINT;
+    v_max_dur    INT;
+    v_elapsed    DOUBLE PRECISION;
+BEGIN
+    SELECT * INTO v_run FROM loop_runs WHERE run_id = p_run_id;
+    IF NOT FOUND THEN RETURN 'STOP'; END IF;
+    SELECT m.stop_conditions INTO v_stop
+    FROM loop_meta m WHERE m.entity_id = v_run.loop_id;
+    IF NOT FOUND THEN RETURN 'STOP'; END IF;
+    v_max_iter   := (v_stop->>'max_iterations')::INT;
+    v_max_tokens := (v_stop->>'max_tokens')::BIGINT;
+    v_max_dur    := (v_stop->>'max_duration_seconds')::INT;
+    IF v_max_iter IS NOT NULL AND v_run.iteration_count >= v_max_iter THEN
+        RETURN 'STOP';
+    END IF;
+    IF v_max_tokens IS NOT NULL AND v_run.total_tokens >= v_max_tokens THEN
+        RETURN 'STOP';
+    END IF;
+    IF v_max_dur IS NOT NULL THEN
+        v_elapsed := EXTRACT(EPOCH FROM (NOW() - v_run.started_at));
+        IF v_elapsed >= v_max_dur THEN
+            RETURN 'TIMEOUT';
+        END IF;
+    END IF;
+    RETURN 'CONTINUE';
+END;
+$$;
+
+-- Process scheduled triggers (called by pg_cron)
+CREATE OR REPLACE FUNCTION loop_manager.process_scheduled_triggers()
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    rec RECORD;
+    v_run_id BIGINT;
+BEGIN
+    FOR rec IN (
+        SELECT e.entity_id AS loop_id, e.owned_by_agent
+        FROM entities e
+        JOIN loop_meta m ON e.entity_id = m.entity_id
+        WHERE e.entity_type = 'LOOP_DEFINITION'
+          AND e.status = 'ACTIVE'
+          AND m.trigger_config IS NOT NULL
+          AND m.trigger_config->>'trigger_type' = 'SCHEDULE'
+          AND NOT EXISTS (
+              SELECT 1 FROM loop_runs lr
+              WHERE lr.loop_id = e.entity_id AND lr.status IN ('RUNNING','PAUSED')
+          )
+    ) LOOP
+        INSERT INTO loop_runs (loop_id, agent_id, trigger_type, trigger_source, status, started_at)
+        VALUES (rec.loop_id, COALESCE(rec.owned_by_agent, 'system'), 'SCHEDULE', 'cron', 'RUNNING', NOW())
+        RETURNING run_id INTO v_run_id;
+    END LOOP;
+END;
+$$;
+
+-- Check for stuck runs (called by pg_cron)
+CREATE OR REPLACE FUNCTION loop_manager.check_stuck_runs()
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    rec RECORD;
+    v_max_dur INT;
+    v_stop    JSONB;
+BEGIN
+    FOR rec IN (
+        SELECT r.run_id, r.loop_id, r.started_at
+        FROM loop_runs r
+        WHERE r.status = 'RUNNING'
+    ) LOOP
+        BEGIN
+            SELECT m.stop_conditions INTO v_stop
+            FROM loop_meta m WHERE m.entity_id = rec.loop_id;
+            v_max_dur := (v_stop->>'max_duration_seconds')::INT;
+            IF v_max_dur IS NOT NULL THEN
+                IF EXTRACT(EPOCH FROM (NOW() - rec.started_at)) >= v_max_dur THEN
+                    UPDATE loop_runs SET status = 'TIMEOUT', completed_at = NOW(),
+                        error_message = 'Run timed out'
+                    WHERE run_id = rec.run_id;
+                END IF;
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            CONTINUE;
+        END;
+    END LOOP;
+END;
+$$;
+
+-- Cleanup old runs (called by pg_cron)
+CREATE OR REPLACE FUNCTION loop_manager.cleanup_old_runs(p_days_threshold INT DEFAULT 90)
+RETURNS INT
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_count INT;
+BEGIN
+    DELETE FROM loop_iterations
+    WHERE run_id IN (
+        SELECT run_id FROM loop_runs
+        WHERE status IN ('COMPLETED','STOPPED','FAILED','TIMEOUT')
+          AND completed_at < NOW() - (p_days_threshold || ' days')::INTERVAL
+    );
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    DELETE FROM loop_runs
+    WHERE status IN ('COMPLETED','STOPPED','FAILED','TIMEOUT')
+      AND completed_at < NOW() - (p_days_threshold || ' days')::INTERVAL;
+    GET DIAGNOSTICS v_temp = ROW_COUNT;
+    v_count := v_count + v_temp;
+    RETURN v_count;
+END;
+$$;
+
+
+-- ============================================================
+-- AI Agent Infra v3.7.0 - Community Edition - PostgreSQL 18.3 API Deployment Complete
 -- ============================================================

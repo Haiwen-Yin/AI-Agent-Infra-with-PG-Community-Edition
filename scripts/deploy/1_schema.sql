@@ -6037,6 +6037,154 @@ CREATE POLICY wt_agent_isolation ON public.workspace_tasks USING ((EXISTS ( SELE
 
 
 --
+
+
+-- ============================================================================
+-- Loop Engineering Tables [NEW v3.7.0]
+-- ============================================================================
+
+-- Add LOOP_DEFINITION to entities type constraint
+ALTER TABLE public.entities DROP CONSTRAINT IF EXISTS ck_entities_type;
+ALTER TABLE public.entities ADD CONSTRAINT ck_entities_type
+    CHECK (entity_type IN ('MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE','SPEC','SKILL','LOOP_DEFINITION','OTHER'));
+
+-- 24. loop_meta (sidecar to entities, like harness_meta)
+CREATE TABLE IF NOT EXISTS public.loop_meta (
+    entity_id           BIGINT       NOT NULL,
+    entity_type         VARCHAR(32)  DEFAULT 'LOOP_DEFINITION' NOT NULL,
+    loop_version        VARCHAR(32)  DEFAULT '1.0' NOT NULL,
+    goal_definition     JSONB        NOT NULL,
+    stop_conditions     JSONB        NOT NULL,
+    evaluation_config   JSONB        NOT NULL,
+    trigger_config      JSONB,
+    harness_template_id BIGINT,
+    workspace_id        BIGINT,
+    branch_id           BIGINT,
+    CONSTRAINT pk_loop_meta PRIMARY KEY (entity_id, entity_type),
+    CONSTRAINT fk_lm_entity FOREIGN KEY (entity_id, entity_type) REFERENCES public.entities(entity_id, entity_type) ON DELETE CASCADE,
+    CONSTRAINT ck_lm_entity_type CHECK (entity_type = 'LOOP_DEFINITION')
+);
+
+-- 25. loop_runs (partitioned by LIST(status) like task_plans)
+CREATE TABLE IF NOT EXISTS public.loop_runs (
+    run_id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    loop_id          BIGINT       NOT NULL,
+    agent_id         VARCHAR(64)  NOT NULL,
+    trigger_type     VARCHAR(32)  DEFAULT 'MANUAL' NOT NULL,
+    trigger_source   VARCHAR(256),
+    status           VARCHAR(30)  DEFAULT 'PENDING' NOT NULL,
+    iteration_count  INTEGER      DEFAULT 0 NOT NULL,
+    total_tokens     BIGINT       DEFAULT 0 NOT NULL,
+    final_result     VARCHAR(4000),
+    error_message    VARCHAR(2000),
+    started_at       TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    completed_at     TIMESTAMP,
+    CONSTRAINT fk_lr_agent FOREIGN KEY (agent_id) REFERENCES public.agent_registry(agent_id),
+    CONSTRAINT ck_lr_status CHECK (status IN ('PENDING','RUNNING','PAUSED','COMPLETED','STOPPED','FAILED','TIMEOUT')),
+    CONSTRAINT ck_lr_trigger CHECK (trigger_type IN ('MANUAL','SCHEDULE','EVENT','HOOK'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_lr_loop ON public.loop_runs(loop_id);
+CREATE INDEX IF NOT EXISTS idx_lr_agent ON public.loop_runs(agent_id);
+CREATE INDEX IF NOT EXISTS idx_lr_status ON public.loop_runs(status);
+
+-- 26. loop_iterations (FK to loop_runs, like task_steps to task_plans)
+CREATE TABLE IF NOT EXISTS public.loop_iterations (
+    iteration_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    run_id             BIGINT       NOT NULL,
+    iteration_order    INTEGER      NOT NULL,
+    plan_data          JSONB,
+    actions            JSONB,
+    observations       JSONB,
+    evaluation_result  JSONB,
+    evaluation_passed  VARCHAR(1)   DEFAULT 'N' NOT NULL,
+    adjustment         JSONB,
+    token_usage        BIGINT       DEFAULT 0 NOT NULL,
+    started_at         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    completed_at       TIMESTAMP,
+    CONSTRAINT fk_li_run FOREIGN KEY (run_id) REFERENCES public.loop_runs(run_id) ON DELETE CASCADE,
+    CONSTRAINT ck_li_passed CHECK (evaluation_passed IN ('Y','N'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_li_run ON public.loop_iterations(run_id);
+CREATE INDEX IF NOT EXISTS idx_li_order ON public.loop_iterations(iteration_order);
+
+-- 27. loop_hooks (non-partitioned, like context_branches)
+CREATE TABLE IF NOT EXISTS public.loop_hooks (
+    hook_id     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    loop_id     BIGINT       NOT NULL,
+    hook_event  VARCHAR(32)  NOT NULL,
+    hook_type   VARCHAR(32)  NOT NULL,
+    hook_config JSONB,
+    priority    INTEGER      DEFAULT 5 NOT NULL,
+    enabled     VARCHAR(1)   DEFAULT 'Y' NOT NULL,
+    created_at  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ck_lh_event CHECK (hook_event IN ('PRE_RUN','POST_ITERATION','ON_STOP','ON_FAIL','ON_TIMEOUT','ON_START')),
+    CONSTRAINT ck_lh_type CHECK (hook_type IN ('WEBHOOK','SCRIPT','NOTIFICATION','LOG','MCP_CALL')),
+    CONSTRAINT ck_lh_enabled CHECK (enabled IN ('Y','N')),
+    CONSTRAINT ck_lh_priority CHECK (priority BETWEEN 1 AND 10)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lh_loop ON public.loop_hooks(loop_id);
+
+-- RLS Policies for Loop tables
+ALTER TABLE public.loop_meta ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.loop_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.loop_iterations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.loop_hooks ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS lm_agent_isolation ON public.loop_meta;
+CREATE POLICY lm_agent_isolation ON public.loop_meta ON public.loop_meta
+    USING (EXISTS (
+        SELECT 1 FROM public.entities e
+        WHERE e.entity_id = loop_meta.entity_id
+        AND (e.owned_by_agent = current_setting('app.current_agent_id', TRUE)
+             OR e.visibility IN ('SHARED','PUBLIC'))
+    ));
+
+DROP POLICY IF EXISTS lr_agent_isolation ON public.loop_runs;
+CREATE POLICY lr_agent_isolation ON public.loop_runs ON public.loop_runs
+    USING (agent_id = current_setting('app.current_agent_id', TRUE)
+           OR EXISTS (
+               SELECT 1 FROM public.entities e
+               JOIN public.loop_meta m ON e.entity_id = m.entity_id
+               WHERE e.entity_id = loop_runs.loop_id
+               AND e.visibility IN ('SHARED','PUBLIC')
+           ));
+
+DROP POLICY IF EXISTS li_agent_isolation ON public.loop_iterations;
+CREATE POLICY li_agent_isolation ON public.loop_iterations ON public.loop_iterations
+    USING (EXISTS (
+        SELECT 1 FROM public.loop_runs r
+        WHERE r.run_id = loop_iterations.run_id
+        AND (r.agent_id = current_setting('app.current_agent_id', TRUE)
+             OR EXISTS (
+                 SELECT 1 FROM public.entities e
+                 JOIN public.loop_meta m ON e.entity_id = m.entity_id
+                 WHERE e.entity_id = r.loop_id AND e.visibility IN ('SHARED','PUBLIC')
+             ))
+    ));
+
+DROP POLICY IF EXISTS lh_agent_isolation ON public.loop_hooks;
+CREATE POLICY lh_agent_isolation ON public.loop_hooks ON public.loop_hooks
+    USING (EXISTS (
+        SELECT 1 FROM public.entities e
+        WHERE e.entity_id = loop_hooks.loop_id
+        AND (e.owned_by_agent = current_setting('app.current_agent_id', TRUE)
+             OR e.visibility IN ('SHARED','PUBLIC'))
+    ));
+
+-- Allow aiadmin full access
+DROP POLICY IF EXISTS lm_aiadmin_all ON public.loop_meta;
+CREATE POLICY lm_aiadmin_all ON public.loop_meta ON public.loop_meta FOR ALL USING (current_user = 'aiadmin');
+DROP POLICY IF EXISTS lr_aiadmin_all ON public.loop_runs;
+CREATE POLICY lr_aiadmin_all ON public.loop_runs ON public.loop_runs FOR ALL USING (current_user = 'aiadmin');
+DROP POLICY IF EXISTS li_aiadmin_all ON public.loop_iterations;
+CREATE POLICY li_aiadmin_all ON public.loop_iterations ON public.loop_iterations FOR ALL USING (current_user = 'aiadmin');
+DROP POLICY IF EXISTS lh_aiadmin_all ON public.loop_hooks;
+CREATE POLICY lh_aiadmin_all ON public.loop_hooks ON public.loop_hooks FOR ALL USING (current_user = 'aiadmin');
+
+
 -- PostgreSQL database dump complete
 --
 

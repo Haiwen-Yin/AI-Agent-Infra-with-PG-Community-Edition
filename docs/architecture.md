@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra v3.6.2 (2026-06-18) - PG Community Edition
+# Architecture - AI Agent Infra v3.7.0 (2026-06-18) - PG Community Edition
 
 ## Unified Entity Model
 
@@ -166,7 +166,7 @@ Version chain of context entries enabling continuity across sessions and agent h
 
 ## Row Security Policy Architecture
 
-v3.6.2 uses PostgreSQL Row Security Policies (RLS) for data isolation:
+v3.7.0 uses PostgreSQL Row Security Policies (RLS) for data isolation:
 
 - **25+ Row Security Policies** enforce row-level, column-level, and cell-level access control
 - **3 Database Roles**: `admin_data_role` (full access), `agent_data_role` (filtered), `pool_agent_data_role` (minimum)
@@ -180,7 +180,7 @@ v3.6.2 uses PostgreSQL Row Security Policies (RLS) for data isolation:
 
 ## Admin/Agent Separation Architecture
 
-v3.6.2 introduces a mode system that separates Admin Agent from Business Agent:
+v3.7.0 introduces a mode system that separates Admin Agent from Business Agent:
 
 ```
 ┌──────────────────────────────────────────────────────────┐

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.6.2 - PG Community Edition - Deployment Check API
+"""AI Agent Infra v3.7.0 - PG Community Edition - Deployment Check API
 
 Pre-deployment safety checks for AI Agents.
 Agents MUST call check_deployment() before running any deploy scripts.

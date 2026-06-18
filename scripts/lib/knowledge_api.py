@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.6.2 - PG Community Edition - Knowledge API
+"""AI Agent Infra v3.7.0 - PG Community Edition - Knowledge API
 
 Knowledge CRUD, graph edges, spaced-review, and tagging.
 Operates on entities (entity_type='KNOWLEDGE') + knowledge_meta + entity_edges.

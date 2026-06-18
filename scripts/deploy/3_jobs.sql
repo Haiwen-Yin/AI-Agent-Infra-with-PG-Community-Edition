@@ -1,5 +1,5 @@
 -- ============================================================================
--- AI Agent Infra v3.6.1 - Community Edition (PostgreSQL 18.3) - Phase 3: Scheduler Jobs
+-- AI Agent Infra v3.7.0 - Community Edition (PostgreSQL 18.3) - Phase 3: Scheduler Jobs
 -- ============================================================================
 -- NOTE: pg_cron must be installed and configured before running this script.
 -- See deployment.md for pg_cron setup instructions.
@@ -246,7 +246,55 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- Verify all 13 jobs are scheduled
+-- 14. Loop Trigger Job: check for scheduled Loop triggers [NEW v3.7.0]
+-- Schedule: Every minute
+DO $$
+BEGIN
+    PERFORM cron.schedule(
+        'loop_trigger_job',
+        '* * * * *',
+        $JOB$
+        SELECT loop_manager.process_scheduled_triggers();
+        $JOB$
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'loop_trigger_job already exists or cannot be scheduled: %', SQLERRM;
+END;
+$$;
+
+-- 15. Loop Stuck Check Job: detect and timeout stuck Loop runs [NEW v3.7.0]
+-- Schedule: Every 5 minutes
+DO $$
+BEGIN
+    PERFORM cron.schedule(
+        'loop_stuck_check_job',
+        '*/5 * * * *',
+        $JOB$
+        SELECT loop_manager.check_stuck_runs();
+        $JOB$
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'loop_stuck_check_job already exists or cannot be scheduled: %', SQLERRM;
+END;
+$$;
+
+-- 16. Loop Cleanup Job: cleanup old Loop runs [NEW v3.7.0]
+-- Schedule: Weekly Sunday 06:00
+DO $$
+BEGIN
+    PERFORM cron.schedule(
+        'loop_cleanup_job',
+        '0 6 * * 0',
+        $JOB$
+        SELECT loop_manager.cleanup_old_runs(90);
+        $JOB$
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'loop_cleanup_job already exists or cannot be scheduled: %', SQLERRM;
+END;
+$$;
+
+-- Verify all 16 jobs are scheduled
 SELECT jobname, schedule, command
 FROM cron.job
 WHERE jobname IN (
@@ -254,8 +302,9 @@ WHERE jobname IN (
     'session_cleanup_job', 'access_log_purge_job', 'entity_archive_job',
     'collab_expiry_job', 'workspace_cleanup_job', 'stale_workspace_detect_job',
     'dormant_agent_job', 'credential_cleanup_job', 'embedding_generation_job',
-    'branch_cleanup_job'
+    'branch_cleanup_job',
+    'loop_trigger_job', 'loop_stuck_check_job', 'loop_cleanup_job'
 )
 ORDER BY jobname;
 
--- AI Agent Infra v3.6.1 - Community Edition (PostgreSQL 18.3) - Phase 3: Scheduler Jobs Complete (13 jobs)
+-- AI Agent Infra v3.7.0 - Community Edition (PostgreSQL 18.3) - Phase 3: Scheduler Jobs Complete (16 jobs)

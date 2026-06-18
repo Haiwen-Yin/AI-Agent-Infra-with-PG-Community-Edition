@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra v3.6.2 (2026-06-18) - PG Community Edition
+# API Reference - AI Agent Infra v3.7.0 (2026-06-18) - PG Community Edition
 
 ## Python API (scripts/lib/)
 
@@ -154,7 +154,7 @@ get_workspace_tasks(workspace_id) -> list
 - `purge_inactive_sessions(days_to_keep)` — Delete old closed sessions
 - `archive_old_entities(days_threshold)` — Archive low-importance memories
 
-## Admin API (v3.6.2)
+## Admin API (v3.7.0)
 
 Admin API endpoints for Admin/Agent Separation Architecture. Only available in `admin` or `standalone` mode.
 

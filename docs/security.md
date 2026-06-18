@@ -1,4 +1,4 @@
-# Security - AI Agent Infra v3.6.2 (2026-06-18) - PG Community Edition
+# Security - AI Agent Infra v3.7.0 (2026-06-18) - PG Community Edition
 
 ## Data Masking
 
@@ -55,9 +55,9 @@ Cross-agent sharing is managed via the AGENT_COLLABORATION table.
 All entity access is logged to ENTITY_ACCESS_LOG:
 - LOG_ID (VARCHAR(64)), Entity ID, Agent ID, Access Type (READ/WRITE/DELETE/SEARCH/EMBED), Access Time, Session ID, Context
 
-## Row Security Policies (v3.6.2)
+## Row Security Policies (v3.7.0)
 
-v3.6.2 uses PostgreSQL Row Security Policies for data isolation:
+v3.7.0 uses PostgreSQL Row Security Policies for data isolation:
 
 - **25+ Row Security Policies** enforce row-level, column-level, and cell-level access control
 - **3 Database Roles**: `admin_data_role` (full), `agent_data_role` (filtered by agent), `pool_agent_data_role` (minimum)
@@ -83,11 +83,11 @@ The `ws_ctx_agent_access` RLS policy enforces these rules:
 
 ## Admin/Agent Separation Security Model
 
-v3.6.2 introduces the Admin/Agent Separation Architecture, which significantly reduces the security blast radius of a compromised Business Agent.
+v3.7.0 introduces the Admin/Agent Separation Architecture, which significantly reduces the security blast radius of a compromised Business Agent.
 
 ### Threat Model Comparison
 
-| Threat | Before v3.6.2 | After v3.6.2 (Agent mode) |
+| Threat | Before v3.7.0 | After v3.7.0 (Agent mode) |
 |--------|--------------|--------------------------|
 | Business Agent compromised | Attacker gets schema owner credentials → full database access | Attacker gets restricted user credentials → RLS-filtered access only |
 | Credential leakage from config.json | Schema owner user/password exposed | Only restricted user credentials exposed (scoped by RLS) |

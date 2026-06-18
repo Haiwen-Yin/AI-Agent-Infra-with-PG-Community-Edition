@@ -1,16 +1,17 @@
 ---
 name: ai-agent-infra-pg-community
-version: v3.6.2
+version: v3.7.0
 author: Haiwen Yin
-description: "AI Agent Infra with PostgreSQL - Community Edition v3.6.2 - AI Agent的基础设施架构"
+description: "AI Agent Infra with PostgreSQL - Community Edition v3.7.0 - AI Agent的基础设施架构"
 tags: [postgresql, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, psycopg2, property-graph, apache-age, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, spec-driven, elastic-agent, collaboration, admin-agent-separation, pgvector, pg-cron, plpython3u, pgcrypto, row-security-policies]
 related_skills: [postgresql-18, psycopg2-execution-methodology]
 ---
 
-# AI Agent Infra with PostgreSQL - Community Edition v3.6.2
+# AI Agent Infra with PostgreSQL - Community Edition v3.7.0
 
 **Author:** Haiwen Yin
-**Version:** v3.6.2 - 2026-06-18
+**Version:** v3.7.0 - 2026-06-18
+**Website:** https://db4agent.top
 **License:** Apache License 2.0 (Community Edition)
 
 ## ⚠️ CRITICAL: Database & Driver Requirements
@@ -19,7 +20,7 @@ related_skills: [postgresql-18, psycopg2-execution-methodology]
 
 **Minimum required version: PostgreSQL 18.3**
 
-v3.6.2 uses PostgreSQL features that require version 18.3 or later: pgvector for vector similarity search, Apache AGE for property graph queries, pgcrypto for in-database encryption, Row Security Policies for data isolation, and pg_cron for scheduled jobs.
+v3.7.0 uses PostgreSQL features that require version 18.3 or later: pgvector for vector similarity search, Apache AGE for property graph queries, pgcrypto for in-database encryption, Row Security Policies for data isolation, and pg_cron for scheduled jobs.
 
 ```sql
 SELECT version();
@@ -49,40 +50,40 @@ pip install psycopg2-binary>=2.9
 ## Architecture Overview
 
 ```
-+-----------------------------------------------------------------+
-|                AI Agent Infra with PostgreSQL                   |
-|                   Community Edition v3.6.2                      |
-+-----------------------------------------------------------------+
-|                                                                 |
-|  +-----------------------------------------------------------+  |
-|  |  ENTITIES (unified, LIST partitioned)                     |  |
-|  |  +----------+----------+----------+--------+-----------+  |  |
-|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_  |  |  |
-|  |  |          |          |PUT       |ENCE    | TEMPLATE  |  |  |
-|  |  +----------+----------+----------+--------+-----------+  |  |
-|  |  PK: (ENTITY_ID, ENTITY_TYPE)                             |  |
-|  |  COL: WORKSPACE_ID -> WORKSPACES                          |  |
-|  +-----------------------------------------------------------+  |
-|                         |                                       |
-|  +----------------------------------------------+               |
-|  |  ENTITY_EDGES (REFERENCE partitioned)        |               |
-|  |  PK: (EDGE_ID, SOURCE_ID)                    |               |
-|  |  FK: -> ENTITIES(ENTITY_ID, ENTITY_TYPE)     |               |
-|  |  + 4 other reference-partitioned children    |               |
-|  +----------------------------------------------+               |
-|                                                                 |
-|  +----------------------------------------------+               |
-|  |  WORKSPACES                                  |               |
-|  |  |-- WORKSPACE_CONTEXT (append-only JSONB)   |               |
-|  |  +-- WORKSPACE_TASKS (updatable)             |               |
-|  +----------------------------------------------+               |
-|                                                                 |
-|  +----------------------------------------------+               |
-|  |  AGENT_SESSION (handoff chain)               |               |
-|  |  PREDECESSOR_SESSION_ID -> self (chain)      |               |
-|  +----------------------------------------------+               |
-|                                                                 |
-+-----------------------------------------------------------------+
++--------------------------------------------------------------------+
+|                AI Agent Infra with PostgreSQL                      |
+|                   Community Edition v3.7.0                         |
++--------------------------------------------------------------------+
+|                                                                    |
+|  +--------------------------------------------------------------+  |
+|  |  ENTITIES (unified, LIST partitioned)                        |  |
+|  |  +----------+----------+----------+--------+--------------+  |  |
+|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_     |  |  |
+|  |  |          |          |PUT       |ENCE    | TEMPLATE     |  |  |
+|  |  +----------+----------+----------+--------+--------------+  |  |
+|  |  PK: (ENTITY_ID, ENTITY_TYPE)                                |  |
+|  |  COL: WORKSPACE_ID -> WORKSPACES                             |  |
+|  +--------------------------------------------------------------+  |
+|                         |                                          |
+|  +----------------------------------------------+                  |
+|  |  ENTITY_EDGES (REFERENCE partitioned)        |                  |
+|  |  PK: (EDGE_ID, SOURCE_ID)                    |                  |
+|  |  FK: -> ENTITIES(ENTITY_ID, ENTITY_TYPE)     |                  |
+|  |  + 4 other reference-partitioned children    |                  |
+|  +----------------------------------------------+                  |
+|                                                                    |
+|  +----------------------------------------------+                  |
+|  |  WORKSPACES                                  |                  |
+|  |  |-- WORKSPACE_CONTEXT (append-only JSONB)   |                  |
+|  |  +-- WORKSPACE_TASKS (updatable)             |                  |
+|  +----------------------------------------------+                  |
+|                                                                    |
+|  +----------------------------------------------+                  |
+|  |  AGENT_SESSION (handoff chain)               |                  |
+|  |  PREDECESSOR_SESSION_ID -> self (chain)      |                  |
+|  +----------------------------------------------+                  |
+|                                                                    |
++--------------------------------------------------------------------+
 ```
 
 ## Database Access Security
@@ -100,11 +101,11 @@ Five-plus-one-layer database access security model with Row Security Policies:
 
 ### Row Security Policies — Agent Usage Guide
 
-v3.6.2 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provides declarative row-level access control using `current_setting('app.current_agent_id', TRUE)` to enforce per-agent data filtering.
+v3.7.0 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provides declarative row-level access control using `current_setting('app.current_agent_id', TRUE)` to enforce per-agent data filtering.
 
 **Zero trust**: If no agent context is set, Row Security Policies return **no data**.
 
-#### Current Enforcement Status (v3.6.2)
+#### Current Enforcement Status (v3.7.0)
 
 | Security Mechanism | Deployed? | Enforcing? | Details |
 |---|---|---|---|
@@ -132,7 +133,7 @@ v3.6.2 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provi
 
 ## Admin/Agent Separation Architecture
 
-v3.6.2 introduces a mode system that separates Admin Agent (runs Web Portal, holds schema owner credentials) from Business Agent (independent process, only holds restricted user credentials).
+v3.7.0 introduces a mode system that separates Admin Agent (runs Web Portal, holds schema owner credentials) from Business Agent (independent process, only holds restricted user credentials).
 
 ### Modes
 
@@ -315,3 +316,30 @@ Agent receives Skill → check_deployment() → deployed?
 | pg_cron | 1.6+ | Scheduled job execution |
 | plpython3u | — | Python stored procedures for embedding generation |
 | tsvector | built-in | Full-text search (`to_tsvector`/`to_tsquery`) |
+
+
+## Loop Engineering [NEW v3.7.0]
+
+Loop Engineering is the 4th generation AI engineering methodology (after Prompt Engineering, Context Engineering, and Harness Engineering), proposed by Peter Steinberger in June 2026.
+
+### Overview
+- **4 new tables**: loop_meta, loop_runs, loop_iterations, loop_hooks
+- **loop_manager** PL/pgSQL schema with ~22 functions
+- **loop_api.py** Python module with 25 functions including evaluation engine
+- **4 evaluation types**: TEST (command), DIFF (git diff), LLM_JUDGE (LLM scoring), MANUAL (human review)
+- **Stop conditions**: max_iterations, max_tokens, max_duration_seconds
+- **Lifecycle hooks**: PRE_RUN, POST_ITERATION, ON_STOP, ON_FAIL, ON_TIMEOUT, ON_START
+- **3 pg_cron jobs**: loop_trigger_job (every minute), loop_stuck_check_job (every 5 min), loop_cleanup_job (weekly Sunday)
+
+
+### Database Schema (34 Tables)
+- **14** PL/pgSQL schemas (including loop_manager)
+- **23** Python modules (including loop_api)
+- **16** pg_cron jobs (including 3 loop jobs)
+- **121** tests across 17 test suites
+
+### Bug Fixes (v3.7.0)
+- **COM navigation** — Added loops link to Community Edition sidebar (loops is a core feature)
+- **Loop detail close button** — Added ❌ close button to loop detail panel header
+- **PG authentication** — Fixed `user_manager.authenticate()` hash comparison with `upper()`
+- **Server startup** — Fixed startup script using `nohup` instead of `setsid` to prevent timeout deadlocks
