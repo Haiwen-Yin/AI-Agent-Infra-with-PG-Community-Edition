@@ -1,3 +1,19 @@
+## [3.7.2] - 2026-06-19
+
+### Fixed — Documentation Consistency
+
+- LOOP_MANAGER function count corrected: ~33 → ~22 (actual package spec count)
+- loop_api.py description corrected: "33 functions" → "32 public API functions + private evaluation helpers"
+- LOOP_CLEANUP_JOB schedule corrected: "Weekly Sunday 06:00" → "Weekly Sunday 06:00" (matches actual SQL)
+- ENTITIES partition count corrected: 7 → 8 (includes SKILL partition)
+- Reference-partitioned children count corrected: 6 → 8 (includes SKILL_META, LOOP_META)
+- ON_START lifecycle hook added to v3.7.0 entry (was previously omitted)
+- loop-engineering.md body text corrected: "four evaluation types" → "six evaluation types"
+- RELEASE_NOTES v3.7.0/v3.7.1 bug fixes boundary clarified
+- README project structure updated: all Python modules listed, template count corrected
+- PG terminology corrected: "PL/SQL" → "PL/pgSQL", "loop_manager schema" → "loop_manager schema" in docs
+- PG Community Edition loop table count corrected: "New Tables (4)" → "(5)" including task_loop_binding
+
 ## v3.7.1 (2026-06-19)
 
 ### New Feature: Loop Engineering Collaborative Integration
@@ -33,7 +49,7 @@
 ### New Feature: Loop Engineering
 - Added Loop Engineering as the 4th generation AI engineering methodology
 - 4 new tables: LOOP_META, LOOP_RUNS, LOOP_ITERATIONS, LOOP_HOOKS
-- LOOP_MANAGER package/schema with ~22 functions for loop lifecycle management
+- loop_manager schema/schema with ~22 functions for loop lifecycle management
 - loop_api.py Python module with 25 functions including evaluation engine
 - 4 evaluation types: TEST (command), DIFF (git diff), LLM_JUDGE (LLM scoring), MANUAL (human review)
 - Stop conditions: max_iterations, max_tokens, max_duration_seconds

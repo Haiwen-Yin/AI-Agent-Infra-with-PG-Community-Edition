@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.1 - PG Community Edition - Loop Engineering API
+"""AI Agent Infra v3.7.2 - PG Community Edition - Loop Engineering API
 
 Loop Engineering: design goal-driven autonomous feedback loops for AI agents.
 Each Loop definition is stored as an ENTITY (entity_type='LOOP_DEFINITION')
