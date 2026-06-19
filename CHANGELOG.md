@@ -1,3 +1,33 @@
+## v3.7.1 (2026-06-19)
+
+### New Feature: Loop Engineering Collaborative Integration
+- Spec-Driven Loop: create loops from Spec acceptance criteria with SPEC_VALIDATION evaluation
+- Task-Loop Binding: bind loops to task steps with auto-completion; task_loop_binding table
+- Collaborative Loop: parent/child loops for collaboration groups with AGGREGATE evaluation; 2-level nesting
+- Branch-Isolated Loop: loops bound to branch_id run in branch context
+- Skill-Triggered Loop: skills with validation_loop metadata auto-start verification loops
+- loop_meta new columns: spec_id, parent_loop_id, collab_group_id
+- loop_runs new column: parent_run_id
+- task_steps new columns: loop_id, step_completion_type (MANUAL/LOOP/SPEC + WAITING_LOOP status)
+- task_loop_binding table
+- SPEC_VALIDATION and AGGREGATE evaluation types
+- 7 new API endpoints: /api/loops/from-spec, /api/loops/collab, /api/loops/{id}/children, /api/loops/{id}/aggregation, /api/tasks/steps/{id}/bind-loop, /api/tasks/steps/{id}/loop, /api/collab/{id}/loop
+- 8 new loop_api.py functions + derive_loop_from_spec() + bind_loop_to_step() + create_group_loop()
+- loops.html: From Spec creation, Collab Group selector, Child Loops panel
+- loop_audit collab_group_id column (ENT only)
+
+### Bug Fixes
+- Session persistence: Added Max-Age=3600 to session cookie; sliding 5-min timeout using last_access
+- PG loop API: Fixed method name mismatches and _api_loops_runs() signature
+- PG ENT audit: Created audit_api.py, audit.html, routes
+- PG ENT edition label: Fixed "Community Edition" → "Enterprise Edition"
+- PG authentication: Fixed hash comparison with upper()
+- Route order: children/aggregation before catch-all
+- Server startup: nohup instead of setsid
+- Loop detail: ❌ close button on detail panel
+- COM navigation: loops link in sidebar
+
+
 ## v3.7.0 (2026-06-18)
 
 ### New Feature: Loop Engineering

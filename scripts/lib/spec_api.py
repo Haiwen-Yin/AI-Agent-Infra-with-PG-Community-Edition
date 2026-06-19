@@ -468,3 +468,42 @@ def get_spec_stats() -> Dict[str, Any]:
         "by_complexity": {r["complexity"]: r["cnt"] for r in by_complexity},
         "linked_to_plans": linked["linked_count"] if linked else 0,
     }
+
+
+def derive_loop_from_spec(spec_id: str, agent_id: str) -> Dict[str, Any]:
+    """Derive a loop definition from a spec. Returns the derived loop parameters."""
+    spec = get_spec(spec_id)
+    if not spec:
+        raise ValueError("Spec {} not found".format(spec_id))
+
+    properties = spec.get("properties", {})
+    acceptance_criteria = properties.get("acceptance_criteria", [])
+
+    goal_definition = {
+        "type": "SPEC_VALIDATION",
+        "spec_id": spec_id,
+        "success_criteria": [str(c) for c in acceptance_criteria] if acceptance_criteria else ["Spec {} validated".format(spec_id)],
+        "constraints": ["Must validate against all acceptance criteria"]
+    }
+
+    stop_conditions = {
+        "max_iterations": 10,
+        "timeout_minutes": 60,
+        "consecutive_passes": 2
+    }
+
+    evaluation_config = {
+        "type": "SPEC_VALIDATION",
+        "spec_id": spec_id,
+        "criteria": [str(c) for c in acceptance_criteria] if acceptance_criteria else []
+    }
+
+    return {
+        "title": "Loop for spec: {}".format(spec.get("title", spec_id)),
+        "summary": "Auto-derived loop for spec validation",
+        "goal_definition": goal_definition,
+        "stop_conditions": stop_conditions,
+        "evaluation_config": evaluation_config,
+        "spec_id": spec_id,
+        "owned_by_agent": agent_id
+    }

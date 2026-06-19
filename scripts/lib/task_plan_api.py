@@ -302,3 +302,23 @@ def get_plan_stats() -> Dict[str, Any]:
         },
         "steps": _row_to_dict(steps_total) if steps_total else {},
     }
+
+
+def bind_loop_to_step(step_id: int, loop_id: int, binding_type: str = 'COMPLETION', auto_start: str = 'N') -> int:
+    from .loop_api import start_run
+    binding_id = execute_insert_returning_id("""
+        INSERT INTO task_loop_binding (step_id, loop_id, binding_type, auto_start, created_at)
+        VALUES (%s, %s, %s, %s, NOW())
+        RETURNING binding_id
+    """, (step_id, loop_id, binding_type, auto_start), id_column="binding_id")
+    execute("UPDATE task_steps SET loop_id = %s, step_completion_type = 'LOOP' WHERE step_id = %s", (loop_id, step_id))
+    if auto_start == 'Y':
+        start_run(loop_id, ...)
+    return binding_id
+
+def get_step_loop(step_id: int) -> Optional[Dict[str, Any]]:
+    row = execute_query_one("""
+        SELECT b.binding_id, b.step_id, b.loop_id, b.binding_type, b.auto_start, b.created_at
+        FROM task_loop_binding b WHERE b.step_id = %s
+    """, (step_id,))
+    return _row_to_dict(row) if row else None

@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra v3.7.0 (2026-06-18) - PG Community Edition
+# Deployment Guide - AI Agent Infra v3.7.1 (2026-06-18) - PG Community Edition
 
 ## Prerequisites
 
@@ -37,7 +37,7 @@ psql -U postgres -d ai_agent -f scripts/deploy/1_schema.sql
 - Composite primary keys on ENTITIES, ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, HARNESS_META, ENTITY_TAGS, TASK_PLANS, TASK_STEPS, AGENT_SESSION, WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS
 - WORKSPACE_CONTEXT includes VISIBILITY column (PRIVATE/SHARED/PUBLIC, default SHARED)
 - Partitioning: LIST on ENTITIES (by ENTITY_TYPE), AGENT_SESSION (by IS_ACTIVE), TASK_PLANS (by STATUS); REFERENCE on 5 child tables
-- Seeds system_config with version 3.7.0
+- Seeds system_config with version 3.7.1
 - Seeds system_config with `admin.registration_token` for Admin/Agent separation
 - Creates Apache AGE property graph `pg_memory_graph`
 
@@ -106,7 +106,7 @@ Environment variable overrides: `MEMORY_DB_USER`, `MEMORY_DB_PASSWORD`, `MEMORY_
 cd scripts && python -m tests.test_all
 ```
 
-v3.7.0 test suite: 121 tests across 17 modules.
+v3.7.1 test suite: 121 tests across 17 modules.
 
 ## Starting the Web Server
 

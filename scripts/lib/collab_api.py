@@ -287,3 +287,25 @@ def get_collab_stats() -> Dict[str, Any]:
         "members": sanitize_row(member_stats) if member_stats else {},
         "shares": sanitize_row(share_stats) if share_stats else {},
     }
+
+
+def create_group_loop(group_id: int, title: str, goal_definition: dict, agent_id: str, **kwargs) -> int:
+    from .loop_api import create_loop
+    loop_id = create_loop(
+        title=title,
+        goal_definition=goal_definition,
+        stop_conditions=kwargs.get("stop_conditions", {"max_iterations": 10, "timeout_minutes": 60, "consecutive_passes": 2}),
+        evaluation_config=kwargs.get("evaluation_config", {"type": "AGGREGATE"}),
+        owned_by_agent=agent_id,
+        collab_group_id=group_id,
+        **{k: v for k, v in kwargs.items() if k not in ("stop_conditions", "evaluation_config")}
+    )
+    return loop_id
+
+def get_group_loop_status(group_id: int) -> Dict[str, Any]:
+    rows = execute_query("""
+        SELECT e.entity_id, e.title, e.status, m.collab_group_id
+        FROM entities e JOIN loop_meta m ON e.entity_id = m.entity_id
+        WHERE m.collab_group_id = %s AND e.entity_type = 'LOOP_DEFINITION'
+    """, (group_id,))
+    return {"group_id": group_id, "loops": [_row_to_dict(r) for r in rows]}

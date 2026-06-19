@@ -1,15 +1,15 @@
-# AI Agent Infra with PostgreSQL - Community Edition v3.7.0
+# AI Agent Infra with PostgreSQL - Community Edition v3.7.1
 
-[![Version](https://img.shields.io/badge/version-v3.7.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.7.1-blue.svg)](CHANGELOG.md)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.3-blue.svg)](https://www.postgresql.org/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on PostgreSQL 18.3.**
 
-> **v3.7.0 (2026-06-18): Bug fix release — 15 bug fixes including conn→connection typo, SQL case compatibility, BIGINT substring errors, user authentication, workspace owner_user_id, portal chat send, graph stats field names, branch_api/graph_api missing functions, task_plan_api/spec_api column mismatches, session switching error handling. See [CHANGELOG.md](CHANGELOG.md) for details.**
+> **v3.7.1 (2026-06-19): Loop Engineering Collaborative Integration — Spec-Driven Loop, Task-Loop Binding, Collaborative Loop, Skill-Triggered Loop. Adds SPEC_VALIDATION & AGGREGATE evaluation types (6 total), task_loop_binding table, 7 new API endpoints, 8 new loop_api.py functions. Session persistence, PG loop API compatibility & auth fixes.** Building on v3.7.0 which introduced Loop Engineering (4 loop tables, loop_manager schema, 4 eval types, lifecycle hooks, 3 pg_cron jobs). See [CHANGELOG.md](CHANGELOG.md) for details.
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.0.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.1.md)**
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
@@ -22,10 +22,10 @@ Loop Engineering is the 4th generation AI engineering paradigm (after Prompt Eng
 
 - **4 new tables**: loop_meta, loop_runs, loop_iterations, loop_hooks
 - **loop_manager** PL/pgSQL schema with ~22 functions for loop lifecycle management
-- **loop_api.py** Python module with 25 functions including evaluation engine
-- **4 evaluation types**: TEST (run command, check exit code), DIFF (analyze git diff), LLM_JUDGE (LLM scoring, configurable), MANUAL (human review)
+- **loop_api.py** Python module with 33 functions including evaluation engine
+- **6 evaluation types**: TEST (run command, check exit code), DIFF (analyze git diff), LLM_JUDGE (LLM scoring, configurable), MANUAL (human review)
 - **Stop conditions**: max_iterations, max_tokens, max_duration_seconds
-- **Lifecycle hooks**: PRE_RUN, POST_ITERATION, ON_STOP, ON_FAIL, ON_TIMEOUT
+- **Lifecycle hooks**: ON_START, PRE_RUN, POST_ITERATION, ON_STOP, ON_FAIL, ON_TIMEOUT
 - **3 pg_cron jobs**: loop_trigger_job, loop_stuck_check_job, loop_cleanup_job
 
 ### The 5-Stage Loop Cycle
@@ -273,7 +273,7 @@ cd scripts && python -m tests.test_all
 ai-agent-infra-pg-community/
   scripts/
     deploy/
-      1_schema.sql              # 34 tables, indexes, property graph (AGE), seed data
+      1_schema.sql              # 35 tables, indexes, property graph (AGE), seed data
       2_api.sql                 # 13 PL/pgSQL function groups
       3_jobs.sql                # 16 pg_cron jobs
     lib/
@@ -300,7 +300,7 @@ ai-agent-infra-pg-community/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.7.0
+      server.py                 # HTTP server v3.7.1
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/

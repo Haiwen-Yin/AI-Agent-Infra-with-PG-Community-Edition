@@ -2049,9 +2049,12 @@ CREATE TABLE public.task_steps (
     tool_name character varying(128),
     tool_input jsonb,
     tool_output jsonb,
+    loop_id bigint,
+    step_completion_type character varying(20) DEFAULT 'MANUAL' NOT NULL,
     status character varying(30) DEFAULT 'PENDING'::character varying NOT NULL,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT ck_ts_status CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'RUNNING'::character varying, 'BLOCKED'::character varying, 'SUCCESS'::character varying, 'FAILED'::character varying, 'SKIPPED'::character varying])::text[])))
+    CONSTRAINT ck_ts_status CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'RUNNING'::character varying, 'BLOCKED'::character varying, 'SUCCESS'::character varying, 'FAILED'::character varying, 'SKIPPED'::character varying, 'WAITING_LOOP'::character varying])::text[]))),
+    CONSTRAINT ck_ts_completion CHECK (((step_completion_type)::text = ANY ((ARRAY['MANUAL'::character varying, 'LOOP'::character varying, 'SPEC'::character varying])::text[])))
 );
 
 
@@ -6060,8 +6063,12 @@ CREATE TABLE IF NOT EXISTS public.loop_meta (
     harness_template_id BIGINT,
     workspace_id        BIGINT,
     branch_id           BIGINT,
+    spec_id             BIGINT,
+    parent_loop_id      BIGINT,
+    collab_group_id     BIGINT,
     CONSTRAINT pk_loop_meta PRIMARY KEY (entity_id, entity_type),
     CONSTRAINT fk_lm_entity FOREIGN KEY (entity_id, entity_type) REFERENCES public.entities(entity_id, entity_type) ON DELETE CASCADE,
+    CONSTRAINT fk_lm_collab FOREIGN KEY (collab_group_id) REFERENCES public.collab_groups(group_id),
     CONSTRAINT ck_lm_entity_type CHECK (entity_type = 'LOOP_DEFINITION')
 );
 
@@ -6077,9 +6084,11 @@ CREATE TABLE IF NOT EXISTS public.loop_runs (
     total_tokens     BIGINT       DEFAULT 0 NOT NULL,
     final_result     VARCHAR(4000),
     error_message    VARCHAR(2000),
+    parent_run_id    BIGINT,
     started_at       TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
     completed_at     TIMESTAMP,
     CONSTRAINT fk_lr_agent FOREIGN KEY (agent_id) REFERENCES public.agent_registry(agent_id),
+    CONSTRAINT fk_lr_parent_run FOREIGN KEY (parent_run_id) REFERENCES public.loop_runs(run_id),
     CONSTRAINT ck_lr_status CHECK (status IN ('PENDING','RUNNING','PAUSED','COMPLETED','STOPPED','FAILED','TIMEOUT')),
     CONSTRAINT ck_lr_trigger CHECK (trigger_type IN ('MANUAL','SCHEDULE','EVENT','HOOK'))
 );
@@ -6087,6 +6096,7 @@ CREATE TABLE IF NOT EXISTS public.loop_runs (
 CREATE INDEX IF NOT EXISTS idx_lr_loop ON public.loop_runs(loop_id);
 CREATE INDEX IF NOT EXISTS idx_lr_agent ON public.loop_runs(agent_id);
 CREATE INDEX IF NOT EXISTS idx_lr_status ON public.loop_runs(status);
+CREATE INDEX IF NOT EXISTS idx_lr_parent_run ON public.loop_runs(parent_run_id);
 
 -- 26. loop_iterations (FK to loop_runs, like task_steps to task_plans)
 CREATE TABLE IF NOT EXISTS public.loop_iterations (
@@ -6126,6 +6136,21 @@ CREATE TABLE IF NOT EXISTS public.loop_hooks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_lh_loop ON public.loop_hooks(loop_id);
+
+-- 27b. task_loop_binding
+CREATE TABLE IF NOT EXISTS public.task_loop_binding (
+    binding_id BIGSERIAL PRIMARY KEY,
+    step_id BIGINT NOT NULL REFERENCES public.task_steps(step_id),
+    loop_id BIGINT NOT NULL,
+    binding_type VARCHAR(20) DEFAULT 'COMPLETION',
+    auto_start VARCHAR(1) DEFAULT 'N',
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT ck_tlb_type CHECK (binding_type IN ('COMPLETION','VALIDATION')),
+    CONSTRAINT ck_tlb_auto CHECK (auto_start IN ('Y','N'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_tlb_step ON public.task_loop_binding(step_id);
+CREATE INDEX IF NOT EXISTS idx_tlb_loop ON public.task_loop_binding(loop_id);
 
 -- RLS Policies for Loop tables
 ALTER TABLE public.loop_meta ENABLE ROW LEVEL SECURITY;
@@ -6183,6 +6208,12 @@ DROP POLICY IF EXISTS li_aiadmin_all ON public.loop_iterations;
 CREATE POLICY li_aiadmin_all ON public.loop_iterations ON public.loop_iterations FOR ALL USING (current_user = 'aiadmin');
 DROP POLICY IF EXISTS lh_aiadmin_all ON public.loop_hooks;
 CREATE POLICY lh_aiadmin_all ON public.loop_hooks ON public.loop_hooks FOR ALL USING (current_user = 'aiadmin');
+
+CREATE INDEX IF NOT EXISTS idx_lm_spec ON public.loop_meta(spec_id);
+CREATE INDEX IF NOT EXISTS idx_lm_parent_loop ON public.loop_meta(parent_loop_id);
+CREATE INDEX IF NOT EXISTS idx_lm_collab ON public.loop_meta(collab_group_id);
+CREATE INDEX IF NOT EXISTS idx_ts_loop ON public.task_steps(loop_id);
+CREATE INDEX IF NOT EXISTS idx_ts_completion ON public.task_steps(step_completion_type);
 
 
 -- PostgreSQL database dump complete
