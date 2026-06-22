@@ -1,3 +1,27 @@
+## [3.7.3] - 2026-06-23
+
+### Summary
+
+Deployment fix release — resolves schema creation order issues, hardcoded schema owner names, configuration priority, and embedding model auto-detection discovered during fresh deployment testing.
+
+### Fixed - Oracle COM/ENT
+
+- **CONTEXT_BRANCHES FK ordering** — Removed inline FK constraints referencing not-yet-created tables (WORKSPACES, WORKSPACE_CONTEXT, AGENT_REGISTRY); added via ALTER TABLE after parent tables exist
+- **LOOP_RUNS self-reference** — Moved UK_LOOP_RUNS_ID UNIQUE(RUN_ID) inline to CREATE TABLE (was added via ALTER TABLE after, causing ORA-02270 on FK_LR_PARENT_RUN self-reference)
+- **LOOP_ITERATIONS partitioning** — Changed from PARTITION BY REFERENCE to PARTITION BY RANGE(STARTED_AT) to resolve incompatibility with parent table's composite subpartitioning (ORA-14661)
+
+### Fixed - All Editions
+
+- **Hardcoded schema owner** — 4_grants.sql and 6_deep_sec_policy.sql: replaced literal AIADMIN with `DEFINE SCHEMA_OWNER` substitution variable; connection.py: `ALTER SESSION SET CURRENT_SCHEMA` and `SET_AGENT_CONTEXT` calls now read schema name from config
+- **PG RLS policy** — Replaced hardcoded `'aiadmin'` in RLS policies with psql variable `:'schema_owner'`
+- **PG agent_bootstrap.py** — Changed `SET search_path TO aiadmin` to `SET search_path TO public`
+- **Config priority** — Changed from Environment Variables > config.json > Defaults to config.json (encrypted) > Environment Variables > Defaults; removed hardcoded default credentials (openclaw/hermes/10.10.10.130)
+- **EmbeddingConfig defaults** — Changed from hardcoded model/dimension to empty strings, forcing explicit configuration
+- **SecurityConfig** — pbkdf2_iterations default 100000 → 210000
+- **Embedding model auto-detection** — embedding_api.py now raises ValueError with supported model list when embedding model is not configured, instead of silently using default
+- **server.py startup** — Added embedding configuration check with WARNING message on startup
+
+---
 ## [3.7.2] - 2026-06-19
 
 ### Fixed — Documentation Consistency
@@ -74,6 +98,91 @@
 All notable changes to AI Agent Infra with PostgreSQL are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+---
+## [3.7.1] - 2026-06-19
+
+### Summary
+
+**Loop Engineering Collaborative Integration** — Connects Loop Engineering with Spec, Task, Branch, Collab, and Skill modules, enabling Spec-driven loops, Task-Loop bindings, and Collaborative Loops. Also fixes session persistence, PG loop API compatibility, and adds SPEC_VALIDATION and AGGREGATE evaluation types.
+
+### Added - Both Editions
+
+- **Spec-Driven Loop** — Create loops from Spec acceptance criteria; SPEC_VALIDATION evaluation type validates against spec criteria
+- **Task-Loop Binding** — Bind loops to task steps; step auto-completes when loop succeeds; new TASK_LOOP_BINDING table
+- **Collaborative Loop** — Create parent/child loops for collaboration groups; AGGREGATE evaluation type collects child results; 2-level nesting limit
+- **Branch-Isolated Loop** — Loops bound to a branch_id automatically run in branch context
+- **Skill-Triggered Loop** — Skills with validation_loop metadata auto-start verification loops on acquire
+- LOOP_META new columns: SPEC_ID, PARENT_LOOP_ID, COLLAB_GROUP_ID
+- LOOP_RUNS new column: PARENT_RUN_ID
+- TASK_STEPS new columns: LOOP_ID, STEP_COMPLETION_TYPE (MANUAL/LOOP/SPEC + WAITING_LOOP status)
+- TASK_LOOP_BINDING table (BINDING_ID, STEP_ID, LOOP_ID, BINDING_TYPE, AUTO_START)
+- SPEC_VALIDATION evaluation type — validates iteration against spec acceptance_criteria
+- AGGREGATE evaluation type — aggregates child loop run results
+- 7 new API endpoints: /api/loops/from-spec, /api/loops/collab, /api/loops/{id}/children, /api/loops/{id}/aggregation, /api/tasks/steps/{id}/bind-loop, /api/tasks/steps/{id}/loop, /api/collab/{id}/loop
+- 8 new loop_api.py functions: create_loop_from_spec, create_collab_loop, create_sub_loops_for_group, aggregate_child_runs, bind_loop_to_step, get_step_loop, on_loop_run_completed, create_validation_loop_for_skill
+- derive_loop_from_spec() in spec_api.py
+- bind_loop_to_step(), get_step_loop() in task_plan_api.py
+- create_group_loop(), get_group_loop_status() in collab_api.py
+- loops.html: From Spec creation, Collab Group selector, Child Loops panel, SPEC_VALIDATION/AGGREGATE badges
+- [ENT only] LOOP_AUDIT COLLAB_GROUP_ID column for collaborative audit trail
+- [ENT only] log_loop_audit() enhanced with collaborative action types: SUB_LOOP_CREATED, SUB_LOOP_COMPLETED, AGGREGATION_DONE
+
+### Fixed - Both Editions
+
+- **Session persistence** — Added Max-Age=3600 to session cookie; session survives tab switches
+- **Session timeout** — Changed from 5-hour (300*60) to 5-minute sliding window using last_access
+- **PG loop API compatibility** — Fixed method name mismatches (_api_loop_get → _api_loops_get etc.)
+- **PG runs API** — Fixed _api_loops_runs() signature to accept qs parameter
+- **Oracle COM loop API imports** — Fixed from scripts.lib.loop_api to from lib.loop_api
+- **Oracle COM missing handlers** — Added _api_loops_stats, _api_loops_hooks, _api_loops_run_get methods
+- **COM navigation** — Added loops link to Community Edition sidebar
+- **Loop detail close button** — Added close button to detail panel header
+- **Oracle ENT audit** — Added missing /audit route and /api/audit endpoint
+- **PG ENT audit** — Created audit_api.py, audit.html, routes, and endpoints
+- **PG authentication** — Fixed user_manager.authenticate() hash comparison with upper()
+- **Route order** — /api/loops/{id}/children and /aggregation now match before catch-all /api/loops/{id}
+- **Server startup** — Fixed startup script using nohup instead of setsid
+- **PG ENT edition label** — Fixed templates showing "Community Edition" instead of "Enterprise Edition"
+
+---
+## [3.7.0] - 2026-06-18
+
+### Summary
+
+**Loop Engineering** — Introduces Loop Engineering as the 4th generation AI engineering methodology (after Prompt Engineering, Context Engineering, and Harness Engineering), proposed by Peter Steinberger in June 2026. Adds 4 new tables, LOOP_MANAGER PL/SQL package, loop_api.py Python module, evaluation engine with 4 evaluation types, lifecycle hooks, and 3 scheduler jobs.
+
+### Added - Both Editions
+
+- **Loop Engineering methodology** — The 4th generation AI engineering methodology (after Prompt/Context/Harness Engineering), proposed by Peter Steinberger in June 2026
+- 4 new tables: LOOP_META, LOOP_RUNS, LOOP_ITERATIONS, LOOP_HOOKS
+- LOOP_MANAGER package/schema with ~22 functions for loop lifecycle management
+- loop_api.py Python module with 25 functions including evaluation engine
+- 4 evaluation types: TEST (command), DIFF (git diff), LLM_JUDGE (LLM scoring), MANUAL (human review)
+- Stop conditions: max_iterations, max_tokens, max_duration_seconds
+- Lifecycle hooks: PRE_RUN, POST_ITERATION, ON_STOP, ON_FAIL, ON_TIMEOUT
+- 3 new scheduler jobs: LOOP_TRIGGER_JOB, LOOP_STUCK_CHECK_JOB, LOOP_CLEANUP_JOB
+- loops.html template with loop management dashboard
+- docs/loop-engineering.md documentation
+- config.json llm_judge section (disabled by default)
+- [ENT only] LOOP_AUDIT table for audit trail
+
+### Changed - Both Editions
+
+- **Test suite** — Community Edition: 121 tests; Enterprise Edition: 151 tests
+- **Schema** — COM: 30 → 34 tables, 13 → 14 PL/SQL packages, 13 → 16 scheduler jobs; ENT: 35 → 40 tables, 16 → 17 PL/SQL packages, 17 → 20 scheduler jobs
+- **Python modules** — COM: 23 → 24 modules; ENT: 24 → 25 modules
+
+### Fixed - Both Editions
+
+- **Oracle COM loop API imports** — Fixed `from scripts.lib.loop_api` to `from lib.loop_api` causing HTTP 500 on /api/loops endpoints
+- **Oracle COM missing handler methods** — Added missing `_api_loops_stats`, `_api_loops_hooks`, `_api_loops_run_get` methods; fixed route-method name mismatches
+- **COM navigation** — Added loops link back to Community Edition sidebar (loops is a core feature available in all editions)
+- **Loop detail close button** — Added close button to loop detail panel header
+- **Oracle ENT audit** — Added missing /audit route and /api/audit endpoint with handler methods
+- **Server startup** — Fixed server startup script using `nohup` instead of `setsid` to prevent shell timeout deadlocks
+- **Loop seed data** — Added realistic loop definitions with runs, iterations, and hooks to all editions
+
 
 ---
 ## [3.6.2] - 2026-06-18

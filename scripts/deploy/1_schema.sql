@@ -2,6 +2,11 @@
 -- PostgreSQL database dump
 --
 
+-- ============================================================
+-- Schema owner configuration (adjust if not using default pgsql)
+-- ============================================================
+\set schema_owner 'pgsql'
+
 \restrict VcAj5J5oNBrPslUHp6nHjRhkrqhnWbVSvhjvs2bkENgycNjLKIqFnra5ZxcIB9j
 
 -- Dumped from database version 18.3
@@ -6043,7 +6048,7 @@ CREATE POLICY wt_agent_isolation ON public.workspace_tasks USING ((EXISTS ( SELE
 
 
 -- ============================================================================
--- Loop Engineering Tables [NEW v3.7.0]
+-- Loop Engineering Tables [NEW v3.7.3]
 -- ============================================================================
 
 -- Add LOOP_DEFINITION to entities type constraint
@@ -6200,14 +6205,14 @@ CREATE POLICY lh_agent_isolation ON public.loop_hooks ON public.loop_hooks
     ));
 
 -- Allow aiadmin full access
-DROP POLICY IF EXISTS lm_aiadmin_all ON public.loop_meta;
-CREATE POLICY lm_aiadmin_all ON public.loop_meta ON public.loop_meta FOR ALL USING (current_user = 'aiadmin');
-DROP POLICY IF EXISTS lr_aiadmin_all ON public.loop_runs;
-CREATE POLICY lr_aiadmin_all ON public.loop_runs ON public.loop_runs FOR ALL USING (current_user = 'aiadmin');
-DROP POLICY IF EXISTS li_aiadmin_all ON public.loop_iterations;
-CREATE POLICY li_aiadmin_all ON public.loop_iterations ON public.loop_iterations FOR ALL USING (current_user = 'aiadmin');
-DROP POLICY IF EXISTS lh_aiadmin_all ON public.loop_hooks;
-CREATE POLICY lh_aiadmin_all ON public.loop_hooks ON public.loop_hooks FOR ALL USING (current_user = 'aiadmin');
+DROP POLICY IF EXISTS lm_owner_all ON public.loop_meta;
+CREATE POLICY lm_owner_all ON public.loop_meta ON public.loop_meta FOR ALL USING (current_user = :'schema_owner');
+DROP POLICY IF EXISTS lr_owner_all ON public.loop_runs;
+CREATE POLICY lr_owner_all ON public.loop_runs ON public.loop_runs FOR ALL USING (current_user = :'schema_owner');
+DROP POLICY IF EXISTS li_owner_all ON public.loop_iterations;
+CREATE POLICY li_owner_all ON public.loop_iterations ON public.loop_iterations FOR ALL USING (current_user = :'schema_owner');
+DROP POLICY IF EXISTS lh_owner_all ON public.loop_hooks;
+CREATE POLICY lh_owner_all ON public.loop_hooks ON public.loop_hooks FOR ALL USING (current_user = :'schema_owner');
 
 CREATE INDEX IF NOT EXISTS idx_lm_spec ON public.loop_meta(spec_id);
 CREATE INDEX IF NOT EXISTS idx_lm_parent_loop ON public.loop_meta(parent_loop_id);

@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-pg-community
-version: v3.7.2
+version: v3.7.3
 author: Haiwen Yin
-description: "AI Agent Infra with PostgreSQL - Community Edition v3.7.2 - AI Agent的基础设施架构"
+description: "AI Agent Infra with PostgreSQL - Community Edition v3.7.3 - AI Agent的基础设施架构"
 tags: [postgresql, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, psycopg2, property-graph, apache-age, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, spec-driven, elastic-agent, collaboration, admin-agent-separation, pgvector, pg-cron, plpython3u, pgcrypto, row-security-policies]
 related_skills: [postgresql-18, psycopg2-execution-methodology]
 ---
 
-# AI Agent Infra with PostgreSQL - Community Edition v3.7.2
+# AI Agent Infra with PostgreSQL - Community Edition v3.7.3
 
 **Author:** Haiwen Yin
-**Version:** v3.7.2 - 2026-06-19
+**Version:** v3.7.3 - 2026-06-19
 **Website:** https://db4agent.top
 **License:** Apache License 2.0 (Community Edition)
 
@@ -20,7 +20,7 @@ related_skills: [postgresql-18, psycopg2-execution-methodology]
 
 **Minimum required version: PostgreSQL 18.3**
 
-v3.7.2 uses PostgreSQL features that require version 18.3 or later: pgvector for vector similarity search, Apache AGE for property graph queries, pgcrypto for in-database encryption, Row Security Policies for data isolation, and pg_cron for scheduled jobs.
+v3.7.3 uses PostgreSQL features that require version 18.3 or later: pgvector for vector similarity search, Apache AGE for property graph queries, pgcrypto for in-database encryption, Row Security Policies for data isolation, and pg_cron for scheduled jobs.
 
 ```sql
 SELECT version();
@@ -50,7 +50,7 @@ pip install psycopg2-binary>=2.9
 ## Architecture Overview
 
 ```
-AI Agent Infra with PostgreSQL — Community Edition v3.7.2
+AI Agent Infra with PostgreSQL — Community Edition v3.7.3
 │
 ├── ENTITIES (LIST partitioned by ENTITY_TYPE, 8 partitions)
 │   ├── P_MEMORY      — MEMORY
@@ -89,11 +89,11 @@ Five-plus-one-layer database access security model with Row Security Policies:
 
 ### Row Security Policies — Agent Usage Guide
 
-v3.7.2 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provides declarative row-level access control using `current_setting('app.current_agent_id', TRUE)` to enforce per-agent data filtering.
+v3.7.3 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provides declarative row-level access control using `current_setting('app.current_agent_id', TRUE)` to enforce per-agent data filtering.
 
 **Zero trust**: If no agent context is set, Row Security Policies return **no data**.
 
-#### Current Enforcement Status (v3.7.2)
+#### Current Enforcement Status (v3.7.3)
 
 | Security Mechanism | Deployed? | Enforcing? | Details |
 |---|---|---|---|
@@ -121,7 +121,7 @@ v3.7.2 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provi
 
 ## Admin/Agent Separation Architecture
 
-v3.7.2 introduces a mode system that separates Admin Agent (runs Web Portal, holds schema owner credentials) from Business Agent (independent process, only holds restricted user credentials).
+v3.7.3 introduces a mode system that separates Admin Agent (runs Web Portal, holds schema owner credentials) from Business Agent (independent process, only holds restricted user credentials).
 
 ### Modes
 
@@ -306,7 +306,7 @@ Agent receives Skill → check_deployment() → deployed?
 | tsvector | built-in | Full-text search (`to_tsvector`/`to_tsquery`) |
 
 
-## Loop Engineering [NEW v3.7.2]
+## Loop Engineering [NEW v3.7.3]
 
 Loop Engineering is the 4th generation AI engineering methodology (after Prompt Engineering, Context Engineering, and Harness Engineering), proposed by Peter Steinberger in June 2026.
 
@@ -326,7 +326,7 @@ Loop Engineering is the 4th generation AI engineering methodology (after Prompt 
 - **16** pg_cron jobs (including 3 loop jobs)
 - **121** tests across 17 test suites
 
-### Collaborative Integration (v3.7.2)
+### Collaborative Integration (v3.7.3)
 - **Spec-Driven Loop** | Create loops from Spec acceptance_criteria; SPEC_VALIDATION eval type |
 - **Task-Loop Binding** | Bind loops to task steps; auto-complete on loop success; TASK_LOOP_BINDING table |
 - **Collaborative Loop** | Parent/child loops for collab groups; AGGREGATE eval type; 2-level nesting |
@@ -335,7 +335,7 @@ Loop Engineering is the 4th generation AI engineering methodology (after Prompt 
 - **ON_START lifecycle hook** | Added to hook event types |
 - **7 new API endpoints** | /api/loops/from-spec, /api/loops/collab, /api/loops/{id}/children, /api/loops/{id}/aggregation, /api/tasks/steps/{id}/bind-loop, /api/tasks/steps/{id}/loop, /api/collab/{id}/loop |
 
-### Bug Fixes (v3.7.2)
+### Bug Fixes (v3.7.3)
 - **COM navigation** — Added loops link to Community Edition sidebar (loops is a core feature)
 - **Loop detail close button** — Added ❌ close button to loop detail panel header
 - **PG authentication** — Fixed `user_manager.authenticate()` hash comparison with `upper()`

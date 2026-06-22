@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.0 - PG Community Edition - Collaboration Group API Tests"""
+"""AI Agent Infra v3.7.3 - PG Community Edition - Collaboration Group API Tests"""
 
 import sys
 import os

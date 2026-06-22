@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra v3.7.0 (2026-06-18) - PG Community Edition
+# Architecture - AI Agent Infra v3.7.3 (2026-06-18) - PG Community Edition
 
 ## Unified Entity Model
 

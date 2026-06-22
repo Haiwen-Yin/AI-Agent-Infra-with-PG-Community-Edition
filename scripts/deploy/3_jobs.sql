@@ -1,5 +1,5 @@
 -- ============================================================================
--- AI Agent Infra v3.7.0 - Community Edition (PostgreSQL 18.3) - Phase 3: Scheduler Jobs
+-- AI Agent Infra v3.7.3 - Community Edition (PostgreSQL 18.3) - Phase 3: Scheduler Jobs
 -- ============================================================================
 -- NOTE: pg_cron must be installed and configured before running this script.
 -- See deployment.md for pg_cron setup instructions.
@@ -246,7 +246,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 14. Loop Trigger Job: check for scheduled Loop triggers [NEW v3.7.0]
+-- 14. Loop Trigger Job: check for scheduled Loop triggers [NEW v3.7.3]
 -- Schedule: Every minute
 DO $$
 BEGIN
@@ -262,7 +262,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 15. Loop Stuck Check Job: detect and timeout stuck Loop runs [NEW v3.7.0]
+-- 15. Loop Stuck Check Job: detect and timeout stuck Loop runs [NEW v3.7.3]
 -- Schedule: Every 5 minutes
 DO $$
 BEGIN
@@ -278,7 +278,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 16. Loop Cleanup Job: cleanup old Loop runs [NEW v3.7.0]
+-- 16. Loop Cleanup Job: cleanup old Loop runs [NEW v3.7.3]
 -- Schedule: Weekly Sunday 06:00
 DO $$
 BEGIN
@@ -307,4 +307,4 @@ WHERE jobname IN (
 )
 ORDER BY jobname;
 
--- AI Agent Infra v3.7.0 - Community Edition (PostgreSQL 18.3) - Phase 3: Scheduler Jobs Complete (16 jobs)
+-- AI Agent Infra v3.7.3 - Community Edition (PostgreSQL 18.3) - Phase 3: Scheduler Jobs Complete (16 jobs)

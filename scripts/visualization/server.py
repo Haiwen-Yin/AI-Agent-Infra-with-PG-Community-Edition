@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.2 - Community Edition (PG) - Web Visualization Server
+"""AI Agent Infra v3.7.3 - Community Edition (PG) - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -24,7 +24,7 @@ from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import spec_api, collab_api, branch_api, loop_api, loop_api
 from lib import security, config, user_api
 
-VERSION = "3.7.0"
+VERSION = "3.7.3"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -2282,6 +2282,18 @@ def main():
         print("[server] Database connection pool initialized")
     except Exception as e:
         print("[server] WARNING: Database connection failed: {}".format(e))
+
+    try:
+        from lib.config import get_config
+        emb_cfg = get_config().embedding
+        if not emb_cfg.model or not emb_cfg.api_url:
+            print("[server] WARNING: Embedding model not configured. "
+                  "Set embedding.api_url and embedding.model in config.json. "
+                  "Vector search will be unavailable until configured.")
+        else:
+            print("[server] Embedding: {} (dim={})".format(emb_cfg.model, emb_cfg.dimension or "auto"))
+    except Exception:
+        pass
 
     server = HTTPServer((host, port), VisHandler)
     server.daemon_threads = True

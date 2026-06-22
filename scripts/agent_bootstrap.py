@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AI Agent Infra v3.7.0 - Community Edition (PG) - Agent Bootstrap CLI
+"""AI Agent Infra v3.7.3 - Community Edition (PG) - Agent Bootstrap CLI
 
 Command-line tool for Business Agent registration and configuration.
 Connects to Admin Agent API, registers with admin token,
@@ -175,7 +175,7 @@ def cmd_test(args):
             password=creds["password"],
         )
         with conn.cursor() as cur:
-            cur.execute("SET search_path TO aiadmin")
+            cur.execute("SET search_path TO public")
             cur.execute("SELECT COUNT(*) FROM agent_registry")
             count = cur.fetchone()[0]
         conn.close()

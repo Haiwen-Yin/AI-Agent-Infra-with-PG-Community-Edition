@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.0 - PG Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v3.7.3 - PG Community Edition - Database Connection Pool Manager
 
 Unified psycopg2 connection pool with %s bind-variable support.
 Includes agent context management via current_setting('app.current_agent_id', TRUE).
