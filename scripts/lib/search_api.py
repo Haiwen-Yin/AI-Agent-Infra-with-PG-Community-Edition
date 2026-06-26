@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.3 - PG Community Edition - Unified Search API
+"""AI Agent Infra v3.7.4 - PG Community Edition - Unified Search API
 
 Single entry point for AI agents to search across all data types and modalities.
 

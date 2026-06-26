@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.3 - PG Community Edition - Security Module Tests"""
+"""AI Agent Infra v3.7.4 - PG Community Edition - Security Module Tests"""
 
 import sys
 import os

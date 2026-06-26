@@ -1,8 +1,9 @@
-"""AI Agent Infra v3.7.3 - PG Community Edition - Embedding API
+"""AI Agent Infra v3.5.0 - Community Edition - Embedding API
 
 Generate, store, and search vector embeddings for entities.
-Uses external Embedding API (OpenAI-compatible) + pgvector for storage.
-5-signal unified hybrid search: vector + fulltext (tsvector) + relational metadata + graph proximity.
+Uses external Embedding API (OpenAI-compatible) + Oracle TO_VECTOR() for storage.
+Auto-detects vector dimension from model response.
+5-signal unified hybrid search: vector + fulltext (Oracle Text) + relational metadata + graph proximity.
 Single-SQL CTE fusion search available via search_unified_sql().
 """
 
@@ -11,7 +12,7 @@ import logging
 import urllib.request
 from typing import Any, Dict, List, Optional
 
-from .connection import execute_query, execute_query_one, execute
+from .connection import execute, execute_query, execute_query_one
 from .config import get_config
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ def _detect_dimension(model: str, api_url: str) -> int:
         result = generate_embedding("dimension probe", api_url=api_url, model=model)
         return len(result)
     except Exception as e:
-        logger.warning("Cannot auto-detect dimension for %s: %s", model, e)
+        logger.warning(f"Cannot auto-detect dimension for {model}: {e}")
         return 1024
 
 
@@ -80,16 +81,17 @@ def generate_embedding(
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
+
             if "data" in result and len(result["data"]) > 0:
                 embedding = result["data"][0]["embedding"]
-                logger.debug("Generated embedding: %d dims for '%s...'", len(embedding), text[:50])
+                logger.debug(f"Generated embedding: {len(embedding)} dims for '{text[:50]}...'")
                 return embedding
             else:
-                raise Exception("Unexpected API response format: %s" % list(result.keys()))
+                raise Exception(f"Unexpected API response format: {list(result.keys())}")
     except urllib.error.URLError as e:
-        raise Exception("Embedding API connection error (%s): %s" % (api_url, e))
+        raise Exception(f"Embedding API connection error ({api_url}): {e}")
     except Exception as e:
-        raise Exception("Error generating embedding: %s" % e)
+        raise Exception(f"Error generating embedding: {e}")
 
 
 def store_embedding(
@@ -100,7 +102,44 @@ def store_embedding(
     model: Optional[str] = None,
 ) -> bool:
     embedding = generate_embedding(text, api_url=api_url, model=model)
-    return store_embedding_vector(entity_id, entity_type, embedding, model=model)
+
+    cfg = _get_api_config()
+    model = model or cfg["model"]
+    dimension = len(embedding)
+
+    vec_str = json.dumps(embedding)
+
+    sql_check = """
+        SELECT COUNT(*) AS C FROM ENTITY_EMBEDDINGS
+        WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
+    """
+    try:
+        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type})
+        count = int(list(row.values())[0]) if row else 0
+
+        if count > 0:
+            sql = """
+                UPDATE ENTITY_EMBEDDINGS
+                SET EMBEDDING = TO_VECTOR(:vec),
+                    EMBEDDING_MODEL = :model,
+                    EMBEDDING_DIM = :dim
+                WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
+            """
+            execute(sql, {"vec": vec_str, "model": model, "dim": dimension, "eid": entity_id, "etype": entity_type})
+        else:
+            from .connection import get_connection
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO ENTITY_EMBEDDINGS (ENTITY_ID, ENTITY_TYPE, EMBEDDING, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT)
+                        VALUES (:eid, :etype, TO_VECTOR(:vec), :model, :dim, SYSTIMESTAMP)
+                    """, {"eid": entity_id, "etype": entity_type, "vec": vec_str, "model": model, "dim": dimension})
+                    conn.commit()
+        logger.info(f"Stored embedding for {entity_type}:{entity_id} ({dimension}d, {model})")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to store embedding for {entity_id}: {e}")
+        return False
 
 
 def store_embedding_vector(
@@ -112,42 +151,49 @@ def store_embedding_vector(
     cfg = _get_api_config()
     model = model or cfg["model"]
     dimension = len(embedding)
-    vec_str = "[" + ",".join(str(x) for x in embedding) + "]"
+    vec_str = json.dumps(embedding)
 
+    sql_check = """
+        SELECT COUNT(*) AS C FROM ENTITY_EMBEDDINGS
+        WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
+    """
     try:
-        row = execute_query_one("""
-            SELECT COUNT(*) AS c FROM entity_embeddings
-            WHERE entity_id = %s AND entity_type = %s
-        """, [entity_id, entity_type])
+        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type})
         count = int(list(row.values())[0]) if row else 0
 
         if count > 0:
-            execute("""
-                UPDATE entity_embeddings
-                SET embedding = %s::vector,
-                    embedding_model = %s,
-                    embedding_dim = %s
-                WHERE entity_id = %s AND entity_type = %s
-            """, [vec_str, model, dimension, entity_id, entity_type])
+            sql = """
+                UPDATE ENTITY_EMBEDDINGS
+                SET EMBEDDING = TO_VECTOR(:vec),
+                    EMBEDDING_MODEL = :model,
+                    EMBEDDING_DIM = :dim
+                WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
+            """
+            execute(sql, {"vec": vec_str, "model": model, "dim": dimension, "eid": entity_id, "etype": entity_type})
         else:
-            execute("""
-                INSERT INTO entity_embeddings (entity_id, entity_type, embedding, embedding_model, embedding_dim, created_at)
-                VALUES (%s, %s, %s::vector, %s, %s, CURRENT_TIMESTAMP)
-            """, [entity_id, entity_type, vec_str, model, dimension])
-        logger.info("Stored embedding for %s:%s (%dd, %s)", entity_type, entity_id, dimension, model)
+            from .connection import get_connection
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO ENTITY_EMBEDDINGS (ENTITY_ID, ENTITY_TYPE, EMBEDDING, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT)
+                        VALUES (:eid, :etype, TO_VECTOR(:vec), :model, :dim, SYSTIMESTAMP)
+                    """, {"eid": entity_id, "etype": entity_type, "vec": vec_str, "model": model, "dim": dimension})
+                    conn.commit()
+        logger.info(f"Stored embedding vector for {entity_type}:{entity_id} ({dimension}d)")
         return True
     except Exception as e:
-        logger.error("Failed to store embedding for %s: %s", entity_id, e)
+        logger.error(f"Failed to store embedding vector: {e}")
         return False
 
 
 def get_embedding(entity_id: str, entity_type: str = "MEMORY") -> Optional[Dict]:
+    sql = """
+        SELECT ENTITY_ID, ENTITY_TYPE, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT
+        FROM ENTITY_EMBEDDINGS
+        WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
+    """
     try:
-        row = execute_query_one("""
-            SELECT entity_id, entity_type, embedding_model, embedding_dim, created_at
-            FROM entity_embeddings
-            WHERE entity_id = %s AND entity_type = %s
-        """, [entity_id, entity_type])
+        row = execute_query_one(sql, {"eid": entity_id, "etype": entity_type})
         if row and row.get("entity_id"):
             return {
                 "entity_id": row["entity_id"],
@@ -158,17 +204,17 @@ def get_embedding(entity_id: str, entity_type: str = "MEMORY") -> Optional[Dict]
             }
         return None
     except Exception as e:
-        logger.error("Failed to get embedding for %s: %s", entity_id, e)
+        logger.error(f"Failed to get embedding for {entity_id}: {e}")
         return None
 
 
 def delete_embedding(entity_id: str, entity_type: str = "MEMORY") -> bool:
+    sql = "DELETE FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype"
     try:
-        execute("DELETE FROM entity_embeddings WHERE entity_id = %s AND entity_type = %s",
-                       [entity_id, entity_type])
+        execute(sql, {"eid": entity_id, "etype": entity_type})
         return True
     except Exception as e:
-        logger.error("Failed to delete embedding: %s", e)
+        logger.error(f"Failed to delete embedding: {e}")
         return False
 
 
@@ -181,26 +227,26 @@ def search_similar(
     model: Optional[str] = None,
 ) -> List[Dict]:
     embedding = generate_embedding(text, api_url=api_url, model=model)
-    vec_str = "[" + ",".join(str(x) for x in embedding) + "]"
+    vec_str = json.dumps(embedding)
 
     conditions = []
-    params: list = [vec_str, top_k]
+    params = {"vec": vec_str, "k": top_k}
     if entity_type:
-        conditions.append("AND e.entity_type = %s")
-        params.append(entity_type)
+        conditions.append("AND e.ENTITY_TYPE = :etype")
+        params["etype"] = entity_type
     if workspace_id:
-        conditions.append("AND e.workspace_id = %s")
-        params.append(workspace_id)
+        conditions.append("AND e.WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
 
     where = " ".join(conditions)
     sql = f"""
-        SELECT e.entity_id, e.entity_type, e.title, e.category,
-               em.embedding <=> %s::vector AS distance
-        FROM entity_embeddings em
-        JOIN entities e ON e.entity_id = em.entity_id AND e.entity_type = em.entity_type
+        SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CATEGORY,
+               VECTOR_DISTANCE(em.EMBEDDING, TO_VECTOR(:vec), COSINE) AS distance
+        FROM ENTITY_EMBEDDINGS em
+        JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
         WHERE 1=1 {where}
         ORDER BY distance ASC
-        LIMIT %s
+        FETCH FIRST :k ROWS ONLY
     """
 
     try:
@@ -218,53 +264,7 @@ def search_similar(
             })
         return results
     except Exception as e:
-        logger.error("Vector search failed: %s", e)
-        return []
-
-
-def search_by_entity_id(
-    entity_id: str,
-    entity_type: str = "MEMORY",
-    top_k: int = 10,
-    workspace_id: Optional[str] = None,
-) -> List[Dict]:
-    try:
-        row = execute_query_one("""
-            SELECT COUNT(*) AS c FROM entity_embeddings WHERE entity_id = %s AND entity_type = %s
-        """, [entity_id, entity_type])
-        count = int(list(row.values())[0]) if row else 0
-        if count == 0:
-            return []
-
-        ws_filter = "AND e.workspace_id = %s" if workspace_id else ""
-        sql = f"""
-            SELECT e.entity_id, e.entity_type, e.title, e.category,
-                   em.embedding <=> (SELECT embedding FROM entity_embeddings WHERE entity_id = %s AND entity_type = %s)::vector AS distance
-            FROM entity_embeddings em
-            JOIN entities e ON e.entity_id = em.entity_id AND e.entity_type = em.entity_type
-            WHERE em.entity_id != %s {ws_filter}
-            ORDER BY distance ASC
-            LIMIT %s
-        """
-        params = [entity_id, entity_type, entity_id, top_k]
-        if workspace_id:
-            params.insert(3, workspace_id)
-
-        rows = execute_query(sql, params)
-        results = []
-        for r in rows:
-            dist = float(r["distance"]) if r.get("distance") is not None else None
-            results.append({
-                "entity_id": r["entity_id"],
-                "entity_type": r["entity_type"],
-                "title": r.get("title", ""),
-                "category": r.get("category", ""),
-                "distance": dist,
-                "similarity": round(1.0 - dist, 4) if dist is not None else None,
-            })
-        return results
-    except Exception as e:
-        logger.error("Entity-based vector search failed: %s", e)
+        logger.error(f"Vector search failed: {e}")
         return []
 
 
@@ -274,20 +274,21 @@ def generate_embeddings_batch(
     api_url: Optional[str] = None,
     model: Optional[str] = None,
 ) -> Dict:
-    try:
-        rows = execute_query("""
-            SELECT e.entity_id, e.entity_type, e.title, e.content
-            FROM entities e
-            WHERE e.entity_type = %s
-              AND NOT EXISTS (
-                SELECT 1 FROM entity_embeddings em
-                WHERE em.entity_id = e.entity_id AND em.entity_type = e.entity_type
-              )
-              AND e.title IS NOT NULL
-            ORDER BY e.created_at DESC
-            LIMIT %s
-        """, [entity_type, limit])
+    sql = """
+        SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CONTENT
+        FROM ENTITIES e
+        WHERE e.ENTITY_TYPE = :etype
+          AND NOT EXISTS (
+            SELECT 1 FROM ENTITY_EMBEDDINGS em
+            WHERE em.ENTITY_ID = e.ENTITY_ID AND em.ENTITY_TYPE = e.ENTITY_TYPE
+          )
+          AND e.TITLE IS NOT NULL
+        ORDER BY e.CREATED_AT DESC
+        FETCH FIRST :lim ROWS ONLY
+    """
 
+    try:
+        rows = execute_query(sql, {"etype": entity_type, "lim": limit})
         generated = 0
         failed = 0
 
@@ -307,13 +308,90 @@ def generate_embeddings_batch(
                 else:
                     failed += 1
             except Exception as e:
-                logger.error("Batch embedding failed for %s: %s", eid, e)
+                logger.error(f"Batch embedding failed for {eid}: {e}")
                 failed += 1
 
         return {"generated": generated, "failed": failed, "total_candidates": len(rows)}
     except Exception as e:
-        logger.error("Batch embedding generation failed: %s", e)
+        logger.error(f"Batch embedding generation failed: {e}")
         return {"generated": 0, "failed": 0, "error": str(e)}
+
+
+def get_embedding_stats() -> Dict:
+    try:
+        row = execute_query_one("""
+            SELECT COUNT(*) AS total,
+                   COUNT(CASE WHEN EMBEDDING IS NOT NULL THEN 1 END) AS with_vector,
+                   COUNT(DISTINCT EMBEDDING_MODEL) AS model_count
+            FROM ENTITY_EMBEDDINGS
+        """)
+        if row:
+            return {
+                "total": int(list(row.values())[0]) if row else 0,
+                "with_vector": int(list(row.values())[1]) if row else 0,
+                "model_count": int(list(row.values())[2]) if row else 0,
+            }
+        return {"total": 0, "with_vector": 0, "model_count": 0}
+    except Exception as e:
+        logger.error(f"Failed to get embedding stats: {e}")
+        return {"error": str(e)}
+
+
+def get_model_dimension(model: Optional[str] = None) -> int:
+    cfg = _get_api_config()
+    model = model or cfg["model"]
+
+    if model in MODEL_DIMENSIONS:
+        return MODEL_DIMENSIONS[model]
+
+    return _detect_dimension(model, cfg["api_url"])
+
+
+def search_by_entity_id(
+    entity_id: str,
+    entity_type: str = "MEMORY",
+    top_k: int = 10,
+    workspace_id: Optional[str] = None,
+) -> List[Dict]:
+    sql_check = "SELECT COUNT(*) AS C FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype"
+    try:
+        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type})
+        count = int(list(row.values())[0]) if row else 0
+        if count == 0:
+            return []
+
+        ws_filter = "AND e.WORKSPACE_ID = :wsid" if workspace_id else ""
+        sql = f"""
+            SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CATEGORY,
+                   VECTOR_DISTANCE(em.EMBEDDING,
+                       (SELECT EMBEDDING FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype),
+                       COSINE) AS distance
+            FROM ENTITY_EMBEDDINGS em
+            JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
+            WHERE em.ENTITY_ID != :eid {ws_filter}
+            ORDER BY distance ASC
+            FETCH FIRST :k ROWS ONLY
+        """
+        params = {"eid": entity_id, "etype": entity_type, "k": top_k}
+        if workspace_id:
+            params["wsid"] = workspace_id
+
+        rows = execute_query(sql, params)
+        results = []
+        for r in rows:
+            dist = float(r["distance"]) if r.get("distance") is not None else None
+            results.append({
+                "entity_id": r["entity_id"],
+                "entity_type": r["entity_type"],
+                "title": r.get("title", ""),
+                "category": r.get("category", ""),
+                "distance": dist,
+                "similarity": round(1.0 - dist, 4) if dist is not None else None,
+            })
+        return results
+    except Exception as e:
+        logger.error(f"Entity-based vector search failed: {e}")
+        return []
 
 
 def search_hybrid(
@@ -327,29 +405,29 @@ def search_hybrid(
     model: Optional[str] = None,
 ) -> List[Dict]:
     embedding = generate_embedding(text, api_url=api_url, model=model)
-    vec_str = "[" + ",".join(str(x) for x in embedding) + "]"
+    vec_str = json.dumps(embedding)
 
     conditions = []
-    params: list = [vec_str, top_k]
+    params = {"vec": vec_str, "k": top_k}
     if entity_type:
-        conditions.append("AND e.entity_type = %s")
-        params.append(entity_type)
+        conditions.append("AND e.ENTITY_TYPE = :etype")
+        params["etype"] = entity_type
     if workspace_id:
-        conditions.append("AND e.workspace_id = %s")
-        params.append(workspace_id)
+        conditions.append("AND e.WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
     if keyword:
-        conditions.append("AND (e.title ILIKE %s OR e.category ILIKE %s)")
-        params.extend([f"%{keyword}%", f"%{keyword}%"])
+        conditions.append("AND (UPPER(e.TITLE) LIKE '%' || UPPER(:kw) || '%' OR UPPER(e.CATEGORY) LIKE '%' || UPPER(:kw) || '%')")
+        params["kw"] = keyword.upper()
 
     where = " ".join(conditions)
     sql = f"""
-        SELECT e.entity_id, e.entity_type, e.title, e.category,
-               em.embedding <=> %s::vector AS distance
-        FROM entity_embeddings em
-        JOIN entities e ON e.entity_id = em.entity_id AND e.entity_type = em.entity_type
+        SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CATEGORY,
+               VECTOR_DISTANCE(em.EMBEDDING, TO_VECTOR(:vec), COSINE) AS distance
+        FROM ENTITY_EMBEDDINGS em
+        JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
         WHERE 1=1 {where}
         ORDER BY distance ASC
-        LIMIT %s
+        FETCH FIRST :k ROWS ONLY
     """
 
     try:
@@ -359,8 +437,8 @@ def search_hybrid(
             dist = float(r["distance"]) if r.get("distance") is not None else None
             vec_score = max(0, 1.0 - dist) * vector_weight if dist is not None else 0
             kw_score = (1.0 - vector_weight) if keyword and (
-                keyword.lower() in (r.get("title", "") or "").lower() or
-                keyword.lower() in (r.get("category", "") or "").lower()
+                keyword.upper() in (r.get("title", "") or "").upper() or
+                keyword.upper() in (r.get("category", "") or "").upper()
             ) else 0
             results.append({
                 "entity_id": r["entity_id"],
@@ -375,8 +453,28 @@ def search_hybrid(
         results.sort(key=lambda x: x["hybrid_score"], reverse=True)
         return results
     except Exception as e:
-        logger.error("Hybrid search failed: %s", e)
+        logger.error(f"Hybrid search failed: {e}")
         return []
+
+
+def search_multi_type(
+    text: str,
+    entity_types: Optional[List[str]] = None,
+    top_k: int = 10,
+    workspace_id: Optional[str] = None,
+    api_url: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Dict[str, List[Dict]]:
+    if entity_types is None:
+        entity_types = ["MEMORY", "KNOWLEDGE", "SPEC"]
+
+    results = {}
+    for etype in entity_types:
+        results[etype] = search_similar(
+            text, top_k=top_k, entity_type=etype, workspace_id=workspace_id,
+            api_url=api_url, model=model,
+        )
+    return results
 
 
 def search_fulltext(
@@ -389,29 +487,27 @@ def search_fulltext(
     if not query or not query.strip():
         return []
 
-    params: list = [query, query, top_k]
+    params: Dict[str, Any] = {"ftq": query, "k": top_k}
     conditions = []
 
     if entity_type:
-        conditions.append("AND entity_type = %s")
-        params.append(entity_type)
+        conditions.append("AND e.ENTITY_TYPE = :etype")
+        params["etype"] = entity_type
     if category:
-        conditions.append("AND category = %s")
-        params.append(category)
+        conditions.append("AND e.CATEGORY = :cat")
+        params["cat"] = category
     if workspace_id:
-        conditions.append("AND workspace_id = %s")
-        params.append(workspace_id)
+        conditions.append("AND e.WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
 
     where = " ".join(conditions)
     sql = f"""
-        SELECT entity_id, entity_type, title, content, category,
-               ts_rank_cd(to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content,'')),
-                          plainto_tsquery('english', %s)) AS ft_score
-        FROM entities
-        WHERE to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content,'')) @@ plainto_tsquery('english', %s)
-        {where}
+        SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CONTENT, e.CATEGORY,
+               SCORE(1) AS ft_score
+        FROM ENTITIES e
+        WHERE CONTAINS(e.TITLE, :ftq, 1) > 0 {where}
         ORDER BY ft_score DESC
-        LIMIT %s
+        FETCH FIRST :k ROWS ONLY
     """
 
     try:
@@ -423,13 +519,13 @@ def search_fulltext(
                 "entity_id": r["entity_id"],
                 "entity_type": r["entity_type"],
                 "title": r.get("title", ""),
-                "content": (r.get("content", "") or "")[:200],
+                "content": r.get("content", "")[:200] if r.get("content") else "",
                 "category": r.get("category", ""),
-                "ft_score": round(min(score, 1.0), 4),
+                "ft_score": round(score / 100.0, 4),
             })
         return results
     except Exception as e:
-        logger.error("Full-text search failed: %s", e)
+        logger.error(f"Full-text search failed: {e}")
         return []
 
 
@@ -452,39 +548,40 @@ def search_unified(
     model: Optional[str] = None,
 ) -> List[Dict]:
     embedding = generate_embedding(text, api_url=api_url, model=model)
-    vec_str = "[" + ",".join(str(x) for x in embedding) + "]"
+    vec_str = json.dumps(embedding)
 
-    params: list = [vec_str, text, text, top_k * 3]
+    params: Dict[str, Any] = {"vec": vec_str, "ftq": text, "k": top_k * 3}
     conditions = []
 
     if entity_type:
-        conditions.append("AND e.entity_type = %s")
-        params.append(entity_type)
+        conditions.append("AND e.ENTITY_TYPE = :etype")
+        params["etype"] = entity_type
     if workspace_id:
-        conditions.append("AND e.workspace_id = %s")
-        params.append(workspace_id)
+        conditions.append("AND e.WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
 
     where = " ".join(conditions)
 
     sql = f"""
-        SELECT e.entity_id, e.entity_type, e.title, e.content, e.category, e.importance,
-               e.workspace_id,
-               em.embedding <=> %s::vector AS vec_distance,
-               ts_rank_cd(to_tsvector('english', coalesce(e.title,'') || ' ' || coalesce(e.content,'')),
-                          plainto_tsquery('english', %s)) AS ft_raw,
-               km.domain AS km_domain, km.topic AS km_topic, km.difficulty AS km_difficulty
-        FROM entity_embeddings em
-        JOIN entities e ON e.entity_id = em.entity_id AND e.entity_type = em.entity_type
-        LEFT JOIN knowledge_meta km ON km.entity_id = e.entity_id AND km.entity_type = e.entity_type
+        SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CONTENT, e.CATEGORY, e.IMPORTANCE,
+               e.WORKSPACE_ID,
+               VECTOR_DISTANCE(em.EMBEDDING, TO_VECTOR(:vec), COSINE) AS vec_distance,
+               CASE WHEN CONTAINS(e.TITLE, :ftq, 1) > 0 THEN SCORE(1) ELSE 0 END AS ft_score,
+               km.DOMAIN AS km_domain, km.TOPIC AS km_topic, km.DIFFICULTY AS km_difficulty,
+               sm.SPEC_SCOPE AS sm_scope, sm.COMPLEXITY AS sm_complexity, sm.SPEC_STATUS AS sm_spec_status
+        FROM ENTITY_EMBEDDINGS em
+        JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
+        LEFT JOIN KNOWLEDGE_META km ON km.ENTITY_ID = e.ENTITY_ID AND km.ENTITY_TYPE = e.ENTITY_TYPE
+        LEFT JOIN SPEC_META sm ON sm.ENTITY_ID = e.ENTITY_ID AND sm.ENTITY_TYPE = e.ENTITY_TYPE
         WHERE 1=1 {where}
         ORDER BY vec_distance ASC
-        LIMIT %s
+        FETCH FIRST :k ROWS ONLY
     """
 
     try:
         rows = execute_query(sql, params)
     except Exception as e:
-        logger.error("Unified search vector+fulltext phase failed: %s", e)
+        logger.error(f"Unified search vector+fulltext phase failed: {e}")
         return []
 
     eid_set = {r["entity_id"] for r in rows}
@@ -509,15 +606,17 @@ def search_unified(
 
     for r in rows:
         eid = r["entity_id"]
+        etype = r["entity_type"]
 
         vec_dist = float(r["vec_distance"]) if r.get("vec_distance") is not None else 1.0
         vec_score = max(0.0, 1.0 - vec_dist)
 
-        ft_raw = float(r["ft_raw"]) if r.get("ft_raw") else 0
-        ft_score = min(ft_raw, 1.0)
+        ft_raw = float(r["ft_score"]) if r.get("ft_score") else 0
+        ft_score = min(ft_raw / 100.0, 1.0)
 
         rel_score = _relational_score(
             r.get("km_domain"), r.get("km_topic"), r.get("km_difficulty"),
+            r.get("sm_scope"), r.get("sm_complexity"), r.get("sm_spec_status"),
             r.get("category"), r.get("importance"),
             domain, category, text_lower,
         )
@@ -538,7 +637,7 @@ def search_unified(
 
         results.append({
             "entity_id": eid,
-            "entity_type": r.get("entity_type", ""),
+            "entity_type": etype,
             "title": r.get("title", ""),
             "category": r.get("category", ""),
             "importance": int(r["importance"]) if r.get("importance") else None,
@@ -546,6 +645,8 @@ def search_unified(
             "km_domain": r.get("km_domain"),
             "km_topic": r.get("km_topic"),
             "km_difficulty": r.get("km_difficulty"),
+            "sm_scope": r.get("sm_scope"),
+            "sm_complexity": r.get("sm_complexity"),
             "tags": tag_map.get(eid, []),
             "edge_count": edge_counts.get(eid, 0),
             "graph_proximity": round(graph_score, 4),
@@ -582,137 +683,145 @@ def search_unified_sql(
     model: Optional[str] = None,
 ) -> List[Dict]:
     embedding = generate_embedding(text, api_url=api_url, model=model)
-    vec_str = "[" + ",".join(str(x) for x in embedding) + "]"
+    vec_str = json.dumps(embedding)
 
-    params: list = [vec_str, text, text, top_k * 3, top_k,
-                    vector_weight, fulltext_weight, relational_weight, graph_weight]
+    params: Dict[str, Any] = {
+        "vec": vec_str,
+        "ftq": text,
+        "k": top_k * 3,
+        "topk": top_k,
+        "vw": vector_weight,
+        "fw": fulltext_weight,
+        "rw": relational_weight,
+        "gw": graph_weight,
+    }
 
     filter_conds = []
     if entity_type:
-        filter_conds.append("AND e.entity_type = %s")
-        params.append(entity_type)
+        filter_conds.append("AND e.ENTITY_TYPE = :etype")
+        params["etype"] = entity_type
     if workspace_id:
-        filter_conds.append("AND e.workspace_id = %s")
-        params.append(workspace_id)
+        filter_conds.append("AND e.WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
 
     filter_where = " ".join(filter_conds)
 
-    tag_cte = ""
-    tag_join = ""
-    tag_select = "0 AS tag_score"
+    tag_join_cte = ""
+    tag_select_score = "0 AS tag_score"
 
     if tags:
-        tag_placeholders = ", ".join(["%s"] * len(tags))
-        params.extend(tags)
-        tag_cte = f""",
+        tag_placeholders = ", ".join([f":tg{i}" for i in range(len(tags))])
+        for i, t in enumerate(tags):
+            params[f"tg{i}"] = t
+
+        tag_join_cte = f""",
 tag_scores AS (
-    SELECT et.entity_id,
-           COUNT(CASE WHEN t.tag_name IN ({tag_placeholders}) THEN 1 END) AS matched_tags,
+    SELECT et.ENTITY_ID,
+           COUNT(CASE WHEN t.TAG_NAME IN ({tag_placeholders}) THEN 1 END) AS matched_tags,
            COUNT(*) AS total_tags
-    FROM entity_tags et
-    JOIN tags t ON t.tag_id = et.tag_id
-    WHERE et.entity_id IN (SELECT entity_id FROM candidates)
-    GROUP BY et.entity_id
+    FROM ENTITY_TAGS et
+    JOIN TAGS t ON t.TAG_ID = et.TAG_ID
+    WHERE et.ENTITY_ID IN (SELECT ENTITY_ID FROM candidates)
+    GROUP BY et.ENTITY_ID
 )"""
-        tag_join = "LEFT JOIN tag_scores ts ON ts.entity_id = c.entity_id"
-        tag_select = "CASE WHEN ts.total_tags > 0 THEN COALESCE(ts.matched_tags, 0)::float / ts.total_tags ELSE 0 END AS tag_score"
+        tag_select_score = "CASE WHEN ts.total_tags > 0 THEN NVL(ts.matched_tags, 0) / ts.total_tags ELSE 0 END AS tag_score"
 
     graph_cte = ""
     graph_join = ""
     graph_select = "0 AS graph_proximity"
 
     if graph_seed_entity_id:
-        params.append(graph_seed_entity_id)
+        params["gsid"] = graph_seed_entity_id
         depth2_join = ""
         if graph_depth >= 2:
             depth2_join = """
             UNION ALL
-            SELECT e2.target_id AS entity_id, 0.5 AS proximity
-            FROM entity_edges e1
-            JOIN entity_edges e2 ON e2.source_id = e1.target_id
-            WHERE e1.source_id = %s
-              AND e2.target_id IN (SELECT entity_id FROM candidates)
-              AND e2.target_id != %s"""
-            params.extend([graph_seed_entity_id, graph_seed_entity_id])
+            SELECT e2.TARGET_ID AS ENTITY_ID, 0.5 AS proximity
+            FROM ENTITY_EDGES e1
+            JOIN ENTITY_EDGES e2 ON e2.SOURCE_ID = e1.TARGET_ID
+            WHERE e1.SOURCE_ID = :gsid
+              AND e2.TARGET_ID IN (SELECT ENTITY_ID FROM candidates)
+              AND e2.TARGET_ID != :gsid"""
 
         graph_cte = f""",
 graph_prox AS (
-    SELECT target_id AS entity_id, 1.0 AS proximity
-    FROM entity_edges
-    WHERE source_id = %s
-      AND target_id IN (SELECT entity_id FROM candidates){depth2_join}
+    SELECT TARGET_ID AS ENTITY_ID, 1.0 AS proximity
+    FROM ENTITY_EDGES
+    WHERE SOURCE_ID = :gsid
+      AND TARGET_ID IN (SELECT ENTITY_ID FROM candidates){depth2_join}
 )"""
-        params.append(graph_seed_entity_id)
-        graph_join = "LEFT JOIN (SELECT entity_id, MAX(proximity) AS proximity FROM graph_prox GROUP BY entity_id) gp ON gp.entity_id = c.entity_id"
-        graph_select = "COALESCE(gp.proximity, 0) AS graph_proximity"
+        graph_join = "LEFT JOIN (SELECT ENTITY_ID, MAX(proximity) AS proximity FROM graph_prox GROUP BY ENTITY_ID) gp ON gp.ENTITY_ID = c.ENTITY_ID"
+        graph_select = "NVL(gp.proximity, 0) AS graph_proximity"
 
-    tag_join_left = tag_join if tags else ""
+    tag_join_left = "LEFT JOIN tag_scores ts ON ts.ENTITY_ID = c.ENTITY_ID" if tags else ""
     graph_join_left = graph_join if graph_seed_entity_id else ""
 
     rel_score_expr = "0"
     if domain:
-        params.append(domain.lower())
-        rel_score_expr = "CASE WHEN LOWER(c.km_domain) = %s THEN 0.5 ELSE 0 END"
+        params["fdomain"] = domain.lower()
+        rel_score_expr = f"CASE WHEN LOWER(c.km_domain) = :fdomain THEN 0.5 ELSE 0 END"
     if category:
-        params.append(category.lower())
+        params["fcat"] = category.lower()
         existing = rel_score_expr
-        rel_score_expr = f"{existing} + CASE WHEN LOWER(c.category) = %s THEN 0.3 ELSE 0 END"
+        rel_score_expr = f"{existing} + CASE WHEN LOWER(c.CATEGORY) = :fcat THEN 0.3 ELSE 0 END"
 
-    importance_part = "COALESCE(c.importance, 0)::float / 100.0"
+    importance_part = "NVL(c.IMPORTANCE, 0) / 100.0"
     rel_score_expr = f"LEAST({rel_score_expr} + {importance_part}, 1.0)"
 
-    tag_final_expr = tag_select if tags else "0 AS tag_score"
+    tag_final_expr = tag_select_score if tags else "0 AS tag_score"
     graph_final_expr = graph_select if graph_seed_entity_id else "0 AS graph_proximity"
 
     final_score_expr = (
-        f"%s * (1 - c.vec_distance)"
-        f" + %s * CASE WHEN c.ft_raw > 0 THEN LEAST(c.ft_raw, 1.0) ELSE 0 END"
-        f" + %s * ({rel_score_expr} + {tag_final_expr.replace(' AS tag_score', '')}) / 2.0"
-        f" + %s * ({graph_final_expr.replace(' AS graph_proximity', '')} + LEAST(COALESCE(ec.edge_count, 0)::float / 10.0, 0.1)) / 2.0"
+        f":vw * (1 - c.vec_distance)"
+        f" + :fw * CASE WHEN c.ft_raw > 0 THEN LEAST(c.ft_raw / 100.0, 1.0) ELSE 0 END"
+        f" + :rw * ({rel_score_expr} + {tag_final_expr.replace(' AS tag_score', '')}) / 2.0"
+        f" + :gw * ({graph_final_expr.replace(' AS graph_proximity', '')} + LEAST(NVL(ec.edge_count, 0) / 10.0, 0.1)) / 2.0"
     )
 
     sql = f"""
 WITH candidates AS (
-    SELECT e.entity_id, e.entity_type, e.title, e.content, e.category, e.importance,
-           e.workspace_id,
-           em.embedding <=> %s::vector AS vec_distance,
-           ts_rank_cd(to_tsvector('english', coalesce(e.title,'') || ' ' || coalesce(e.content,'')),
-                      plainto_tsquery('english', %s)) AS ft_raw,
-           km.domain AS km_domain, km.topic AS km_topic, km.difficulty AS km_difficulty
-    FROM entity_embeddings em
-    JOIN entities e ON e.entity_id = em.entity_id AND e.entity_type = em.entity_type
-    LEFT JOIN knowledge_meta km ON km.entity_id = e.entity_id AND km.entity_type = e.entity_type
+    SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CONTENT, e.CATEGORY, e.IMPORTANCE,
+           e.WORKSPACE_ID,
+           VECTOR_DISTANCE(em.EMBEDDING, TO_VECTOR(:vec), COSINE) AS vec_distance,
+           CASE WHEN CONTAINS(e.TITLE, :ftq, 1) > 0 THEN SCORE(1) ELSE 0 END AS ft_raw,
+           km.DOMAIN AS km_domain, km.TOPIC AS km_topic, km.DIFFICULTY AS km_difficulty,
+           sm.SPEC_SCOPE AS sm_scope, sm.COMPLEXITY AS sm_complexity, sm.SPEC_STATUS AS sm_spec_status
+    FROM ENTITY_EMBEDDINGS em
+    JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
+    LEFT JOIN KNOWLEDGE_META km ON km.ENTITY_ID = e.ENTITY_ID AND km.ENTITY_TYPE = e.ENTITY_TYPE
+    LEFT JOIN SPEC_META sm ON sm.ENTITY_ID = e.ENTITY_ID AND sm.ENTITY_TYPE = e.ENTITY_TYPE
     WHERE 1=1 {filter_where}
     ORDER BY vec_distance ASC
-    LIMIT %s
+    FETCH FIRST :k ROWS ONLY
 ),
 edge_counts AS (
-    SELECT source_id AS entity_id, COUNT(*) AS edge_count
-    FROM entity_edges
-    WHERE source_id IN (SELECT entity_id FROM candidates)
-    GROUP BY source_id
-){tag_cte}{graph_cte}
-SELECT c.entity_id, c.entity_type, c.title, c.category, c.importance,
-       c.workspace_id, c.km_domain, c.km_topic, c.km_difficulty,
+    SELECT SOURCE_ID AS ENTITY_ID, COUNT(*) AS edge_count
+    FROM ENTITY_EDGES
+    WHERE SOURCE_ID IN (SELECT ENTITY_ID FROM candidates)
+    GROUP BY SOURCE_ID
+){tag_join_cte}{graph_cte}
+SELECT c.ENTITY_ID, c.ENTITY_TYPE, c.TITLE, c.CATEGORY, c.IMPORTANCE,
+       c.WORKSPACE_ID, c.km_domain, c.km_topic, c.km_difficulty,
+       c.sm_scope, c.sm_complexity, c.sm_spec_status,
        (1 - c.vec_distance) AS vec_score,
-       CASE WHEN c.ft_raw > 0 THEN LEAST(c.ft_raw, 1.0) ELSE 0 END AS ft_score,
+       CASE WHEN c.ft_raw > 0 THEN LEAST(c.ft_raw / 100.0, 1.0) ELSE 0 END AS ft_score,
        LEAST({rel_score_expr}, 1.0) AS rel_score,
        {tag_final_expr},
-       COALESCE(ec.edge_count, 0) AS edge_count,
+       NVL(ec.edge_count, 0) AS edge_count,
        {graph_final_expr},
        LEAST({final_score_expr}, 1.0) AS final_score
 FROM candidates c
-LEFT JOIN edge_counts ec ON ec.entity_id = c.entity_id
+LEFT JOIN edge_counts ec ON ec.ENTITY_ID = c.ENTITY_ID
 {tag_join_left}
 {graph_join_left}
 ORDER BY final_score DESC
-LIMIT %s
+FETCH FIRST :topk ROWS ONLY
 """
 
     try:
         rows = execute_query(sql, params)
     except Exception as e:
-        logger.error("search_unified_sql failed: %s", e)
+        logger.error(f"search_unified_sql failed: {e}")
         return []
 
     tag_map: Dict[str, List[str]] = {}
@@ -725,6 +834,13 @@ LIMIT %s
     results = []
     for r in rows:
         eid = r["entity_id"]
+        vec_score = float(r.get("vec_score", 0) or 0)
+        ft_score = float(r.get("ft_score", 0) or 0)
+        rel_score = float(r.get("rel_score", 0) or 0)
+        tg_score = float(r.get("tag_score", 0) or 0)
+        graph_prox = float(r.get("graph_proximity", 0) or 0)
+        final_score = float(r.get("final_score", 0) or 0)
+
         results.append({
             "entity_id": eid,
             "entity_type": r.get("entity_type", ""),
@@ -735,117 +851,90 @@ LIMIT %s
             "km_domain": r.get("km_domain"),
             "km_topic": r.get("km_topic"),
             "km_difficulty": r.get("km_difficulty"),
+            "sm_scope": r.get("sm_scope"),
+            "sm_complexity": r.get("sm_complexity"),
             "tags": tag_map.get(eid, []),
             "edge_count": int(r.get("edge_count", 0) or 0),
-            "graph_proximity": round(float(r.get("graph_proximity", 0) or 0), 4),
+            "graph_proximity": round(graph_prox, 4),
             "scores": {
-                "vector": round(float(r.get("vec_score", 0) or 0), 4),
-                "fulltext": round(float(r.get("ft_score", 0) or 0), 4),
-                "relational": round(float(r.get("rel_score", 0) or 0), 4),
-                "tag": round(float(r.get("tag_score", 0) or 0), 4),
-                "graph": round(float(r.get("graph_proximity", 0) or 0), 4),
+                "vector": round(vec_score, 4),
+                "fulltext": round(ft_score, 4),
+                "relational": round(rel_score, 4),
+                "tag": round(tg_score, 4),
+                "graph": round(graph_prox, 4),
             },
-            "final_score": round(float(r.get("final_score", 0) or 0), 4),
+            "final_score": round(final_score, 4),
             "engine": "single_sql",
         })
 
     return results
 
 
-def search_multi_type(
-    text: str,
-    entity_types: Optional[List[str]] = None,
-    top_k: int = 10,
-    workspace_id: Optional[str] = None,
-    api_url: Optional[str] = None,
-    model: Optional[str] = None,
-) -> Dict[str, List[Dict]]:
-    if entity_types is None:
-        entity_types = ["MEMORY", "KNOWLEDGE", "SPEC"]
+def _keyword_score(query_lower: str, query_words: set, title: str, content: str, category: str) -> float:
+    title_lower = (title or "").lower()
+    content_lower = (content or "").lower()
+    category_lower = (category or "").lower()
 
-    results = {}
-    for etype in entity_types:
-        results[etype] = search_similar(
-            text, top_k=top_k, entity_type=etype, workspace_id=workspace_id,
-            api_url=api_url, model=model,
-        )
-    return results
+    score = 0.0
+    matched = 0
+    for w in query_words:
+        if len(w) < 2:
+            continue
+        if w in title_lower:
+            score += 0.5
+            matched += 1
+        elif w in content_lower:
+            score += 0.2
+            matched += 1
+        if w in category_lower:
+            score += 0.3
+            matched += 1
 
-
-def search_auto(
-    text: str,
-    top_k: int = 10,
-    entity_type: Optional[str] = None,
-    workspace_id: Optional[str] = None,
-    api_url: Optional[str] = None,
-    model: Optional[str] = None,
-) -> List[Dict]:
-    try:
-        results = search_similar(text, top_k=top_k, entity_type=entity_type,
-                                 workspace_id=workspace_id, api_url=api_url, model=model)
-        if results:
-            return results
-    except Exception:
-        pass
-    return search_fulltext(text, top_k=top_k, entity_type=entity_type, workspace_id=workspace_id)
-
-
-def get_embedding_stats() -> Dict:
-    try:
-        row = execute_query_one("""
-            SELECT COUNT(*) AS total,
-                   COUNT(*) FILTER (WHERE embedding IS NOT NULL) AS with_vector,
-                   COUNT(DISTINCT embedding_model) AS model_count
-            FROM entity_embeddings
-        """)
-        if row:
-            return {
-                "total": int(row.get("total", 0)),
-                "with_vector": int(row.get("with_vector", 0)),
-                "model_count": int(row.get("model_count", 0)),
-            }
-        return {"total": 0, "with_vector": 0, "model_count": 0}
-    except Exception as e:
-        logger.error("Failed to get embedding stats: %s", e)
-        return {"error": str(e)}
-
-
-def get_model_dimension(model: Optional[str] = None) -> int:
-    cfg = _get_api_config()
-    model = model or cfg["model"]
-    if model in MODEL_DIMENSIONS:
-        return MODEL_DIMENSIONS[model]
-    return _detect_dimension(model, cfg["api_url"])
+    if not query_words:
+        return 0.0
+    coverage = matched / (len(query_words) * 3) if query_words else 0
+    return min(score / len(query_words), 1.0) * 0.7 + coverage * 0.3
 
 
 def _relational_score(
     km_domain: Optional[str], km_topic: Optional[str], km_difficulty: Optional[str],
+    sm_scope: Optional[str], sm_complexity: Optional[str], sm_spec_status: Optional[str],
     category: Optional[str], importance: Optional[Any],
     filter_domain: Optional[str], filter_category: Optional[str],
     query_lower: str,
 ) -> float:
     score = 0.0
+
     if filter_domain:
         if km_domain and km_domain.lower() == filter_domain.lower():
             score += 0.4
+        if sm_scope and sm_scope.lower() == filter_domain.lower():
+            score += 0.4
+
     if filter_category:
         if category and category.lower() == filter_category.lower():
             score += 0.3
+
     if km_domain and km_domain.lower() in query_lower:
         score += 0.2
     if km_topic and km_topic.lower() in query_lower:
         score += 0.2
+    if sm_scope and sm_scope.lower() in query_lower:
+        score += 0.2
+
     if importance:
         try:
             score += min(int(importance) / 10.0, 1.0) * 0.1
         except (ValueError, TypeError):
             pass
+
     return min(score, 1.0)
 
 
 def _tag_score(entity_tags: List[str], filter_tags: List[str], query_lower: str) -> float:
     if not entity_tags and not filter_tags:
         return 0.0
+
     score = 0.0
     if filter_tags:
         filter_lower = {t.lower() for t in filter_tags}
@@ -853,10 +942,12 @@ def _tag_score(entity_tags: List[str], filter_tags: List[str], query_lower: str)
         overlap = len(filter_lower & entity_lower)
         if overlap > 0:
             score += min(overlap / len(filter_lower), 1.0) * 0.5
+
     for tag in entity_tags:
         if tag.lower() in query_lower:
             score += 0.3
             break
+
     return min(score, 1.0)
 
 
@@ -864,17 +955,18 @@ def _batch_get_tags(entity_ids: List[str]) -> List[tuple]:
     if not entity_ids:
         return []
     try:
-        placeholders = ", ".join(["%s"] * len(entity_ids))
+        placeholders = ", ".join([f":eid{i}" for i in range(len(entity_ids))])
+        params = {f"eid{i}": eid for i, eid in enumerate(entity_ids)}
         sql = f"""
-            SELECT et.entity_id, t.tag_name
-            FROM entity_tags et
-            JOIN tags t ON t.tag_id = et.tag_id
-            WHERE et.entity_id IN ({placeholders})
+            SELECT et.ENTITY_ID, t.TAG_NAME
+            FROM ENTITY_TAGS et
+            JOIN TAGS t ON t.TAG_ID = et.TAG_ID
+            WHERE et.ENTITY_ID IN ({placeholders})
         """
-        rows = execute_query(sql, entity_ids)
+        rows = execute_query(sql, params)
         return [(r["entity_id"], r["tag_name"]) for r in rows]
     except Exception as e:
-        logger.debug("Batch tag query failed: %s", e)
+        logger.debug(f"Batch tag query failed: {e}")
         return []
 
 
@@ -894,12 +986,12 @@ def _batch_graph_proximity(
             if not current_frontier:
                 break
 
-            placeholders = ", ".join(["%s"] * len(current_frontier))
-            params = list(current_frontier)
+            placeholders = ", ".join([f":fid{i}" for i in range(len(current_frontier))])
+            params = {f"fid{i}": fid for i, fid in enumerate(current_frontier)}
 
             sql = f"""
-                SELECT source_id, target_id FROM entity_edges
-                WHERE source_id IN ({placeholders})
+                SELECT SOURCE_ID, TARGET_ID FROM ENTITY_EDGES
+                WHERE SOURCE_ID IN ({placeholders})
             """
             try:
                 rows = execute_query(sql, params)
@@ -923,7 +1015,7 @@ def _batch_graph_proximity(
 
         return proximity
     except Exception as e:
-        logger.debug("Graph proximity computation failed: %s", e)
+        logger.debug(f"Graph proximity computation failed: {e}")
         return {}
 
 
@@ -931,14 +1023,62 @@ def _batch_edge_counts(entity_ids: List[str]) -> Dict[str, int]:
     if not entity_ids:
         return {}
     try:
-        placeholders = ", ".join(["%s"] * len(entity_ids))
+        placeholders = ", ".join([f":eid{i}" for i in range(len(entity_ids))])
+        params = {f"eid{i}": eid for i, eid in enumerate(entity_ids)}
         sql = f"""
-            SELECT source_id AS entity_id, COUNT(*) AS cnt
-            FROM entity_edges WHERE source_id IN ({placeholders})
-            GROUP BY source_id
+            SELECT SOURCE_ID AS ENTITY_ID, COUNT(*) AS CNT
+            FROM ENTITY_EDGES WHERE SOURCE_ID IN ({placeholders})
+            GROUP BY SOURCE_ID
         """
-        rows = execute_query(sql, entity_ids)
+        rows = execute_query(sql, params)
         return {r["entity_id"]: int(list(r.values())[1]) for r in rows}
     except Exception as e:
-        logger.debug("Batch edge count query failed: %s", e)
+        logger.debug(f"Batch edge count query failed: {e}")
         return {}
+
+
+# -- D4: Advanced Embedding Management (v3.7.4) --
+
+def reindex_entity(entity_id: str) -> bool:
+    """Re-generate embedding for a single entity."""
+    from .connection import execute_query_one, execute
+    entity = execute_query_one(
+        "SELECT ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT FROM ENTITIES WHERE ENTITY_ID = :eid",
+        {"eid": entity_id},
+    )
+    if not entity:
+        return False
+    text = (entity.get("title", "") + " " + entity.get("content", "")).strip()
+    if not text:
+        return False
+    try:
+        embedding = generate_embedding(text)
+        store_embedding(entity_id, entity.get("entity_type", "MEMORY"), embedding)
+        return True
+    except Exception as e:
+        logger.error("reindex_entity failed for %s: %s", entity_id, e)
+        return False
+
+
+def queue_reindex(entity_id: str, priority: int = 0) -> bool:
+    """Queue an entity for re-indexing."""
+    from .connection import execute_insert
+    execute_insert(
+        """INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION)
+           VALUES (:key, :val, :desc)""",
+        {"key": f"reindex_{entity_id}", "val": str(priority),
+         "desc": f"Pending reindex for entity {entity_id}"},
+    )
+    return True
+
+
+def reindex_batch(entity_ids: List[str]) -> Dict[str, int]:
+    """Re-index multiple entities."""
+    success = 0
+    failed = 0
+    for eid in entity_ids:
+        if reindex_entity(eid):
+            success += 1
+        else:
+            failed += 1
+    return {"success": success, "failed": failed}

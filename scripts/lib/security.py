@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.3 - PG Community Edition - Security Module
+"""AI Agent Infra v3.7.4 - PG Community Edition - Security Module
 
 Data masking, context-aware masking, reversible encryption via pgcrypto,
 password hashing, and admin token management.

@@ -1,3 +1,21 @@
+## [3.7.4] - 2026-06-26
+
+### Summary
+
+6 expansion directions: Agent Communication Protocol, Multi-Agent Orchestration, Event-Driven Architecture, Advanced Memory Management, Observability, and Tool Ecosystem.
+
+### Added - All Editions
+
+- **Agent Communication Protocol** — COLLAB_MESSAGES table + message_api.py (15 functions): send/reply/broadcast/thread messages with priority levels, attachment references, and unread tracking.
+- **Multi-Agent Orchestration** — orchestrator.py: DAG resolution (topological sort), sequential/parallel execution groups, fan-out/fan-in with multiple strategies. STEP_RETRY_POLICY table.
+- **Event-Driven Architecture** — EVENT_LOG + EVENT_SUBSCRIPTIONS tables. event_bus.py: publish/subscribe, agent capability discovery, LOOP_HOOKS execution engine.
+- **Advanced Memory Management** — consolidate_branch_memories(), promote_to_semantic(), merge_knowledge(), detect_knowledge_conflicts(), reindex_entity().
+- **Observability** — Distributed tracing (TRACE_ID on 6 tables). trace_api.py, monitor_api.py. monitor.html dashboard page. 3 PL/pgSQL schemas.
+- **Tool Ecosystem** — OpenAPI spec auto-import into harness templates. TOOL_REGISTRY table. TOOL_CHAINS + TOOL_CHAIN_STEPS for tool DAG composition.
+- 25 new API endpoints. 3 new pg_cron jobs.
+
+---
+
 ## [3.7.3] - 2026-06-23
 
 ### Summary

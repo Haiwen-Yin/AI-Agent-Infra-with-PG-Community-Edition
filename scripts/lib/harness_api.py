@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.3 - PG Community Edition - Harness API
+"""AI Agent Infra v3.7.4 - PG Community Edition - Harness API
 
 Templates are reusable agent execution blueprints stored as entities
 with entity_type='HARNESS_TEMPLATE' and extended via harness_meta.
@@ -375,7 +375,7 @@ def export_harness(entity_id: str) -> Optional[Dict[str, Any]]:
     if tpl is None:
         return None
     export_data = {
-        "version": "3.7.3",
+        "version": "3.7.4",
         "type": "HARNESS_TEMPLATE",
         "entity_id": tpl.get("entity_id"),
         "title": tpl.get("title"),

@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ============================================================
--- AI Agent Infra v3.7.3 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
+-- AI Agent Infra v3.7.4 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
 -- ============================================================
 
 -- ============================================================
@@ -2363,7 +2363,7 @@ $$;
 
 
 -- ============================================================
--- 14. loop_manager schema [NEW v3.7.3]
+-- 14. loop_manager schema [NEW v3.7.4]
 -- ============================================================
 
 CREATE SCHEMA IF NOT EXISTS loop_manager;
@@ -2493,5 +2493,5 @@ $$;
 
 
 -- ============================================================
--- AI Agent Infra v3.7.3 - Community Edition - PostgreSQL 18.3 API Deployment Complete
+-- AI Agent Infra v3.7.4 - Community Edition - PostgreSQL 18.3 API Deployment Complete
 -- ============================================================

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.3 - PG Community Edition - Skill API Tests"""
+"""AI Agent Infra v3.7.4 - PG Community Edition - Skill API Tests"""
 
 import sys
 import os

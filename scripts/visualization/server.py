@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.3 - Community Edition (PG) - Web Visualization Server
+"""AI Agent Infra v3.7.4 - Community Edition (PG) - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -21,10 +21,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib import connection, memory_api, knowledge_api, agent_api
 from lib import task_plan_api, workspace_api, harness_api, graph_api
-from lib import spec_api, collab_api, branch_api, loop_api, loop_api
+from lib import spec_api, collab_api, branch_api, loop_api
+from lib import message_api, orchestrator, event_bus, trace_api, monitor_api, tool_registry
 from lib import security, config, user_api
 
-VERSION = "3.7.3"
+VERSION = "3.7.4"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -44,6 +45,7 @@ PAGE_ROUTES = {
     '/skills': 'skills.html',
     '/branches': 'branches.html',
     '/loops': 'loops.html',
+    '/monitor': 'monitor.html',
 }
 
 PUBLIC_API = {'/api/health', '/api/login', '/portal/api/register', '/portal/api/login', '/api/admin/agent/register', '/api/admin/agent/recover', '/api/admin/token/generate', '/api/admin/token/rotate', '/api/admin/skill/list', '/api/admin/skill/acquire', '/api/admin/skill/create', '/api/admin/skill/update', '/api/admin/skill/delete', '/api/admin/skill/upload'}
@@ -725,6 +727,47 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_collab_branch(path, qs)
             elif path.startswith('/api/branch/'):
                 self._api_branch_get(path)
+            # v3.7.4 new routes
+            elif path == '/api/collab/messages':
+                self._api_messages_list(qs)
+            elif path == '/api/collab/messages/inbox':
+                self._api_messages_inbox(qs)
+            elif path == '/api/collab/messages/unread':
+                self._api_messages_unread(qs)
+            elif path.startswith('/api/collab/messages/') and path.endswith('/thread'):
+                self._api_messages_thread(path)
+            elif path == '/api/orchestrator/status':
+                self._api_orch_status(qs)
+            elif path == '/api/monitor/overview':
+                self._api_monitor_overview()
+            elif path == '/api/monitor/agents':
+                self._api_monitor_agents()
+            elif path == '/api/monitor/stalls':
+                self._api_monitor_stalls(qs)
+            elif path == '/api/monitor/metrics':
+                self._api_monitor_metrics(qs)
+            elif path == '/api/monitor/alerts':
+                self._api_monitor_alerts()
+            elif path == '/api/traces':
+                self._api_traces_list(qs)
+            elif path.startswith('/api/traces/') and path.endswith('/tree'):
+                self._api_traces_tree(path)
+            elif path.startswith('/api/traces/') and path.endswith('/spans'):
+                self._api_traces_spans(path, qs)
+            elif path.startswith('/api/traces/'):
+                self._api_traces_get(path)
+            elif path == '/api/tools':
+                self._api_tools_list(qs)
+            elif path == '/api/tools/chains':
+                self._api_tool_chains_list()
+            elif path.startswith('/api/tools/') and not '/import' in path:
+                self._api_tools_get(path)
+            elif path == '/api/events/pending':
+                self._api_events_pending(qs)
+            elif path == '/api/events/subscriptions':
+                self._api_events_subscriptions(qs)
+            elif path == '/api/agents/discover':
+                self._api_agents_discover(qs)
             else:
                 self._send_error(404, 'API endpoint not found')
         except Exception as e:
@@ -2252,6 +2295,236 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_error(500, str(e))
 
 
+    def _api_messages_list(self, qs):
+        group_id = qs.get('group_id', [None])[0]
+        agent_id = qs.get('agent_id', [None])[0]
+        messages = message_api.get_messages(group_id=group_id, agent_id=agent_id)
+        self._send_json(messages)
+
+    def _api_messages_inbox(self, qs):
+        group_id = qs.get('group_id', [None])[0]
+        agent_id = qs.get('agent_id', [None])[0]
+        if not group_id or not agent_id:
+            self._send_json({'error': 'group_id and agent_id required'}, 400)
+            return
+        self._send_json(message_api.get_group_inbox(group_id, agent_id))
+
+    def _api_messages_unread(self, qs):
+        agent_id = qs.get('agent_id', [None])[0]
+        group_id = qs.get('group_id', [None])[0]
+        if not agent_id:
+            self._send_json({'error': 'agent_id required'}, 400)
+            return
+        count = message_api.get_unread_count(agent_id, group_id)
+        self._send_json({'unread_count': count})
+
+    def _api_messages_thread(self, path):
+        message_id = path.split('/')[-2]
+        self._send_json(message_api.get_conversation(message_id))
+
+    def _api_messages_send(self):
+        body = self._read_body()
+        data = json.loads(body)
+        msg_id = message_api.send_message(
+            group_id=data['group_id'], sender_agent_id=data['sender_agent_id'],
+            body=data['body'], receiver_agent_id=data.get('receiver_agent_id'),
+            subject=data.get('subject'), message_type=data.get('message_type', 'TEXT'),
+            priority=data.get('priority', 'NORMAL'),
+            parent_message_id=data.get('parent_message_id'),
+            attachment_entity_id=data.get('attachment_entity_id'),
+        )
+        self._send_json({'message_id': msg_id}, 201)
+
+    def _api_messages_read(self, path):
+        message_id = path.split('/')[-2]
+        body = self._read_body()
+        data = json.loads(body)
+        ok = message_api.mark_read(message_id, data['agent_id'])
+        self._send_json({'success': ok})
+
+    def _api_messages_delete(self, path):
+        message_id = path.split('/')[-2]
+        body = self._read_body()
+        data = json.loads(body)
+        ok = message_api.delete_message(message_id, data['agent_id'])
+        self._send_json({'success': ok})
+
+    def _api_orch_status(self, qs):
+        plan_id = qs.get('plan_id', [None])[0]
+        if not plan_id:
+            self._send_json({'error': 'plan_id required'}, 400)
+            return
+        self._send_json(orchestrator.get_execution_status(plan_id))
+
+    def _api_orch_dag_resolve(self, path):
+        plan_id = path.split('/')[-1]
+        self._send_json(orchestrator.resolve_dag(plan_id))
+
+    def _api_orch_dag_execute(self, path):
+        plan_id = path.split('/')[-1]
+        self._send_json(orchestrator.execute_dag(plan_id))
+
+    def _api_orch_retry_policy(self):
+        body = self._read_body()
+        data = json.loads(body)
+        step_id = path.split('/')[-2]
+        policy_id = orchestrator.add_retry_policy(step_id, **data)
+        self._send_json({'policy_id': policy_id}, 201)
+
+    def _api_orch_fan_out(self, path):
+        loop_id = path.split('/')[-2]
+        body = self._read_body()
+        data = json.loads(body)
+        result = orchestrator.fan_out(
+            step_id=data['step_id'], agent_ids=data['agent_ids'],
+            loop_goal=data['loop_goal'], evaluation_type=data.get('evaluation_type', 'AGGREGATE'),
+        )
+        self._send_json(result, 201)
+
+    def _api_orch_fan_in(self, path):
+        parent_loop_id = path.split('/')[-2]
+        body = self._read_body()
+        data = json.loads(body)
+        result = orchestrator.fan_in(parent_loop_id, data.get('strategy', 'CONSENSUS'))
+        self._send_json(result)
+
+    def _api_monitor_overview(self):
+        self._send_json(monitor_api.get_system_overview())
+
+    def _api_monitor_agents(self):
+        self._send_json(monitor_api.get_agent_health())
+
+    def _api_monitor_stalls(self, qs):
+        threshold = int(qs.get('threshold_minutes', ['10'])[0])
+        self._send_json(monitor_api.get_stalled_agents(threshold))
+
+    def _api_monitor_metrics(self, qs):
+        since = qs.get('since', [None])[0]
+        self._send_json(monitor_api.get_performance_metrics(since))
+
+    def _api_monitor_alerts(self):
+        self._send_json(monitor_api.get_active_alerts())
+
+    def _api_traces_list(self, qs):
+        agent_id = qs.get('agent_id', [None])[0]
+        since = qs.get('since', [None])[0]
+        limit = int(qs.get('limit', ['50'])[0])
+        self._send_json(trace_api.get_trace_summary(agent_id, since, limit))
+
+    def _api_traces_get(self, path):
+        trace_id = path.split('/')[-1]
+        self._send_json(trace_api.get_trace_tree(trace_id))
+
+    def _api_traces_tree(self, path):
+        trace_id = path.split('/')[-2]
+        self._send_json(trace_api.get_trace_tree(trace_id))
+
+    def _api_traces_spans(self, path, qs):
+        trace_id = path.split('/')[-2]
+        span_type = qs.get('type', ['SESSION'])[0]
+        self._send_json(trace_api.get_trace_span(trace_id, span_type))
+
+    def _api_tools_list(self, qs):
+        namespace = qs.get('namespace', [None])[0]
+        tool_type = qs.get('type', [None])[0]
+        self._send_json(tool_registry.list_tools(namespace, tool_type))
+
+    def _api_tools_get(self, path):
+        tool_id = path.split('/')[-1]
+        tool = tool_registry.get_tool(tool_id)
+        if tool:
+            self._send_json(tool)
+        else:
+            self._send_error(404, 'Tool not found')
+
+    def _api_tools_import_openapi(self):
+        body = self._read_body()
+        data = json.loads(body)
+        spec = data.get('spec')
+        namespace = data.get('namespace', 'default')
+        if not spec:
+            self._send_json({'error': 'spec required'}, 400)
+            return
+        ids = tool_registry.import_openapi(spec, namespace)
+        self._send_json({'imported': ids, 'count': len(ids)}, 201)
+
+    def _api_tools_import_url(self):
+        body = self._read_body()
+        data = json.loads(body)
+        url = data.get('url')
+        namespace = data.get('namespace', 'default')
+        auth_header = data.get('auth_header')
+        if not url:
+            self._send_json({'error': 'url required'}, 400)
+            return
+        ids = tool_registry.import_from_url(url, namespace, auth_header)
+        self._send_json({'imported': ids, 'count': len(ids)}, 201)
+
+    def _api_tool_chains_list(self):
+        self._send_json(tool_registry.list_tool_chains())
+
+    def _api_tool_chain_create(self):
+        body = self._read_body()
+        data = json.loads(body)
+        chain_id = tool_registry.create_tool_chain(
+            name=data['name'], steps=data['steps'], description=data.get('description'),
+        )
+        self._send_json({'chain_id': chain_id}, 201)
+
+    def _api_events_pending(self, qs):
+        agent_id = qs.get('agent_id', [None])[0]
+        if not agent_id:
+            self._send_json({'error': 'agent_id required'}, 400)
+            return
+        self._send_json(event_bus.get_pending_events(agent_id))
+
+    def _api_events_publish(self):
+        body = self._read_body()
+        data = json.loads(body)
+        event_id = event_bus.publish_event(
+            event_type=data['event_type'], source_id=data.get('source_id'),
+            source_type=data.get('source_type'), payload=data.get('payload'),
+        )
+        self._send_json({'event_id': event_id}, 201)
+
+    def _api_events_subscribe(self):
+        body = self._read_body()
+        data = json.loads(body)
+        sub_id = event_bus.subscribe_agent(
+            agent_id=data['agent_id'], event_type=data['event_type'],
+            filter_pattern=data.get('filter_pattern'),
+        )
+        self._send_json({'sub_id': sub_id}, 201)
+
+    def _api_events_subscriptions(self, qs):
+        agent_id = qs.get('agent_id', [None])[0]
+        self._send_json(event_bus.get_subscriptions(agent_id))
+
+    def _api_agents_discover(self, qs):
+        capability = qs.get('capability', [None])[0]
+        if capability:
+            self._send_json(event_bus.discover_agents_by_capability(capability))
+        else:
+            skill_id = qs.get('skill_id', [None])[0]
+            if skill_id:
+                self._send_json(event_bus.match_skill_to_agents(skill_id))
+            else:
+                task = qs.get('task', [None])[0]
+                if task:
+                    self._send_json(event_bus.recommend_agents(task))
+                else:
+                    self._send_json({'error': 'capability, skill_id, or task required'}, 400)
+
+    def _api_orch_pipeline(self):
+        body = self._read_body()
+        data = json.loads(body)
+        plan_id = orchestrator.create_pipeline(
+            step_ids=data['step_ids'], mode=data.get('mode', 'SEQUENTIAL'),
+        )
+        self._send_json({'plan_id': plan_id}, 201)
+
+
+
 SIM_REPLIES = {
     'hello': 'Hello! I am your AI Agent. How can I help you today?',
     '你好': '你好！我是你的 AI Agent，有什么可以帮你的吗？',
@@ -2310,3 +2583,6 @@ def main():
 if __name__ == '__main__':
     signal.signal(signal.SIGPIPE, signal.SIG_IGN)
     main()
+
+# v3.7.4 Handler methods (appended)
+# These are stub implementations that delegate to the API modules
