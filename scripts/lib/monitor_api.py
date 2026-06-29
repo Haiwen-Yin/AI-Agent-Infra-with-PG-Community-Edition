@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Monitoring & Observability
+"""AI Agent Infra v3.7.5 - PG Community Edition - Monitoring & Observability
 
 Agent health dashboard, system overview, stalled detection,
 performance metrics, and drift detection.
@@ -24,7 +24,7 @@ def get_agent_health(agent_id: Optional[str] = None) -> Dict[str, Any]:
         if not agent:
             return {"error": f"Agent not found: {agent_id}"}
         session = execute_query_one(
-            "SELECT * FROM AGENT_SESSION WHERE AGENT_ID = :aid AND IS_ACTIVE = 'Y' FETCH FIRST 1 ROWS ONLY",
+            "SELECT * FROM AGENT_SESSION WHERE AGENT_ID = :aid AND IS_ACTIVE = 'Y' LIMIT 1",
             {"aid": agent_id},
         )
         plan_count = execute_query_one(
@@ -79,7 +79,7 @@ def get_agent_health(agent_id: Optional[str] = None) -> Dict[str, Any]:
 def get_system_overview() -> Dict[str, Any]:
     total = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY")
     online = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY WHERE STATUS = 'ACTIVE'")
-    busy = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY WHERE STATUS = 'ACTIVE' AND LAST_ACTIVE_AT > SYSTIMESTAMP - INTERVAL '5' MINUTE")
+    busy = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY WHERE STATUS = 'ACTIVE' AND LAST_ACTIVE_AT > NOW() - INTERVAL '5 minutes'")
     pool = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY WHERE STATUS = 'POOL'")
     dormant = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY WHERE STATUS = 'DORMANT'")
     active_sessions = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_SESSION WHERE IS_ACTIVE = 'Y'")
@@ -109,11 +109,11 @@ def get_system_overview() -> Dict[str, Any]:
 def get_stalled_agents(threshold_minutes: int = 10) -> List[Dict[str, Any]]:
     rows = execute_query(
         f"""SELECT a.AGENT_ID, a.AGENT_NAME, a.STATUS, a.LAST_ACTIVE_AT,
-                  s.SESSION_ID, s.START_TIME
+                  s.SESSION_ID, s.created_at
            FROM AGENT_REGISTRY a
            LEFT JOIN AGENT_SESSION s ON s.AGENT_ID = a.AGENT_ID AND s.IS_ACTIVE = 'Y'
            WHERE a.STATUS = 'ACTIVE'
-             AND a.LAST_ACTIVE_AT < SYSTIMESTAMP - INTERVAL '{threshold_minutes}' MINUTE
+             AND a.LAST_ACTIVE_AT < NOW() - INTERVAL '{threshold_minutes}' MINUTE
            ORDER BY a.LAST_ACTIVE_AT ASC""",
     )
     return [sanitize_row(r) for r in rows]
@@ -133,19 +133,19 @@ def get_active_alerts(limit: int = 50) -> List[Dict[str, Any]]:
 
 def get_performance_metrics(since: Optional[str] = None) -> Dict[str, Any]:
     avg_session = execute_query_one(
-        "SELECT AVG((CAST(END_TIME AS DATE) - CAST(START_TIME AS DATE)) * 86400) AS VAL FROM AGENT_SESSION WHERE END_TIME IS NOT NULL AND START_TIME > SYSTIMESTAMP - NUMTODSINTERVAL(7, 'DAY')"
+        "SELECT AVG(EXTRACT(EPOCH FROM (last_active_at - created_at))) AS VAL FROM AGENT_SESSION WHERE last_active_at IS NOT NULL AND created_at > NOW() - INTERVAL '7 days'"
     )
     avg_loop = execute_query_one(
-        "SELECT AVG((CAST(COMPLETED_AT AS DATE) - CAST(STARTED_AT AS DATE)) * 86400) AS VAL FROM LOOP_RUNS WHERE COMPLETED_AT IS NOT NULL AND STARTED_AT > SYSTIMESTAMP - NUMTODSINTERVAL(7, 'DAY')"
+        "SELECT AVG(EXTRACT(EPOCH FROM (completed_at - started_at))) AS VAL FROM LOOP_RUNS WHERE completed_at IS NOT NULL AND started_at > NOW() - INTERVAL '7 days'"
     )
     avg_iterations = execute_query_one(
-        "SELECT AVG(ITERATION_COUNT) AS VAL FROM LOOP_RUNS WHERE STATUS = 'COMPLETED' AND STARTED_AT > SYSTIMESTAMP - NUMTODSINTERVAL(7, 'DAY')"
+        "SELECT AVG(ITERATION_COUNT) AS VAL FROM LOOP_RUNS WHERE STATUS = 'COMPLETED' AND started_at > NOW() - INTERVAL '7 days'"
     )
     avg_tool = execute_query_one(
-        "SELECT AVG(DURATION_MS) AS VAL FROM TASK_TOOL_CALLS WHERE CREATED_AT > SYSTIMESTAMP - NUMTODSINTERVAL(7, 'DAY')"
+        "SELECT AVG(DURATION_MS) AS VAL FROM TASK_TOOL_CALLS WHERE CREATED_AT > NOW() - INTERVAL '7 days'"
     )
     access_count = execute_query_one(
-        "SELECT COUNT(*) AS CNT FROM ENTITY_ACCESS_LOG WHERE ACCESS_TIME > SYSTIMESTAMP - NUMTODSINTERVAL(1, 'DAY')"
+        "SELECT COUNT(*) AS CNT FROM ENTITY_ACCESS_LOG WHERE access_time > NOW() - INTERVAL '1 day'"
     )
 
     def _val(row):
@@ -169,7 +169,7 @@ def detect_run_drift(
     rows = execute_query(
         f"""SELECT {metric} AS VAL FROM LOOP_RUNS
            WHERE LOOP_ID = :lid AND STATUS = 'COMPLETED'
-           ORDER BY STARTED_AT DESC FETCH FIRST :limit ROWS ONLY""",
+           ORDER BY STARTED_AT DESC LIMIT %s""",
         {"lid": loop_id, "limit": baseline_runs * 2},
     )
     if len(rows) < 3:
@@ -207,7 +207,7 @@ def detect_eval_drift(
            JOIN LOOP_RUNS r ON r.RUN_ID = i.RUN_ID
            WHERE r.AGENT_ID = :aid
            ORDER BY i.CREATED_AT DESC
-           FETCH FIRST :limit ROWS ONLY""",
+           LIMIT %s""",
         {"aid": agent_id, "limit": baseline_count * 2},
     )
     if len(rows) < 5:
@@ -240,7 +240,7 @@ def detect_iteration_bloat(
         """SELECT ITERATION_COUNT FROM LOOP_RUNS
            WHERE AGENT_ID = :aid AND STATUS = 'COMPLETED'
            ORDER BY STARTED_AT DESC
-           FETCH FIRST :limit ROWS ONLY""",
+           LIMIT %s""",
         {"aid": agent_id, "limit": baseline_count * 2},
     )
     if len(rows) < 5:

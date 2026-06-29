@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-pg-community
-version: v3.7.4
+version: v3.7.5
 author: Haiwen Yin
-description: "AI Agent Infra with PostgreSQL - Community Edition v3.7.4 - AI Agent的基础设施架构"
+description: "AI Agent Infra with PostgreSQL - Community Edition v3.7.5 - AI Agent的基础设施架构"
 tags: [postgresql, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, psycopg2, property-graph, apache-age, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, spec-driven, elastic-agent, collaboration, admin-agent-separation, pgvector, pg-cron, plpython3u, pgcrypto, row-security-policies]
 related_skills: [postgresql-18, psycopg2-execution-methodology]
 ---
 
-# AI Agent Infra with PostgreSQL - Community Edition v3.7.4
+# AI Agent Infra with PostgreSQL - Community Edition v3.7.5
 
 **Author:** Haiwen Yin
-**Version:** v3.7.4 - 2026-06-26
+**Version:** v3.7.5 - 2026-06-26
 **Website:** https://db4agent.top
 **License:** Apache License 2.0 (Community Edition)
 
@@ -20,7 +20,7 @@ related_skills: [postgresql-18, psycopg2-execution-methodology]
 
 **Minimum required version: PostgreSQL 18.3**
 
-v3.7.4 extends PostgreSQL features that require version 18.3 or later: pgvector for vector similarity search, Apache AGE for property graph queries, pgcrypto for in-database encryption, Row Security Policies for data isolation, and pg_cron for scheduled jobs.
+v3.7.5 extends PostgreSQL features that require version 18.3 or later: pgvector for vector similarity search, Apache AGE for property graph queries, pgcrypto for in-database encryption, Row Security Policies for data isolation, and pg_cron for scheduled jobs.
 
 ```sql
 SELECT version();
@@ -50,7 +50,7 @@ pip install psycopg2-binary>=2.9
 ## Architecture Overview
 
 ```
-AI Agent Infra with PostgreSQL — Community Edition v3.7.4
+AI Agent Infra with PostgreSQL — Community Edition v3.7.5
 │
 ├── ENTITIES (LIST partitioned by ENTITY_TYPE, 8 partitions)
 │   ├── P_MEMORY      — MEMORY
@@ -89,11 +89,11 @@ Five-plus-one-layer database access security model with Row Security Policies:
 
 ### Row Security Policies — Agent Usage Guide
 
-v3.7.4 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provides declarative row-level access control using `current_setting('app.current_agent_id', TRUE)` to enforce per-agent data filtering.
+v3.7.5 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provides declarative row-level access control using `current_setting('app.current_agent_id', TRUE)` to enforce per-agent data filtering.
 
 **Zero trust**: If no agent context is set, Row Security Policies return **no data**.
 
-#### Current Enforcement Status (v3.7.4)
+#### Current Enforcement Status (v3.7.5)
 
 | Security Mechanism | Deployed? | Enforcing? | Details |
 |---|---|---|---|
@@ -121,7 +121,7 @@ v3.7.4 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provi
 
 ## Admin/Agent Separation Architecture
 
-v3.7.4 introduces a mode system that separates Admin Agent (runs Web Portal, holds schema owner credentials) from Business Agent (independent process, only holds restricted user credentials).
+v3.7.5 introduces a mode system that separates Admin Agent (runs Web Portal, holds schema owner credentials) from Business Agent (independent process, only holds restricted user credentials).
 
 ### Modes
 

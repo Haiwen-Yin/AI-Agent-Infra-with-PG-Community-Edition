@@ -6048,7 +6048,7 @@ CREATE POLICY wt_agent_isolation ON public.workspace_tasks USING ((EXISTS ( SELE
 
 
 -- ============================================================================
--- Loop Engineering Tables [NEW v3.7.4]
+-- Loop Engineering Tables [NEW v3.7.5]
 -- ============================================================================
 
 -- Add LOOP_DEFINITION to entities type constraint
@@ -6227,8 +6227,8 @@ CREATE INDEX IF NOT EXISTS idx_ts_completion ON public.task_steps(step_completio
 \unrestrict VcAj5J5oNBrPslUHp6nHjRhkrqhnWbVSvhjvs2bkENgycNjLKIqFnra5ZxcIB9j
 
 
--- v3.7.4 Extensions
-PROMPT v3.7.4 Extensions: Agent Communication, Orchestration, Events, Observability, Tools
+-- v3.7.5 Extensions
+PROMPT v3.7.5 Extensions: Agent Communication, Orchestration, Events, Observability, Tools
 PROMPT ============================================================
 
 -- D5: Add TRACE_ID columns for distributed tracing
@@ -6263,7 +6263,7 @@ CREATE INDEX IDX_HM_NS ON HARNESS_META(TOOL_NAMESPACE);
 CREATE INDEX IDX_HM_SOURCE ON HARNESS_META(TOOL_SOURCE);
 
 PROMPT ============================================================
-PROMPT 35. COLLAB_MESSAGES (Non-Partitioned) [NEW v3.7.4]
+PROMPT 35. COLLAB_MESSAGES (Non-Partitioned) [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE TABLE COLLAB_MESSAGES (
@@ -6289,7 +6289,7 @@ CREATE TABLE COLLAB_MESSAGES (
     CONSTRAINT FK_CM_ATTACHMENT FOREIGN KEY (ATTACHMENT_ENTITY_ID) REFERENCES ENTITIES(ENTITY_ID),
     CONSTRAINT CK_CM_TYPE CHECK (MESSAGE_TYPE IN ('TEXT','QUERY','RESPONSE','ALERT','NOTIFICATION','COMMAND','REPORT')),
     CONSTRAINT CK_CM_PRIORITY CHECK (PRIORITY IN ('LOW','NORMAL','HIGH','URGENT')),
-    CONSTRAINT CK_CM_STATUS CHECK (STATUS IN ('SENT','DELIVERED','READ','FAILED'))
+    CONSTRAINT CK_CM_STATUS CHECK (STATUS IN ('SENT','DELIVERED','READ','DELETED'))
 );
 CREATE INDEX IDX_CM_GROUP ON COLLAB_MESSAGES(GROUP_ID, CREATED_AT DESC);
 CREATE INDEX IDX_CM_RECEIVER ON COLLAB_MESSAGES(RECEIVER_AGENT_ID, STATUS, CREATED_AT DESC);
@@ -6297,7 +6297,7 @@ CREATE INDEX IDX_CM_SENDER ON COLLAB_MESSAGES(SENDER_AGENT_ID, CREATED_AT DESC);
 CREATE INDEX IDX_CM_THREAD ON COLLAB_MESSAGES(THREAD_ID, CREATED_AT);
 
 PROMPT ============================================================
-PROMPT 36. STEP_RETRY_POLICY (Non-Partitioned) [NEW v3.7.4]
+PROMPT 36. STEP_RETRY_POLICY (Non-Partitioned) [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE TABLE STEP_RETRY_POLICY (
@@ -6317,7 +6317,7 @@ CREATE TABLE STEP_RETRY_POLICY (
 CREATE INDEX IDX_SRP_STEP ON STEP_RETRY_POLICY(STEP_ID);
 
 PROMPT ============================================================
-PROMPT 37. STEP_EXECUTION_PLAN (Non-Partitioned) [NEW v3.7.4]
+PROMPT 37. STEP_EXECUTION_PLAN (Non-Partitioned) [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE TABLE STEP_EXECUTION_PLAN (
@@ -6341,7 +6341,7 @@ CREATE INDEX IDX_SEP_PLAN ON STEP_EXECUTION_PLAN(ROOT_PLAN_ID, STEP_ORDER);
 CREATE INDEX IDX_SEP_STATUS ON STEP_EXECUTION_PLAN(STATUS);
 
 PROMPT ============================================================
-PROMPT 38. EVENT_LOG (Non-Partitioned) [NEW v3.7.4]
+PROMPT 38. EVENT_LOG (Non-Partitioned) [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE TABLE EVENT_LOG (
@@ -6356,7 +6356,7 @@ CREATE INDEX IDX_EL_TYPE ON EVENT_LOG(EVENT_TYPE, CREATED_AT DESC);
 CREATE INDEX IDX_EL_SOURCE ON EVENT_LOG(SOURCE_ID, EVENT_TYPE);
 
 PROMPT ============================================================
-PROMPT 39. EVENT_SUBSCRIPTIONS (Non-Partitioned) [NEW v3.7.4]
+PROMPT 39. EVENT_SUBSCRIPTIONS (Non-Partitioned) [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE TABLE EVENT_SUBSCRIPTIONS (
@@ -6373,7 +6373,7 @@ CREATE TABLE EVENT_SUBSCRIPTIONS (
 CREATE INDEX IDX_ES_EVENT ON EVENT_SUBSCRIPTIONS(EVENT_TYPE, ENABLED);
 
 PROMPT ============================================================
-PROMPT 40. AGENT_CAPABILITY_INDEX (Non-Partitioned) [NEW v3.7.4]
+PROMPT 40. AGENT_CAPABILITY_INDEX (Non-Partitioned) [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE TABLE AGENT_CAPABILITY_INDEX (
@@ -6389,7 +6389,7 @@ CREATE INDEX IDX_ACI_CAP ON AGENT_CAPABILITY_INDEX(CAPABILITY);
 CREATE INDEX IDX_ACI_AGENT ON AGENT_CAPABILITY_INDEX(AGENT_ID);
 
 PROMPT ============================================================
-PROMPT 41. TOOL_REGISTRY (Non-Partitioned) [NEW v3.7.4]
+PROMPT 41. TOOL_REGISTRY (Non-Partitioned) [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE TABLE TOOL_REGISTRY (
@@ -6416,7 +6416,7 @@ CREATE INDEX IDX_TR_TYPE ON TOOL_REGISTRY(TOOL_TYPE);
 CREATE INDEX IDX_TR_STATUS ON TOOL_REGISTRY(STATUS);
 
 PROMPT ============================================================
-PROMPT 42. TOOL_CHAINS (Non-Partitioned) [NEW v3.7.4]
+PROMPT 42. TOOL_CHAINS (Non-Partitioned) [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE TABLE TOOL_CHAINS (
@@ -6429,7 +6429,7 @@ CREATE TABLE TOOL_CHAINS (
 );
 
 PROMPT ============================================================
-PROMPT 43. TOOL_CHAIN_STEPS (Non-Partitioned) [NEW v3.7.4]
+PROMPT 43. TOOL_CHAIN_STEPS (Non-Partitioned) [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE TABLE TOOL_CHAIN_STEPS (

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - PG Community Edition - Admin/Agent Separation Tests
+"""AI Agent Infra v3.7.5 - PG Community Edition - Admin/Agent Separation Tests
 
 Tests for admin token management, credential distribution,
 agent registration via admin, recovery codes, agent recovery,

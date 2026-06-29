@@ -1,3 +1,21 @@
+## [3.7.5] - 2026-06-28
+
+### Summary
+
+Critical bug fix release for PostgreSQL editions. Fixes connection layer and SQL compatibility issues that prevented PG editions from functioning.
+
+### Fixed - PG COM/ENT
+
+- **connection.py**: Complete rewrite from `oracledb` to `psycopg2`; adapted to PG `DatabaseConfig` fields; implemented `_convert_params()` for bind variable translation; implemented `execute_insert_returning_id()` for PG `RETURNING` clause
+- **Oracle SQL to PostgreSQL migration**: 10 modules updated - `RAWTOHEX(SYS_GUID())` to `gen_random_uuid()::text`, `SYSTIMESTAMP` to `NOW()`, `FETCH FIRST N ROWS ONLY` to `LIMIT N`, `FROM DUAL` removed, `RETURNING INTO` to `RETURNING`, `TO_VECTOR` to `::vector`, `NUMTODSINTERVAL` to `INTERVAL`
+- **monitor_api.py**: Fixed column names `START_TIME` to `created_at`, `END_TIME` to `last_active_at`; adapted performance metrics SQL to PG syntax
+- **orchestrator.py**: `execute_step_with_retry` now queries actual TASK_STEPS and checks LOOP_RUNS status
+- **event_bus.py**: Webhook retry/backoff; Script `shell=True` replaced with `shlex.split()`
+- **message_api.py**: Soft-delete `STATUS='FAILED'` to `STATUS='DELETED'`; CK_CM_STATUS constraint updated
+- **loop_api.py**: Added missing `logger` import for `_fire_hooks`
+
+---
+
 ## [3.7.4] - 2026-06-26
 
 ### Summary

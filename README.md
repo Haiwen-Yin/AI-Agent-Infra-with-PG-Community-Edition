@@ -1,15 +1,15 @@
-# AI Agent Infra with PostgreSQL - Community Edition v3.7.4
+# AI Agent Infra with PostgreSQL - Community Edition v3.7.5
 
-[![Version](https://img.shields.io/badge/version-v3.7.4-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.7.5-blue.svg)](CHANGELOG.md)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.3-blue.svg)](https://www.postgresql.org/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on PostgreSQL 18.3.**
 
-> **v3.7.4 (2026-06-26): 6 Expansions — Agent Communication Protocol (COLLAB_MESSAGES), Multi-Agent Orchestration (DAG engine, fan-out/in), Event-Driven Architecture (publish/subscribe, LOOP_HOOKS), Advanced Memory Management (consolidation/merge/reindex), Observability (TRACE_ID/health dashboard/drift detection), Tool Ecosystem (OpenAPI auto-import/TOOL_REGISTRY).** 历史版本信息详见 [CHANGELOG.md](CHANGELOG.md)。
+> **v3.7.5 (2026-06-28): Bug Fixes — connection.py rewrite (oracledb to psycopg2), 10 modules Oracle SQL to PostgreSQL migration, monitor_api column fixes, orchestrator stub fix, event_bus security, message_api DELETED status.** 历史版本信息详见 [CHANGELOG.md](CHANGELOG.md)。
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.4.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.5.md)**
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
@@ -300,7 +300,7 @@ ai-agent-infra-pg-community/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.7.4
+      server.py                 # HTTP server v3.7.5
       templates/                # 14 HTML templates
       static/                   # style.css + vis-network.min.js
   docs/

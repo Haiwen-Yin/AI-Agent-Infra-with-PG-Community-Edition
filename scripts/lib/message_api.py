@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Agent Communication Protocol
+"""AI Agent Infra v3.7.5 - PG Community Edition - Agent Communication Protocol
 
 Inter-agent messaging for collaboration groups. Supports direct messages,
 broadcast, threaded replies, priority levels, and attachment references.
@@ -56,10 +56,10 @@ def send_message(
            (MESSAGE_ID, GROUP_ID, SENDER_AGENT_ID, RECEIVER_AGENT_ID,
             PARENT_MESSAGE_ID, THREAD_ID, SUBJECT, BODY,
             MESSAGE_TYPE, PRIORITY, STATUS, ATTACHMENT_ENTITY_ID)
-           VALUES (RAWTOHEX(SYS_GUID()), :gid, :sender, :receiver,
+           VALUES (gen_random_uuid()::text, :gid, :sender, :receiver,
                    :parent, :thread, :subject, :body,
                    :mtype, :priority, 'SENT', :attach)
-           RETURNING MESSAGE_ID INTO :ret_id""",
+           RETURNING MESSAGE_ID """,
         {
             "gid": group_id, "sender": sender_agent_id, "receiver": receiver_agent_id,
             "parent": parent_message_id, "thread": thread_id, "subject": subject,
@@ -137,7 +137,7 @@ def get_conversation(message_id: str) -> List[Dict[str, Any]]:
 def mark_read(message_id: str, agent_id: str) -> bool:
     affected = execute(
         """UPDATE COLLAB_MESSAGES
-           SET READ_AT = SYSTIMESTAMP, STATUS = 'READ'
+           SET READ_AT = NOW(), STATUS = 'READ'
            WHERE MESSAGE_ID = :mid
              AND (RECEIVER_AGENT_ID = :aid OR RECEIVER_AGENT_ID IS NULL)""",
         {"mid": message_id, "aid": agent_id},
@@ -215,7 +215,7 @@ def broadcast_message(
 
 def delete_message(message_id: str, agent_id: str) -> bool:
     affected = execute(
-        """UPDATE COLLAB_MESSAGES SET STATUS = 'FAILED'
+        """UPDATE COLLAB_MESSAGES SET STATUS = 'DELETED'
            WHERE MESSAGE_ID = :mid AND SENDER_AGENT_ID = :aid""",
         {"mid": message_id, "aid": agent_id},
     )
@@ -229,7 +229,7 @@ def get_group_inbox(group_id: str, agent_id: str, limit: int = 50) -> List[Dict[
               FROM COLLAB_MESSAGES m
               WHERE GROUP_ID = :gid
                 AND (RECEIVER_AGENT_ID = :aid OR RECEIVER_AGENT_ID IS NULL)
-                AND STATUS != 'FAILED'
+                AND STATUS != 'DELETED'
             ) WHERE rn <= :limit""",
         {"gid": group_id, "aid": agent_id, "limit": limit},
     )
@@ -240,7 +240,7 @@ def get_sent_messages(sender_agent_id: str, limit: int = 50) -> List[Dict[str, A
     rows = execute_query(
         """SELECT * FROM (
               SELECT m.*, ROW_NUMBER() OVER (ORDER BY CREATED_AT DESC) AS rn
-              FROM COLLAB_MESSAGES m WHERE SENDER_AGENT_ID = :aid AND STATUS != 'FAILED'
+              FROM COLLAB_MESSAGES m WHERE SENDER_AGENT_ID = :aid AND STATUS != 'DELETED'
             ) WHERE rn <= :limit""",
         {"aid": sender_agent_id, "limit": limit},
     )

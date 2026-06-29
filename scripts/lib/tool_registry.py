@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Tool Registry + DAG Chains
+"""AI Agent Infra v3.7.5 - PG Community Edition - Tool Registry + DAG Chains
 
 OpenAPI import, tool versioning, tool DAG composition.
 Tables: TOOL_REGISTRY, TOOL_CHAINS, TOOL_CHAIN_STEPS
@@ -51,9 +51,9 @@ def import_openapi(spec: Dict[str, Any], namespace: str) -> List[str]:
                 """INSERT INTO TOOL_REGISTRY
                    (TOOL_ID, TOOL_NAME, TOOL_NAMESPACE, TOOL_VERSION, DESCRIPTION,
                     INPUT_SCHEMA, OUTPUT_SCHEMA, TOOL_TYPE, STATUS)
-                   VALUES (RAWTOHEX(SYS_GUID()), :name, :ns, :ver, :descr,
+                   VALUES (gen_random_uuid()::text, :name, :ns, :ver, :descr,
                            :in_schema, :out_schema, 'API', 'ACTIVE')
-                   RETURNING TOOL_ID INTO :ret_id""",
+                   RETURNING TOOL_ID """,
                 {
                     "name": tool_name, "ns": namespace, "ver": version,
                     "descr": endpoint.get("summary", f"{method.upper()} {path}"),
@@ -115,7 +115,7 @@ def refresh_tool(tool_id: str, spec: Dict[str, Any]) -> bool:
     if not tool:
         return False
     affected = execute(
-        """UPDATE TOOL_REGISTRY SET OUTPUT_SCHEMA = :schema, UPDATED_AT = SYSTIMESTAMP
+        """UPDATE TOOL_REGISTRY SET OUTPUT_SCHEMA = :schema, UPDATED_AT = NOW()
            WHERE TOOL_ID = :tid""",
         {"schema": json.dumps(spec), "tid": tool_id},
     )
@@ -124,7 +124,7 @@ def refresh_tool(tool_id: str, spec: Dict[str, Any]) -> bool:
 
 def delete_tool(tool_id: str) -> bool:
     affected = execute(
-        "UPDATE TOOL_REGISTRY SET STATUS = 'RETIRED', UPDATED_AT = SYSTIMESTAMP WHERE TOOL_ID = :tid",
+        "UPDATE TOOL_REGISTRY SET STATUS = 'RETIRED', UPDATED_AT = NOW() WHERE TOOL_ID = :tid",
         {"tid": tool_id},
     )
     return affected > 0
@@ -133,8 +133,8 @@ def delete_tool(tool_id: str) -> bool:
 def create_tool_chain(name: str, steps: List[Dict[str, Any]], description: Optional[str] = None) -> str:
     chain_id = execute_insert_returning_id(
         """INSERT INTO TOOL_CHAINS (CHAIN_ID, CHAIN_NAME, DESCRIPTION)
-           VALUES (RAWTOHEX(SYS_GUID()), :name, :descr)
-           RETURNING CHAIN_ID INTO :ret_id""",
+           VALUES (gen_random_uuid()::text, :name, :descr)
+           RETURNING CHAIN_ID """,
         {"name": name, "descr": description},
     )
     for order, step in enumerate(steps, 1):
@@ -142,7 +142,7 @@ def create_tool_chain(name: str, steps: List[Dict[str, Any]], description: Optio
             """INSERT INTO TOOL_CHAIN_STEPS
                (CHAIN_STEP_ID, CHAIN_ID, STEP_ORDER, TOOL_ID,
                 INPUT_MAPPING, OUTPUT_MAPPING, PARALLEL_GROUP, TIMEOUT_SECONDS)
-               VALUES (RAWTOHEX(SYS_GUID()), :cid, :p_order, :tid,
+               VALUES (gen_random_uuid()::text, :cid, :p_order, :tid,
                        :in_map, :out_map, :pgroup, :timeout)""",
             {
                 "cid": chain_id, "p_order": order,
@@ -179,7 +179,7 @@ def list_tool_chains(limit: int = 50) -> List[Dict[str, Any]]:
     rows = execute_query(
         """SELECT c.*, (SELECT COUNT(*) FROM TOOL_CHAIN_STEPS s WHERE s.CHAIN_ID = c.CHAIN_ID) AS step_count
            FROM TOOL_CHAINS c ORDER BY c.CREATED_AT DESC
-           FETCH FIRST :limit ROWS ONLY""",
+           LIMIT %s""",
         {"limit": limit},
     )
     return [_row_to_dict(r) for r in rows]
@@ -195,7 +195,7 @@ def delete_tool_chain(chain_id: str) -> bool:
 
 def record_tool_call(tool_id: str) -> bool:
     affected = execute(
-        """UPDATE TOOL_REGISTRY SET CALL_COUNT = CALL_COUNT + 1, LAST_CALLED_AT = SYSTIMESTAMP
+        """UPDATE TOOL_REGISTRY SET CALL_COUNT = CALL_COUNT + 1, LAST_CALLED_AT = NOW()
            WHERE TOOL_ID = :tid""",
         {"tid": tool_id},
     )

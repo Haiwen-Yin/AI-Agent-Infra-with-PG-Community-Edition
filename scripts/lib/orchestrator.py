@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Multi-Agent Orchestration
+"""AI Agent Infra v3.7.5 - PG Community Edition - Multi-Agent Orchestration
 
 DAG execution engine, fan-out/fan-in, pipeline orchestration,
 and retry policies for task steps.
@@ -88,7 +88,7 @@ def resolve_dag(plan_id: str) -> List[Dict[str, Any]]:
         for sid in group["steps"]:
             execute(
                 """INSERT INTO STEP_EXECUTION_PLAN (PLAN_ID, ROOT_PLAN_ID, STEP_GROUP_ID, STEP_ORDER, STEP_ID, STATUS)
-                   VALUES (RAWTOHEX(SYS_GUID()), :root, :gid, :p_order, :sid, 'PENDING')""",
+                   VALUES (gen_random_uuid()::text, :root, :gid, :p_order, :sid, 'PENDING')""",
                 {"root": plan_id, "gid": group["parallel_group"],
                  "order": group["parallel_group"], "sid": sid},
             )
@@ -192,7 +192,7 @@ def create_pipeline(step_ids: List[str], mode: str = "SEQUENTIAL") -> str:
         raise ValueError(f"Unknown pipeline mode: {mode}")
 
     plan_id = execute_insert_returning_id(
-        "INSERT INTO TASK_PLANS (PLAN_ID, AGENT_ID, GOAL, STRATEGY, STATUS) VALUES (RAWTOHEX(SYS_GUID()), 'SYSTEM', 'Pipeline', :p_mode, 'PENDING') RETURNING PLAN_ID INTO :ret_id",
+        "INSERT INTO TASK_PLANS (PLAN_ID, AGENT_ID, GOAL, STRATEGY, STATUS) VALUES (gen_random_uuid()::text, 'SYSTEM', 'Pipeline', :p_mode, 'PENDING') RETURNING PLAN_ID ",
         {"p_mode": mode},
     )
 
@@ -200,7 +200,7 @@ def create_pipeline(step_ids: List[str], mode: str = "SEQUENTIAL") -> str:
         parallel_group = 1 if mode == "PARALLEL" else order
         execute(
             """INSERT INTO STEP_EXECUTION_PLAN (PLAN_ID, ROOT_PLAN_ID, STEP_GROUP_ID, STEP_ORDER, STEP_ID, STATUS)
-               VALUES (RAWTOHEX(SYS_GUID()), :root, :gid, :p_order, :sid, 'PENDING')""",
+               VALUES (gen_random_uuid()::text, :root, :gid, :p_order, :sid, 'PENDING')""",
             {"root": plan_id, "gid": parallel_group, "p_order": order, "sid": step_id},
         )
     return plan_id
@@ -218,8 +218,8 @@ def add_retry_policy(
         """INSERT INTO STEP_RETRY_POLICY
            (POLICY_ID, STEP_ID, MAX_RETRIES, BACKOFF_SECONDS, BACKOFF_MULTIPLIER,
             TIMEOUT_SECONDS, FALLBACK_ACTION, RETRY_COUNT)
-           VALUES (RAWTOHEX(SYS_GUID()), :sid, :max_r, :bo_sec, :bo_mult,
-                   :timeout, :fallback, 0) RETURNING POLICY_ID INTO :ret_id""",
+           VALUES (gen_random_uuid()::text, :sid, :max_r, :bo_sec, :bo_mult,
+                   :timeout, :fallback, 0) RETURNING POLICY_ID """,
         {"sid": step_id, "max_r": max_retries, "bo_sec": backoff_seconds,
          "bo_mult": backoff_multiplier, "timeout": timeout_seconds, "fallback": fallback_action},
     )
@@ -254,23 +254,40 @@ def execute_step_with_retry(step_id: str) -> bool:
     timeout = policy.get("timeout_seconds") if policy else None
     fallback = policy.get("fallback_action", "FAIL") if policy else "FAIL"
 
+    step = execute_query_one(
+        "SELECT * FROM TASK_STEPS WHERE STEP_ID = :sid",
+        {"sid": step_id},
+    )
+    if not step:
+        logger.error("Step %s not found", step_id)
+        return False
+
     for attempt in range(max_retries + 1):
         execute(
-            "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'RUNNING', STARTED_AT = SYSTIMESTAMP WHERE STEP_ID = :sid AND STATUS = 'PENDING'",
+            "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'RUNNING', STARTED_AT = NOW() WHERE STEP_ID = :sid AND STATUS = 'PENDING'",
             {"sid": step_id},
         )
         try:
+            loop_id = step.get("loop_id")
+            if loop_id:
+                from . import loop_api
+                runs = loop_api.get_runs_for_loop(loop_id)
+                active_runs = [r for r in runs if r.get("status") == "RUNNING"]
+                if active_runs:
+                    logger.info("Step %s waiting for loop %s to complete", step_id, loop_id)
+                    continue
+
             execute(
-                "UPDATE TASK_STEPS SET STATUS = 'SUCCESS', COMPLETED_AT = SYSTIMESTAMP WHERE STEP_ID = :sid",
+                "UPDATE TASK_STEPS SET STATUS = 'SUCCESS', COMPLETED_AT = NOW() WHERE STEP_ID = :sid",
                 {"sid": step_id},
             )
             execute(
-                "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'COMPLETED', COMPLETED_AT = SYSTIMESTAMP WHERE STEP_ID = :sid",
+                "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'COMPLETED', COMPLETED_AT = NOW() WHERE STEP_ID = :sid",
                 {"sid": step_id},
             )
             if policy:
                 execute(
-                    "UPDATE STEP_RETRY_POLICY SET RETRY_COUNT = :cnt, LAST_RETRY_AT = SYSTIMESTAMP WHERE POLICY_ID = :pid",
+                    "UPDATE STEP_RETRY_POLICY SET RETRY_COUNT = :cnt, LAST_RETRY_AT = NOW() WHERE POLICY_ID = :pid",
                     {"cnt": attempt, "pid": policy["policy_id"]},
                 )
             return True
@@ -282,7 +299,7 @@ def execute_step_with_retry(step_id: str) -> bool:
                 time.sleep(wait)
                 if policy:
                     execute(
-                        "UPDATE STEP_RETRY_POLICY SET RETRY_COUNT = :cnt, LAST_RETRY_AT = SYSTIMESTAMP WHERE POLICY_ID = :pid",
+                        "UPDATE STEP_RETRY_POLICY SET RETRY_COUNT = :cnt, LAST_RETRY_AT = NOW() WHERE POLICY_ID = :pid",
                         {"cnt": attempt + 1, "pid": policy["policy_id"]},
                     )
             else:

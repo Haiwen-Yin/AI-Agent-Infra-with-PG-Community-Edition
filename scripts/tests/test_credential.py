@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - PG Community Edition - Credential & Config Tests"""
+"""AI Agent Infra v3.7.5 - PG Community Edition - Credential & Config Tests"""
 
 import sys
 import os

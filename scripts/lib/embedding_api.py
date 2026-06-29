@@ -120,7 +120,7 @@ def store_embedding(
         if count > 0:
             sql = """
                 UPDATE ENTITY_EMBEDDINGS
-                SET EMBEDDING = TO_VECTOR(:vec),
+                SET EMBEDDING = :vec::vector,
                     EMBEDDING_MODEL = :model,
                     EMBEDDING_DIM = :dim
                 WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
@@ -132,7 +132,7 @@ def store_embedding(
                 with conn.cursor() as cur:
                     cur.execute("""
                         INSERT INTO ENTITY_EMBEDDINGS (ENTITY_ID, ENTITY_TYPE, EMBEDDING, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT)
-                        VALUES (:eid, :etype, TO_VECTOR(:vec), :model, :dim, SYSTIMESTAMP)
+                        VALUES (:eid, :etype, :vec::vector, :model, :dim, NOW())
                     """, {"eid": entity_id, "etype": entity_type, "vec": vec_str, "model": model, "dim": dimension})
                     conn.commit()
         logger.info(f"Stored embedding for {entity_type}:{entity_id} ({dimension}d, {model})")
@@ -164,7 +164,7 @@ def store_embedding_vector(
         if count > 0:
             sql = """
                 UPDATE ENTITY_EMBEDDINGS
-                SET EMBEDDING = TO_VECTOR(:vec),
+                SET EMBEDDING = :vec::vector,
                     EMBEDDING_MODEL = :model,
                     EMBEDDING_DIM = :dim
                 WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
@@ -176,7 +176,7 @@ def store_embedding_vector(
                 with conn.cursor() as cur:
                     cur.execute("""
                         INSERT INTO ENTITY_EMBEDDINGS (ENTITY_ID, ENTITY_TYPE, EMBEDDING, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT)
-                        VALUES (:eid, :etype, TO_VECTOR(:vec), :model, :dim, SYSTIMESTAMP)
+                        VALUES (:eid, :etype, :vec::vector, :model, :dim, NOW())
                     """, {"eid": entity_id, "etype": entity_type, "vec": vec_str, "model": model, "dim": dimension})
                     conn.commit()
         logger.info(f"Stored embedding vector for {entity_type}:{entity_id} ({dimension}d)")
@@ -241,12 +241,12 @@ def search_similar(
     where = " ".join(conditions)
     sql = f"""
         SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CATEGORY,
-               VECTOR_DISTANCE(em.EMBEDDING, TO_VECTOR(:vec), COSINE) AS distance
+               VECTOR_DISTANCE(em.EMBEDDING, :vec::vector, COSINE) AS distance
         FROM ENTITY_EMBEDDINGS em
         JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
         WHERE 1=1 {where}
         ORDER BY distance ASC
-        FETCH FIRST :k ROWS ONLY
+        LIMIT %s
     """
 
     try:
@@ -284,7 +284,7 @@ def generate_embeddings_batch(
           )
           AND e.TITLE IS NOT NULL
         ORDER BY e.CREATED_AT DESC
-        FETCH FIRST :lim ROWS ONLY
+        LIMIT %s
     """
 
     try:
@@ -370,7 +370,7 @@ def search_by_entity_id(
             JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
             WHERE em.ENTITY_ID != :eid {ws_filter}
             ORDER BY distance ASC
-            FETCH FIRST :k ROWS ONLY
+            LIMIT %s
         """
         params = {"eid": entity_id, "etype": entity_type, "k": top_k}
         if workspace_id:
@@ -422,12 +422,12 @@ def search_hybrid(
     where = " ".join(conditions)
     sql = f"""
         SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CATEGORY,
-               VECTOR_DISTANCE(em.EMBEDDING, TO_VECTOR(:vec), COSINE) AS distance
+               VECTOR_DISTANCE(em.EMBEDDING, :vec::vector, COSINE) AS distance
         FROM ENTITY_EMBEDDINGS em
         JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
         WHERE 1=1 {where}
         ORDER BY distance ASC
-        FETCH FIRST :k ROWS ONLY
+        LIMIT %s
     """
 
     try:
@@ -507,7 +507,7 @@ def search_fulltext(
         FROM ENTITIES e
         WHERE CONTAINS(e.TITLE, :ftq, 1) > 0 {where}
         ORDER BY ft_score DESC
-        FETCH FIRST :k ROWS ONLY
+        LIMIT %s
     """
 
     try:
@@ -565,7 +565,7 @@ def search_unified(
     sql = f"""
         SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CONTENT, e.CATEGORY, e.IMPORTANCE,
                e.WORKSPACE_ID,
-               VECTOR_DISTANCE(em.EMBEDDING, TO_VECTOR(:vec), COSINE) AS vec_distance,
+               VECTOR_DISTANCE(em.EMBEDDING, :vec::vector, COSINE) AS vec_distance,
                CASE WHEN CONTAINS(e.TITLE, :ftq, 1) > 0 THEN SCORE(1) ELSE 0 END AS ft_score,
                km.DOMAIN AS km_domain, km.TOPIC AS km_topic, km.DIFFICULTY AS km_difficulty,
                sm.SPEC_SCOPE AS sm_scope, sm.COMPLEXITY AS sm_complexity, sm.SPEC_STATUS AS sm_spec_status
@@ -575,7 +575,7 @@ def search_unified(
         LEFT JOIN SPEC_META sm ON sm.ENTITY_ID = e.ENTITY_ID AND sm.ENTITY_TYPE = e.ENTITY_TYPE
         WHERE 1=1 {where}
         ORDER BY vec_distance ASC
-        FETCH FIRST :k ROWS ONLY
+        LIMIT %s
     """
 
     try:
@@ -782,7 +782,7 @@ graph_prox AS (
 WITH candidates AS (
     SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CONTENT, e.CATEGORY, e.IMPORTANCE,
            e.WORKSPACE_ID,
-           VECTOR_DISTANCE(em.EMBEDDING, TO_VECTOR(:vec), COSINE) AS vec_distance,
+           VECTOR_DISTANCE(em.EMBEDDING, :vec::vector, COSINE) AS vec_distance,
            CASE WHEN CONTAINS(e.TITLE, :ftq, 1) > 0 THEN SCORE(1) ELSE 0 END AS ft_raw,
            km.DOMAIN AS km_domain, km.TOPIC AS km_topic, km.DIFFICULTY AS km_difficulty,
            sm.SPEC_SCOPE AS sm_scope, sm.COMPLEXITY AS sm_complexity, sm.SPEC_STATUS AS sm_spec_status
@@ -792,7 +792,7 @@ WITH candidates AS (
     LEFT JOIN SPEC_META sm ON sm.ENTITY_ID = e.ENTITY_ID AND sm.ENTITY_TYPE = e.ENTITY_TYPE
     WHERE 1=1 {filter_where}
     ORDER BY vec_distance ASC
-    FETCH FIRST :k ROWS ONLY
+    LIMIT %s
 ),
 edge_counts AS (
     SELECT SOURCE_ID AS ENTITY_ID, COUNT(*) AS edge_count
@@ -815,7 +815,7 @@ LEFT JOIN edge_counts ec ON ec.ENTITY_ID = c.ENTITY_ID
 {tag_join_left}
 {graph_join_left}
 ORDER BY final_score DESC
-FETCH FIRST :topk ROWS ONLY
+LIMIT :topk
 """
 
     try:
@@ -1037,7 +1037,7 @@ def _batch_edge_counts(entity_ids: List[str]) -> Dict[str, int]:
         return {}
 
 
-# -- D4: Advanced Embedding Management (v3.7.4) --
+# -- D4: Advanced Embedding Management (v3.7.5) --
 
 def reindex_entity(entity_id: str) -> bool:
     """Re-generate embedding for a single entity."""

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition (PG) - Web Visualization Server
+"""AI Agent Infra v3.7.5 - Community Edition (PG) - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -25,7 +25,7 @@ from lib import spec_api, collab_api, branch_api, loop_api
 from lib import message_api, orchestrator, event_bus, trace_api, monitor_api, tool_registry
 from lib import security, config, user_api
 
-VERSION = "3.7.4"
+VERSION = "3.7.5"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -727,7 +727,7 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_collab_branch(path, qs)
             elif path.startswith('/api/branch/'):
                 self._api_branch_get(path)
-            # v3.7.4 new routes
+            # v3.7.5 new routes
             elif path == '/api/collab/messages':
                 self._api_messages_list(qs)
             elif path == '/api/collab/messages/inbox':
@@ -2584,5 +2584,5 @@ if __name__ == '__main__':
     signal.signal(signal.SIGPIPE, signal.SIG_IGN)
     main()
 
-# v3.7.4 Handler methods (appended)
+# v3.7.5 Handler methods (appended)
 # These are stub implementations that delegate to the API modules

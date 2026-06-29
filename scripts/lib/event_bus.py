@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Event Bus + Hook Execution
+"""AI Agent Infra v3.7.5 - PG Community Edition - Event Bus + Hook Execution
 
 Event publishing, subscription management, and LOOP_HOOKS execution engine.
 Agent capability discovery.
@@ -39,8 +39,8 @@ def publish_event(
 ) -> str:
     return execute_insert_returning_id(
         """INSERT INTO EVENT_LOG (EVENT_ID, EVENT_TYPE, SOURCE_ID, SOURCE_TYPE, PAYLOAD)
-           VALUES (RAWTOHEX(SYS_GUID()), :etype, :sid, :stype, :payload)
-           RETURNING EVENT_ID INTO :ret_id""",
+           VALUES (gen_random_uuid()::text, :etype, :sid, :stype, :payload)
+           RETURNING EVENT_ID """,
         {
             "etype": event_type, "sid": source_id, "stype": source_type,
             "payload": json.dumps(payload) if payload else None,
@@ -62,7 +62,7 @@ def subscribe_agent(
 
     return execute_insert_returning_id(
         """INSERT INTO EVENT_SUBSCRIPTIONS (SUB_ID, AGENT_ID, EVENT_TYPE, FILTER_PATTERN)
-           VALUES (RAWTOHEX(SYS_GUID()), :aid, :etype, :filter) RETURNING SUB_ID INTO :ret_id""",
+           VALUES (gen_random_uuid()::text, :aid, :etype, :filter) RETURNING SUB_ID """,
         {"aid": agent_id, "etype": event_type, "filter": filter_pattern},
     )
 
@@ -85,7 +85,7 @@ def get_pending_events(agent_id: str, limit: int = 50) -> List[Dict[str, Any]]:
                WHERE e2.SOURCE_ID = :aid AND e2.EVENT_TYPE = 'ACK'
              )
            ORDER BY e.CREATED_AT DESC
-           FETCH FIRST :limit ROWS ONLY""",
+           LIMIT %s""",
         {"aid": agent_id, "limit": limit},
     )
     return [_row_to_dict(r) for r in rows]
@@ -142,13 +142,35 @@ def execute_hooks(loop_id: str, hook_event: str, context: Optional[Dict[str, Any
 
 def _execute_webhook(config_str: str, payload: str):
     import urllib.request
+    import urllib.error
     config = json.loads(config_str) if config_str else {}
     url = config.get("url")
     if not url:
         return
-    req = urllib.request.Request(url, data=payload.encode("utf-8"),
-                                 headers={"Content-Type": "application/json"}, method="POST")
-    urllib.request.urlopen(req, timeout=30)
+    headers = config.get("headers", {"Content-Type": "application/json"})
+    timeout = config.get("timeout", 30)
+    max_retries = config.get("retries", 3)
+
+    for attempt in range(max_retries):
+        try:
+            req = urllib.request.Request(url, data=payload.encode("utf-8"),
+                                         headers=headers, method="POST")
+            urllib.request.urlopen(req, timeout=timeout)
+            return
+        except urllib.error.HTTPError as e:
+            logger.warning("Webhook %s attempt %d failed: HTTP %d", url, attempt + 1, e.code)
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(2 ** attempt)
+            else:
+                raise
+        except urllib.error.URLError as e:
+            logger.warning("Webhook %s attempt %d failed: %s", url, attempt + 1, e)
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(2 ** attempt)
+            else:
+                raise
 
 
 def _execute_script(config_str: str, payload: str):
@@ -157,7 +179,21 @@ def _execute_script(config_str: str, payload: str):
     cmd = config.get("command")
     if not cmd:
         return
-    subprocess.run(cmd, shell=True, timeout=60, input=payload.encode(), capture_output=True)
+    args = config.get("args", [])
+    timeout = config.get("timeout", 60)
+    try:
+        if isinstance(args, list) and args:
+            subprocess.run(args, timeout=timeout, input=payload.encode(),
+                           capture_output=True, check=True)
+        else:
+            subprocess.run(cmd.split(), timeout=timeout, input=payload.encode(),
+                           capture_output=True, check=True)
+    except subprocess.TimeoutExpired:
+        logger.error("Script timeout after %ds: %s", timeout, cmd)
+        raise
+    except subprocess.CalledProcessError as e:
+        logger.error("Script failed with code %d: %s", e.returncode, e.stderr)
+        raise
 
 
 def _execute_notification(hook: Dict[str, Any], context: Optional[Dict[str, Any]]):
@@ -181,13 +217,13 @@ def register_capability(agent_id: str, capability: str, confidence: float = 1.0)
     )
     if existing:
         execute(
-            "UPDATE AGENT_CAPABILITY_INDEX SET CONFIDENCE = :conf, LAST_VERIFIED_AT = SYSTIMESTAMP WHERE CAP_ID = :cid",
+            "UPDATE AGENT_CAPABILITY_INDEX SET CONFIDENCE = :conf, LAST_VERIFIED_AT = NOW() WHERE CAP_ID = :cid",
             {"conf": confidence, "cid": existing["cap_id"]},
         )
         return existing["cap_id"]
     return execute_insert_returning_id(
         """INSERT INTO AGENT_CAPABILITY_INDEX (CAP_ID, AGENT_ID, CAPABILITY, CONFIDENCE, LAST_VERIFIED_AT)
-           VALUES (RAWTOHEX(SYS_GUID()), :aid, :cap, :conf, SYSTIMESTAMP) RETURNING CAP_ID INTO :ret_id""",
+           VALUES (gen_random_uuid()::text, :aid, :cap, :conf, NOW()) RETURNING CAP_ID """,
         {"aid": agent_id, "cap": capability, "conf": confidence},
     )
 
@@ -254,7 +290,7 @@ def recommend_agents(task_description: str, limit: int = 5) -> List[Dict[str, An
                JOIN AGENT_REGISTRY a ON a.AGENT_ID = c.AGENT_ID
                WHERE UPPER(c.CAPABILITY) LIKE :kw AND a.STATUS IN ('ACTIVE', 'POOL')
                ORDER BY c.CONFIDENCE DESC
-               FETCH FIRST :limit ROWS ONLY""",
+               LIMIT %s""",
             {"kw": f"%{kw.upper()}%", "limit": limit},
         )
         for r in rows:

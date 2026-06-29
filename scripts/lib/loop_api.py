@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Loop Engineering API
+"""AI Agent Infra v3.7.5 - PG Community Edition - Loop Engineering API
 
 Loop Engineering: design goal-driven autonomous feedback loops for AI agents.
 Each Loop definition is stored as an ENTITY (ENTITY_TYPE='LOOP_DEFINITION')
@@ -63,9 +63,9 @@ def create_loop(
         INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, SUMMARY, STATUS,
                               OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
                               IMPORTANCE, RETRIEVAL_COUNT, WORKSPACE_ID)
-        VALUES (RAWTOHEX(SYS_GUID()), 'LOOP_DEFINITION', :title, :summary, 'ACTIVE',
+        VALUES (gen_random_uuid()::text, 'LOOP_DEFINITION', :title, :summary, 'ACTIVE',
                 :owned_by_agent, :source_agent, :visibility, 5, 0, :workspace_id)
-        RETURNING ENTITY_ID INTO :ret_id
+        RETURNING ENTITY_ID 
     """, {
         "title": title, "summary": summary,
         "owned_by_agent": owned_by_agent, "source_agent": owned_by_agent,
@@ -115,7 +115,7 @@ def update_loop(loop_id: str, **kwargs: Any) -> bool:
             sets.append(f"{entity_fields[k]} = :{k}")
             params[k] = v
     if sets:
-        execute(f"UPDATE ENTITIES SET {', '.join(sets)}, UPDATED_AT = SYSTIMESTAMP "
+        execute(f"UPDATE ENTITIES SET {', '.join(sets)}, UPDATED_AT = NOW() "
                 f"WHERE ENTITY_ID = :id AND ENTITY_TYPE = 'LOOP_DEFINITION'", params)
         count += 1
     meta_fields = {"goal_definition", "stop_conditions", "evaluation_config", "trigger_config"}
@@ -161,7 +161,7 @@ def list_loops(status: Optional[str] = None, agent_id: Optional[str] = None,
         sql += " AND m.COLLAB_GROUP_ID = :collab_group_id"; params["collab_group_id"] = collab_group_id
     if spec_id:
         sql += " AND m.SPEC_ID = :spec_id_filter"; params["spec_id_filter"] = spec_id
-    sql += " ORDER BY e.CREATED_AT DESC FETCH FIRST :limit ROWS ONLY"
+    sql += " ORDER BY e.CREATED_AT DESC LIMIT %s"
     return [_row_to_dict(r) for r in execute_query(sql, params)]
 
 
@@ -174,9 +174,9 @@ def start_run(loop_id: str, agent_id: str, trigger_type: str = "MANUAL",
         INSERT INTO LOOP_RUNS (RUN_ID, LOOP_ID, AGENT_ID, TRIGGER_TYPE, TRIGGER_SOURCE,
                                STATUS, ITERATION_COUNT, TOTAL_TOKENS, STARTED_AT,
                                PARENT_RUN_ID)
-        VALUES (RAWTOHEX(SYS_GUID()), :loop_id, :agent_id, :trigger_type, :trigger_source,
-                'RUNNING', 0, 0, SYSTIMESTAMP, :parent_run_id)
-        RETURNING RUN_ID INTO :ret_id
+        VALUES (gen_random_uuid()::text, :loop_id, :agent_id, :trigger_type, :trigger_source,
+                'RUNNING', 0, 0, NOW(), :parent_run_id)
+        RETURNING RUN_ID 
     """, {"loop_id": loop_id, "agent_id": agent_id,
           "trigger_type": trigger_type, "trigger_source": trigger_source,
           "parent_run_id": parent_run_id})
@@ -204,7 +204,7 @@ def list_runs(loop_id: Optional[str] = None, status: Optional[str] = None,
         sql += " AND LOOP_ID = :loop_id"; params["loop_id"] = loop_id
     if status:
         sql += " AND STATUS = :status"; params["status"] = status
-    sql += " ORDER BY STARTED_AT DESC FETCH FIRST :limit ROWS ONLY"
+    sql += " ORDER BY STARTED_AT DESC LIMIT %s"
     return [dict(r) for r in execute_query(sql, params)]
 
 
@@ -221,7 +221,7 @@ def resume_run(run_id: str) -> bool:
 def stop_run(run_id: str, reason: Optional[str] = None) -> bool:
     run = get_run(run_id)
     result = execute("UPDATE LOOP_RUNS SET STATUS = 'STOPPED', FINAL_RESULT = :reason, "
-                     "COMPLETED_AT = SYSTIMESTAMP WHERE RUN_ID = :id "
+                     "COMPLETED_AT = NOW() WHERE RUN_ID = :id "
                      "AND STATUS IN ('RUNNING','PAUSED')",
                      {"id": run_id, "reason": reason}) > 0
     if result:
@@ -234,7 +234,7 @@ def stop_run(run_id: str, reason: Optional[str] = None) -> bool:
 def fail_run(run_id: str, error_message: str) -> bool:
     run = get_run(run_id)
     result = execute("UPDATE LOOP_RUNS SET STATUS = 'FAILED', ERROR_MESSAGE = :err, "
-                   "COMPLETED_AT = SYSTIMESTAMP WHERE RUN_ID = :id",
+                   "COMPLETED_AT = NOW() WHERE RUN_ID = :id",
                    {"id": run_id, "err": error_message}) > 0
     if result and run:
         _fire_hooks(run["loop_id"], "ON_FAIL", {"run_id": run_id, "error": error_message})
@@ -244,7 +244,7 @@ def fail_run(run_id: str, error_message: str) -> bool:
 def complete_run(run_id: str, final_result: Optional[str] = None) -> bool:
     run = get_run(run_id)
     result = execute("UPDATE LOOP_RUNS SET STATUS = 'COMPLETED', FINAL_RESULT = :result, "
-                     "COMPLETED_AT = SYSTIMESTAMP WHERE RUN_ID = :id "
+                     "COMPLETED_AT = NOW() WHERE RUN_ID = :id "
                      "AND STATUS IN ('RUNNING','PAUSED')",
                      {"id": run_id, "result": final_result}) > 0
     if result:
@@ -346,9 +346,9 @@ def bind_loop_to_step(loop_id: str, step_id: str,
     binding_id = execute_insert_returning_id("""
         INSERT INTO TASK_LOOP_BINDING (BINDING_ID, LOOP_ID, STEP_ID, BINDING_TYPE,
                                        AUTO_START, CREATED_AT)
-        VALUES (RAWTOHEX(SYS_GUID()), :loop_id, :step_id, :binding_type,
-                :auto_start, SYSTIMESTAMP)
-        RETURNING BINDING_ID INTO :ret_id
+        VALUES (gen_random_uuid()::text, :loop_id, :step_id, :binding_type,
+                :auto_start, NOW())
+        RETURNING BINDING_ID 
     """, {"loop_id": loop_id, "step_id": step_id,
           "binding_type": binding_type, "auto_start": auto_start})
     execute("UPDATE TASK_STEPS SET LOOP_ID = :loop_id, STEP_COMPLETION_TYPE = 'LOOP' "
@@ -386,7 +386,7 @@ def on_loop_run_completed(run_id: str) -> List[str]:
     """, {"loop_id": loop_id})
     updated = []
     for r in rows:
-        execute("UPDATE TASK_STEPS SET STATUS = 'SUCCESS', COMPLETED_AT = SYSTIMESTAMP "
+        execute("UPDATE TASK_STEPS SET STATUS = 'SUCCESS', COMPLETED_AT = NOW() "
                 "WHERE STEP_ID = :step_id", {"step_id": r["step_id"]})
         updated.append(r["step_id"])
     return updated
@@ -434,11 +434,11 @@ def record_iteration(
                                      PLAN_DATA, ACTIONS, OBSERVATIONS,
                                      EVALUATION_RESULT, EVALUATION_PASSED, ADJUSTMENT,
                                      TOKEN_USAGE, STARTED_AT, COMPLETED_AT)
-        VALUES (RAWTOHEX(SYS_GUID()), :run_id, :iter_order,
+        VALUES (gen_random_uuid()::text, :run_id, :iter_order,
                 :plan_data, :actions, :observations,
                 :eval_result, :eval_passed, :adjustment,
-                :tokens, SYSTIMESTAMP, SYSTIMESTAMP)
-        RETURNING ITERATION_ID INTO :ret_id
+                :tokens, NOW(), NOW())
+        RETURNING ITERATION_ID 
     """, {
         "run_id": run_id,
         "iter_order": run["iteration_count"] + 1,
@@ -454,7 +454,7 @@ def record_iteration(
             "TOTAL_TOKENS = TOTAL_TOKENS + :tokens WHERE RUN_ID = :id",
             {"tokens": token_usage, "id": run_id})
     if evaluation_passed:
-        execute("UPDATE LOOP_RUNS SET STATUS = 'COMPLETED', COMPLETED_AT = SYSTIMESTAMP, "
+        execute("UPDATE LOOP_RUNS SET STATUS = 'COMPLETED', COMPLETED_AT = NOW(), "
                 "FINAL_RESULT = 'Goal achieved at iteration ' || TO_CHAR(ITERATION_COUNT) "
                 "WHERE RUN_ID = :id", {"id": run_id})
     return iter_id
@@ -475,7 +475,7 @@ def list_iterations(run_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         SELECT ITERATION_ID, RUN_ID, ITERATION_ORDER, EVALUATION_PASSED,
                TOKEN_USAGE, STARTED_AT, COMPLETED_AT
         FROM LOOP_ITERATIONS WHERE RUN_ID = :id
-        ORDER BY ITERATION_ORDER ASC FETCH FIRST :limit ROWS ONLY
+        ORDER BY ITERATION_ORDER ASC LIMIT %s
     """, {"id": run_id, "limit": limit})
     return [dict(r) for r in rows]
 
@@ -491,7 +491,7 @@ def get_loop_stats(loop_id: str) -> Dict[str, Any]:
             (SELECT COUNT(*) FROM LOOP_ITERATIONS li JOIN LOOP_RUNS lr ON li.RUN_ID = lr.RUN_ID
              WHERE lr.LOOP_ID = :id) AS total_iterations,
             (SELECT NVL(SUM(TOTAL_TOKENS), 0) FROM LOOP_RUNS WHERE LOOP_ID = :id) AS total_tokens
-        FROM DUAL
+        
     """, {"id": loop_id})
     return dict(row) if row else {}
 
@@ -528,9 +528,9 @@ def add_hook(loop_id: str, hook_event: str, hook_type: str,
     return execute_insert_returning_id("""
         INSERT INTO LOOP_HOOKS (HOOK_ID, LOOP_ID, HOOK_EVENT, HOOK_TYPE,
                                 HOOK_CONFIG, PRIORITY, ENABLED, CREATED_AT)
-        VALUES (RAWTOHEX(SYS_GUID()), :loop_id, :event, :type,
-                :config, :priority, 'Y', SYSTIMESTAMP)
-        RETURNING HOOK_ID INTO :ret_id
+        VALUES (gen_random_uuid()::text, :loop_id, :event, :type,
+                :config, :priority, 'Y', NOW())
+        RETURNING HOOK_ID 
     """, {"loop_id": loop_id, "event": hook_event, "type": hook_type,
           "config": json.dumps(hook_config) if hook_config else None,
           "priority": priority})
@@ -552,9 +552,9 @@ def list_hooks(loop_id: str) -> List[Dict[str, Any]]:
 def cleanup_old_runs(days_threshold: int = 90) -> int:
     n1 = execute("""DELETE FROM LOOP_ITERATIONS WHERE RUN_ID IN (
         SELECT RUN_ID FROM LOOP_RUNS WHERE STATUS IN ('COMPLETED','STOPPED','FAILED','TIMEOUT')
-          AND COMPLETED_AT < SYSTIMESTAMP - :days)""", {"days": days_threshold})
+          AND COMPLETED_AT < NOW() - :days)""", {"days": days_threshold})
     n2 = execute("""DELETE FROM LOOP_RUNS WHERE STATUS IN ('COMPLETED','STOPPED','FAILED','TIMEOUT')
-          AND COMPLETED_AT < SYSTIMESTAMP - :days""", {"days": days_threshold})
+          AND COMPLETED_AT < NOW() - :days""", {"days": days_threshold})
     return n1 + n2
 
 
@@ -805,7 +805,7 @@ def execute_loop_iteration(run_id: str, agent_id: str,
     stop_check = check_stop_conditions(run_id)
     if stop_check != "CONTINUE":
         if stop_check == "TIMEOUT":
-            execute("UPDATE LOOP_RUNS SET STATUS='TIMEOUT', COMPLETED_AT=SYSTIMESTAMP "
+            execute("UPDATE LOOP_RUNS SET STATUS='TIMEOUT', COMPLETED_AT=NOW() "
                     "WHERE RUN_ID=:id", {"id": run_id})
         return {"iteration_id": None, "evaluation": None,
                 "stop_status": stop_check, "run_status": stop_check}
@@ -830,7 +830,7 @@ def execute_loop_iteration(run_id: str, agent_id: str,
                      {"run_id": run_id, "iteration_id": iter_id, "passed": passed})
 
     if passed:
-        execute("UPDATE LOOP_RUNS SET STATUS='COMPLETED', COMPLETED_AT=SYSTIMESTAMP, "
+        execute("UPDATE LOOP_RUNS SET STATUS='COMPLETED', COMPLETED_AT=NOW(), "
                 "FINAL_RESULT='Goal achieved' WHERE RUN_ID=:id", {"id": run_id})
         on_loop_run_completed(run_id)
         return {"iteration_id": iter_id, "evaluation": eval_result,
@@ -839,10 +839,10 @@ def execute_loop_iteration(run_id: str, agent_id: str,
     stop_check = check_stop_conditions(run_id)
     if stop_check != "CONTINUE":
         if stop_check == "TIMEOUT":
-            execute("UPDATE LOOP_RUNS SET STATUS='TIMEOUT', COMPLETED_AT=SYSTIMESTAMP "
+            execute("UPDATE LOOP_RUNS SET STATUS='TIMEOUT', COMPLETED_AT=NOW() "
                     "WHERE RUN_ID=:id", {"id": run_id})
         else:
-            execute("UPDATE LOOP_RUNS SET STATUS='STOPPED', COMPLETED_AT=SYSTIMESTAMP "
+            execute("UPDATE LOOP_RUNS SET STATUS='STOPPED', COMPLETED_AT=NOW() "
                     "WHERE RUN_ID=:id", {"id": run_id})
 
     return {"iteration_id": iter_id, "evaluation": eval_result,

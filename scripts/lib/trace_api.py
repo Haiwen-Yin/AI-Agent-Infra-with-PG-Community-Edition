@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Distributed Tracing
+"""AI Agent Infra v3.7.5 - PG Community Edition - Distributed Tracing
 
 Trace ID propagation across sessions, plans, loop runs, and tool calls.
 Thread-local trace context for automatic propagation.
@@ -41,7 +41,7 @@ def clear_trace():
 
 def get_trace_tree(trace_id: str) -> Dict[str, Any]:
     session = execute_query_one(
-        "SELECT * FROM AGENT_SESSION WHERE TRACE_ID = :tid FETCH FIRST 1 ROWS ONLY",
+        "SELECT * FROM AGENT_SESSION WHERE TRACE_ID = :tid LIMIT 1",
         {"tid": trace_id},
     )
     plans = execute_query(
@@ -57,7 +57,7 @@ def get_trace_tree(trace_id: str) -> Dict[str, Any]:
         {"tid": trace_id},
     )
     access_logs = execute_query(
-        "SELECT * FROM ENTITY_ACCESS_LOG WHERE TRACE_ID = :tid ORDER BY ACCESS_TIME FETCH FIRST 100 ROWS ONLY",
+        "SELECT * FROM ENTITY_ACCESS_LOG WHERE TRACE_ID = :tid ORDER BY ACCESS_TIME LIMIT 100",
         {"tid": trace_id},
     )
 
@@ -98,7 +98,7 @@ def get_trace_summary(
            FROM AGENT_SESSION s
            WHERE {' AND '.join(clauses)}
            ORDER BY s.START_TIME DESC
-           FETCH FIRST :limit ROWS ONLY""",
+           LIMIT %s""",
         params,
     )
     return [sanitize_row(r) for r in rows]

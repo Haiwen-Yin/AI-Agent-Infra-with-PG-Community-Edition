@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - PG Community Edition - Workspace API Tests"""
+"""AI Agent Infra v3.7.5 - PG Community Edition - Workspace API Tests"""
 
 import sys
 import os

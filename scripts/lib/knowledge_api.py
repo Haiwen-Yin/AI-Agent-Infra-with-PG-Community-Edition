@@ -30,10 +30,10 @@ def create_knowledge(
         INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, SUMMARY, CATEGORY,
                               IMPORTANCE, STATUS, OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
                               WORKSPACE_ID)
-        VALUES (RAWTOHEX(SYS_GUID()), 'KNOWLEDGE', :title, :content, :summary, :category,
+        VALUES (gen_random_uuid()::text, 'KNOWLEDGE', :title, :content, :summary, :category,
                 :importance, 'ACTIVE', :owned_by_agent, NULL, :visibility,
                 :wsid)
-        RETURNING ENTITY_ID INTO :ret_id
+        RETURNING ENTITY_ID 
     """
     params = {
         "title": title[:500],
@@ -50,7 +50,7 @@ def create_knowledge(
     meta_sql = """
         INSERT INTO KNOWLEDGE_META (ENTITY_ID, ENTITY_TYPE, DOMAIN, TOPIC, DIFFICULTY,
                                     REVIEW_COUNT, NEXT_REVIEW)
-        VALUES (:eid, 'KNOWLEDGE', :domain, :topic, :difficulty, 0, SYSTIMESTAMP + 7)
+        VALUES (:eid, 'KNOWLEDGE', :domain, :topic, :difficulty, 0, NOW() + INTERVAL '7 days')
     """
     execute(meta_sql, {
         "eid": entity_id,
@@ -102,7 +102,7 @@ def update_knowledge(entity_id: str, **kwargs) -> bool:
 
     if entity_updates:
         set_parts = [f"{k} = :{k}" for k in entity_updates]
-        set_parts.append("UPDATED_AT = SYSTIMESTAMP")
+        set_parts.append("UPDATED_AT = NOW()")
         entity_updates["id"] = entity_id
         sql = f"UPDATE ENTITIES SET {', '.join(set_parts)} WHERE ENTITY_ID = :id AND ENTITY_TYPE = 'KNOWLEDGE'"
         affected += execute(sql, entity_updates)
@@ -192,9 +192,9 @@ def get_due_reviews(limit: int = 50) -> List[Dict[str, Any]]:
         FROM ENTITIES e
         JOIN KNOWLEDGE_META km ON km.ENTITY_ID = e.ENTITY_ID
                                AND km.ENTITY_TYPE = 'KNOWLEDGE'
-        WHERE km.NEXT_REVIEW <= SYSTIMESTAMP AND e.STATUS = 'ACTIVE'
+        WHERE km.NEXT_REVIEW <= NOW() AND e.STATUS = 'ACTIVE'
         ORDER BY km.NEXT_REVIEW ASC
-        FETCH FIRST :lim ROWS ONLY
+        LIMIT %s
     """
     return [_row_to_dict(r) for r in execute_query(sql, {"lim": limit})]
 
@@ -203,8 +203,8 @@ def record_review(entity_id: str) -> bool:
     sql = """
         UPDATE KNOWLEDGE_META
         SET REVIEW_COUNT = REVIEW_COUNT + 1,
-            LAST_REVIEWED = SYSTIMESTAMP,
-            NEXT_REVIEW = SYSTIMESTAMP + LEAST(POWER(2, REVIEW_COUNT + 1), 30)
+            LAST_REVIEWED = NOW(),
+            NEXT_REVIEW = NOW() + LEAST(POWER(2, REVIEW_COUNT + 1), 30)
         WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'KNOWLEDGE'
     """
     return execute(sql, {"eid": entity_id}) > 0
@@ -215,7 +215,7 @@ def add_knowledge_tags(entity_id: str, tag_names: List[str]) -> int:
     for tag_name in tag_names:
         merge_sql = """
             MERGE INTO TAGS t
-            USING (SELECT :tag_name AS TAG_NAME FROM DUAL) src
+            USING (SELECT :tag_name AS TAG_NAME ) src
             ON (t.TAG_NAME = src.TAG_NAME)
             WHEN NOT MATCHED THEN INSERT (TAG_NAME) VALUES (src.TAG_NAME)
         """
@@ -231,7 +231,7 @@ def add_knowledge_tags(entity_id: str, tag_names: List[str]) -> int:
         tag_id = tag_row["tag_id"]
         insert_sql = """
             INSERT INTO ENTITY_TAGS (ENTITY_ID, ENTITY_TYPE, TAG_ID)
-            SELECT :eid, 'KNOWLEDGE', :tid FROM DUAL
+            SELECT :eid, 'KNOWLEDGE', :tid 
             WHERE NOT EXISTS (
                 SELECT 1 FROM ENTITY_TAGS
                 WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'KNOWLEDGE' AND TAG_ID = :tid
@@ -276,9 +276,9 @@ def add_edge(
     sql = """
         INSERT INTO ENTITY_EDGES (EDGE_ID, SOURCE_ID, SOURCE_TYPE, TARGET_ID, EDGE_TYPE,
                                   STRENGTH, CONFIDENCE, METADATA)
-        VALUES ('E_' || RAWTOHEX(SYS_GUID()), :source_id, :source_type, :target_id, :edge_type,
+        VALUES ('E_' || gen_random_uuid()::text, :source_id, :source_type, :target_id, :edge_type,
                 :strength, :confidence, :metadata)
-        RETURNING EDGE_ID INTO :ret_id
+        RETURNING EDGE_ID 
     """
     params = {
         "source_id": source_id,
@@ -394,7 +394,7 @@ def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# -- D4: Advanced Knowledge Management (v3.7.4) --
+# -- D4: Advanced Knowledge Management (v3.7.5) --
 
 def merge_knowledge(source_id: str, target_id: str, strategy: str = "UNION") -> Dict[str, Any]:
     """Merge two knowledge entries using the specified strategy."""
@@ -405,7 +405,7 @@ def merge_knowledge(source_id: str, target_id: str, strategy: str = "UNION") -> 
 
     if strategy == "OVERWRITE":
         execute(
-            "UPDATE ENTITIES SET CONTENT = :content, UPDATED_AT = SYSTIMESTAMP WHERE ENTITY_ID = :tid",
+            "UPDATE ENTITIES SET CONTENT = :content, UPDATED_AT = NOW() WHERE ENTITY_ID = :tid",
             {"content": source.get("content", ""), "tid": target_id},
         )
         execute("UPDATE ENTITIES SET VISIBILITY = 'PRIVATE' WHERE ENTITY_ID = :sid", {"sid": source_id})
@@ -414,7 +414,7 @@ def merge_knowledge(source_id: str, target_id: str, strategy: str = "UNION") -> 
     elif strategy == "UNION":
         merged_content = (target.get("content", "") or "") + "\n\n---\n\n" + (source.get("content", "") or "")
         execute(
-            "UPDATE ENTITIES SET CONTENT = :content, UPDATED_AT = SYSTIMESTAMP WHERE ENTITY_ID = :tid",
+            "UPDATE ENTITIES SET CONTENT = :content, UPDATED_AT = NOW() WHERE ENTITY_ID = :tid",
             {"content": merged_content, "tid": target_id},
         )
         execute("UPDATE ENTITIES SET VISIBILITY = 'PRIVATE' WHERE ENTITY_ID = :sid", {"sid": source_id})
@@ -428,7 +428,7 @@ def merge_knowledge(source_id: str, target_id: str, strategy: str = "UNION") -> 
             total = 1
         merged_content = source.get("content", "") or ""
         execute(
-            "UPDATE ENTITIES SET CONTENT = :content, UPDATED_AT = SYSTIMESTAMP WHERE ENTITY_ID = :tid",
+            "UPDATE ENTITIES SET CONTENT = :content, UPDATED_AT = NOW() WHERE ENTITY_ID = :tid",
             {"content": merged_content, "tid": target_id},
         )
         return {"strategy": strategy, "target_id": target_id, "source_weight": source_strength / total}
@@ -448,7 +448,7 @@ def detect_knowledge_conflicts(workspace_id: str) -> List[Dict[str, Any]]:
              AND (UPPER(a.TITLE) = UPPER(b.TITLE)
                   OR DBMS_LOB.GETLENGTH(a.CONTENT) > 0 AND DBMS_LOB.GETLENGTH(b.CONTENT) > 0
                   AND DBMS_LOB.SUBSTR(a.CONTENT, 200, 1) = DBMS_LOB.SUBSTR(b.CONTENT, 200, 1))
-           FETCH FIRST 50 ROWS ONLY""",
+           LIMIT 50""",
         {"wid": workspace_id},
     )
     conflicts = []

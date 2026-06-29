@@ -27,10 +27,10 @@ def create_memory(
         INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, SUMMARY, CATEGORY,
                               IMPORTANCE, STATUS, OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
                               WORKSPACE_ID)
-        VALUES (RAWTOHEX(SYS_GUID()), 'MEMORY', :title, :content, :summary, :category,
+        VALUES (gen_random_uuid()::text, 'MEMORY', :title, :content, :summary, :category,
                 :importance, 'ACTIVE', :owned_by_agent, :source_agent, :visibility,
                 :wsid)
-        RETURNING ENTITY_ID INTO :ret_id
+        RETURNING ENTITY_ID 
     """
     params = {
         "title": title[:500],
@@ -77,7 +77,7 @@ def update_memory(entity_id: str, **kwargs) -> bool:
         return False
 
     set_parts = [f"{k} = :{k}" for k in updates]
-    set_parts.append("UPDATED_AT = SYSTIMESTAMP")
+    set_parts.append("UPDATED_AT = NOW()")
     updates["id"] = entity_id
 
     sql = f"UPDATE ENTITIES SET {', '.join(set_parts)} WHERE ENTITY_ID = :id AND ENTITY_TYPE = 'MEMORY'"
@@ -150,7 +150,7 @@ def get_agent_memories(agent_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         WHERE ENTITY_TYPE = 'MEMORY'
           AND (VISIBILITY = 'SHARED' OR VISIBILITY = 'PUBLIC' OR OWNED_BY_AGENT = :agent)
         ORDER BY CREATED_AT DESC
-        FETCH FIRST :lim ROWS ONLY
+        LIMIT %s
     """
     return [_row_to_dict(r) for r in execute_query(sql, {"agent": agent_id, "lim": limit})]
 
@@ -170,7 +170,7 @@ def add_memory_tags(entity_id: str, tag_names: List[str]) -> int:
     for tag_name in tag_names:
         merge_sql = """
             MERGE INTO TAGS t
-            USING (SELECT :tag_name AS TAG_NAME FROM DUAL) src
+            USING (SELECT :tag_name AS TAG_NAME ) src
             ON (t.TAG_NAME = src.TAG_NAME)
             WHEN NOT MATCHED THEN INSERT (TAG_NAME) VALUES (src.TAG_NAME)
         """
@@ -186,7 +186,7 @@ def add_memory_tags(entity_id: str, tag_names: List[str]) -> int:
         tag_id = tag_row["tag_id"]
         insert_sql = """
             INSERT INTO ENTITY_TAGS (ENTITY_ID, ENTITY_TYPE, TAG_ID)
-            SELECT :eid, 'MEMORY', :tid FROM DUAL
+            SELECT :eid, 'MEMORY', :tid 
             WHERE NOT EXISTS (
                 SELECT 1 FROM ENTITY_TAGS
                 WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'MEMORY' AND TAG_ID = :tid
@@ -239,7 +239,7 @@ def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# -- D4: Advanced Memory Management (v3.7.4) --
+# -- D4: Advanced Memory Management (v3.7.5) --
 
 def consolidate_branch_memories(branch_id: str, target_workspace_id: str) -> Dict[str, Any]:
     """Merge branch memories into target workspace, resolving conflicts."""
@@ -273,9 +273,9 @@ def consolidate_branch_memories(branch_id: str, target_workspace_id: str) -> Dic
         execute_insert_returning_id(
             """INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, CATEGORY,
                WORKSPACE_ID, VISIBILITY, CREATED_AT)
-               VALUES (RAWTOHEX(SYS_GUID()), 'MEMORY', :title, :content, :cat,
-                       :wid, 'SHARED', SYSTIMESTAMP)
-               RETURNING ENTITY_ID INTO :ret_id""",
+               VALUES (gen_random_uuid()::text, 'MEMORY', :title, :content, :cat,
+                       :wid, 'SHARED', NOW())
+               RETURNING ENTITY_ID """,
             {"title": m["title"], "content": m["content"],
              "cat": m.get("category", "CONSOLIDATED"), "wid": target_workspace_id},
         )
@@ -302,7 +302,7 @@ def promote_to_semantic(memory_id: str) -> Optional[str]:
     )
 
     execute(
-        "UPDATE ENTITIES SET METADATA = JSON_OBJECT('promoted_to' VALUE :kid, 'promoted_at' VALUE SYSTIMESTAMP) "
+        "UPDATE ENTITIES SET METADATA = JSON_OBJECT('promoted_to' VALUE :kid, 'promoted_at' VALUE NOW()) "
         "WHERE ENTITY_ID = :mid",
         {"kid": knowledge_id, "mid": memory_id},
     )
