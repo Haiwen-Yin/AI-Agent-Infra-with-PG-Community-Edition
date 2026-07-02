@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ============================================================
--- AI Agent Infra v3.7.5 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
+-- AI Agent Infra v3.8.0 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
 -- ============================================================
 
 -- ============================================================
@@ -2201,6 +2201,7 @@ AS $$
 DECLARE
     v_user       RECORD;
     v_test_hash  TEXT;
+    v_salt       TEXT;
 BEGIN
     SELECT user_id, username, password_hash, salt, role, status
     INTO v_user
@@ -2493,5 +2494,5 @@ $$;
 
 
 -- ============================================================
--- AI Agent Infra v3.7.5 - Community Edition - PostgreSQL 18.3 API Deployment Complete
+-- AI Agent Infra v3.8.0 - Community Edition - PostgreSQL 18.3 API Deployment Complete
 -- ============================================================

@@ -1,3 +1,35 @@
+## [3.8.0] - 2026-07-02
+
+### Summary
+
+Multi-Agent integration testing release for PostgreSQL editions. Completed full 5-phase deployment and 15-module functional test suite with zero failures on a fresh PG 18.3 database. Multiple runtime bugs discovered and fixed during testing.
+
+### Fixed - PG COM/ENT
+
+- **connection.py `_convert_params`**: Rewrote to support repeated `:param` occurrences (same param used multiple times in one SQL) and mixed `:param` + `%s` styles; values are now collected in SQL order of appearance, not dict iteration order
+- **connection.py `execute_insert_returning_id`**: Added `id_column` parameter as alias for `returning_col` for Oracle API compatibility; auto-adds `RETURNING` clause when missing
+- **connection.py `execute_query_one`**: Added `conn.commit()` to persist DML executed inside PL/pgSQL functions (e.g., `skill_manager.register()` was silently losing INSERTs)
+- **1_schema.sql**: Fixed double `ON` clause in `CREATE POLICY` statements (e.g., `ON public.loop_meta ON public.loop_meta` → `ON public.loop_meta`)
+- **1_schema.sql**: Removed `loop_audit` FK to `entities(entity_id)` — partitioned tables with composite PK `(entity_id, entity_type)` cannot be referenced by single-column FK
+- **1_schema.sql/2_api.sql/3_jobs.sql**: Converted Oracle `PROMPT` commands to `--` comments (PG does not support PROMPT)
+- **2_api.sql `user_manager.authenticate`**: Added missing `v_salt` variable declaration that caused function compilation failure
+- **loop_api.py**: Replaced Oracle `TO_CHAR(ITERATION_COUNT)` with PG `ITERATION_COUNT::text`
+- **monitor_api.py**: Fixed table name `CONTEXT_AUDIT_LOG` → `WORKSPACE_CONTEXT_AUDIT`; removed non-existent `RESOLUTION_STATUS` filter
+- **event_bus.py**: Fixed column names `SUB_ID` → `SUBSCRIPTION_ID`, `CAP_ID` → `CAPABILITY_ID`; fixed `ENABLED='Y'` → `STATUS='ACTIVE'`; fixed mixed `:param` and `%s` in `get_pending_events` SQL
+
+### Tested - PG ENT
+
+- **15-module functional test suite**: All 15 tests passed (Memory CRUD, Knowledge Base, Agent Messaging, Collaboration Group, Loop Lifecycle, Graph Operations, Branch & Workspace, Spec Management, Tool Registry, Monitor API, Event Bus, Task Plan API, Skill API, Agent API, LLM Integration)
+- **4 registered Business Agents**: AGENT_001–004 registered with recovery codes, collaboration group created
+- **69 tables, 176 functions** deployed on fresh PG 18.3 database
+
+### Fixed - PG ENT only
+
+- **server.py audit routing**: Added missing `/api/audit` and `/api/audit/stats` routes that were defined but never registered in the API router
+- **audit.html**: Fixed `audit_id.substring()` crash — PG `BIGINT` IDs are numbers, not strings; wrapped with `String()` conversion
+
+---
+
 ## [3.7.5] - 2026-06-28
 
 ### Summary

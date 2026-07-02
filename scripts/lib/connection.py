@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - PG Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v3.8.0 - PG Enterprise Edition - Database Connection Pool Manager
 
 psycopg2-based connection pool with parameterized query support.
 Supports Admin/Agent separation modes (standalone, admin, agent).
@@ -96,17 +96,60 @@ def close_pool():
         _pool = None
 
 
-def _convert_params(sql: str, params: Optional[Dict[str, Any]]) -> tuple:
-    """Convert Oracle-style :param to psycopg2 %s style."""
+def _convert_params(sql: str, params: Optional[Any]) -> tuple:
+    """Convert Oracle-style :param to psycopg2 %s style.
+    Supports both dict params (:param style) and tuple/list params (%s style).
+    
+    For dict params:
+    - Each :param is replaced with %s and value collected in order of appearance
+    - Existing %s placeholders get values from dict keys 'limit', 'offset', etc.
+      (for backwards compat with PG-native SQL that uses LIMIT %s)
+    
+    For tuple/list params:
+    - %s placeholders are used as-is with values in order
+    """
     if params is None:
         return sql, ()
     if isinstance(params, dict):
-        # Convert :param to %(param)s for psycopg2 named params
-        converted = sql
+        import re
         ordered_values = []
-        for key in params:
-            converted = converted.replace(f":{key}", "%s")
-            ordered_values.append(params[key])
+        
+        # First, replace all :param with %s and collect values
+        def replace_param(match):
+            key = match.group(1)
+            if key in params:
+                ordered_values.append(params[key])
+                return '%s'
+            return match.group(0)
+        converted = re.sub(r':(\w+)', replace_param, sql)
+        
+        # Now handle any remaining %s placeholders that weren't from :param
+        # These come from PG-native SQL (e.g., LIMIT %s)
+        # We need to provide values for them from the dict
+        # Count remaining %s and try to match with dict values not yet used
+        remaining_s = converted.count('%s') - len(ordered_values)
+        if remaining_s > 0:
+            # Find dict keys that weren't used by :param replacement
+            used_keys = set()
+            for m in re.finditer(r':(\w+)', sql):
+                if m.group(1) in params:
+                    used_keys.add(m.group(1))
+            # Common positional keys in order of typical SQL appearance
+            positional_keys = ['limit', 'offset', 'status', 'agent_id', 'workspace_id']
+            for key in positional_keys:
+                if key in params and key not in used_keys and remaining_s > 0:
+                    ordered_values.append(params[key])
+                    used_keys.add(key)
+                    remaining_s -= 1
+            # If still remaining, add any unused values
+            for key in params:
+                if remaining_s <= 0:
+                    break
+                if key not in used_keys:
+                    ordered_values.append(params[key])
+                    used_keys.add(key)
+                    remaining_s -= 1
+        
         return converted, tuple(ordered_values)
     elif isinstance(params, (list, tuple)):
         return sql, tuple(params)
@@ -136,6 +179,7 @@ def execute_query_one(sql: str, params: Optional[Dict[str, Any]] = None) -> Opti
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, pg_params)
             row = cur.fetchone()
+            conn.commit()
             return dict(row) if row else None
 
 
@@ -151,13 +195,17 @@ def execute_insert(sql: str, params: Optional[Dict[str, Any]] = None) -> str:
 def execute_insert_returning_id(
     sql: str,
     params: Optional[Dict[str, Any]] = None,
-    returning_col: str = None
+    returning_col: str = None,
+    id_column: str = None
 ) -> str:
     """Execute INSERT with RETURNING clause and return the ID.
     
     For PostgreSQL, the RETURNING clause is already in the SQL.
     The :ret_id bind variable should be removed from the SQL before calling.
+    `id_column` is an alias for `returning_col` for Oracle API compatibility.
     """
+    if id_column and not returning_col:
+        returning_col = id_column
     sql, pg_params = _convert_params(sql, params)
     # Remove any RETURNING ... INTO :ret_id clause (Oracle-specific)
     if "INTO :ret_id" in sql:
@@ -166,6 +214,12 @@ def execute_insert_returning_id(
         # Clean up Oracle-style RETURNING ... INTO ...
         import re
         sql = re.sub(r'\s+INTO\s+:\w+', '', sql, flags=re.IGNORECASE)
+    
+    # If RETURNING clause is not in SQL, add it
+    if returning_col and "RETURNING" not in sql.upper():
+        # Find the column name to return
+        col = returning_col.lower() if not returning_col.startswith(':') else returning_col
+        sql = sql.rstrip().rstrip(';') + f' RETURNING {col}'
     
     with get_connection() as conn:
         with conn.cursor() as cur:

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - PG Community Edition - Multi-Agent Orchestration
+"""AI Agent Infra v3.8.0 - PG Community Edition - Multi-Agent Orchestration
 
 DAG execution engine, fan-out/fan-in, pipeline orchestration,
 and retry policies for task steps.

@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-pg-community
-version: v3.7.5
+version: v3.8.0
 author: Haiwen Yin
-description: "AI Agent Infra with PostgreSQL - Community Edition v3.7.5 - AI Agent的基础设施架构"
+description: "AI Agent Infra with PostgreSQL - Community Edition v3.8.0 - AI Agent的基础设施架构"
 tags: [postgresql, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, psycopg2, property-graph, apache-age, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, spec-driven, elastic-agent, collaboration, admin-agent-separation, pgvector, pg-cron, plpython3u, pgcrypto, row-security-policies]
 related_skills: [postgresql-18, psycopg2-execution-methodology]
 ---
 
-# AI Agent Infra with PostgreSQL - Community Edition v3.7.5
+# AI Agent Infra with PostgreSQL - Community Edition v3.8.0
 
 **Author:** Haiwen Yin
-**Version:** v3.7.5 - 2026-06-26
+**Version:** v3.8.0 - 2026-07-02
 **Website:** https://db4agent.top
 **License:** Apache License 2.0 (Community Edition)
 

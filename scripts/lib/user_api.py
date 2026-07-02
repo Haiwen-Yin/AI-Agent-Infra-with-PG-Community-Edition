@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - PG Community Edition - User Management API
+"""AI Agent Infra v3.8.0 - PG Community Edition - User Management API
 
 User registration, profile, and user-scoped content retrieval.
 """

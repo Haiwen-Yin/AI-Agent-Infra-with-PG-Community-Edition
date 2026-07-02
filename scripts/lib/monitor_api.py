@@ -1,10 +1,10 @@
-"""AI Agent Infra v3.7.5 - PG Community Edition - Monitoring & Observability
+"""AI Agent Infra v3.8.0 - PG Community Edition - Monitoring & Observability
 
 Agent health dashboard, system overview, stalled detection,
 performance metrics, and drift detection.
 
 Tables: AGENT_REGISTRY, AGENT_SESSION, TASK_PLANS, LOOP_RUNS,
-        TASK_TOOL_CALLS, ENTITY_ACCESS_LOG, CONTEXT_AUDIT_LOG (ENT)
+        TASK_TOOL_CALLS, ENTITY_ACCESS_LOG, WORKSPACE_CONTEXT_AUDIT (ENT)
 """
 
 import logging
@@ -122,9 +122,8 @@ def get_stalled_agents(threshold_minutes: int = 10) -> List[Dict[str, Any]]:
 def get_active_alerts(limit: int = 50) -> List[Dict[str, Any]]:
     rows = execute_query(
         """SELECT * FROM (
-              SELECT a.*, ROW_NUMBER() OVER (ORDER BY CREATED_AT DESC) AS rn
-              FROM CONTEXT_AUDIT_LOG a
-              WHERE RESOLUTION_STATUS = 'OPEN'
+              SELECT a.*, ROW_NUMBER() OVER (ORDER BY CHANGED_AT DESC) AS rn
+              FROM WORKSPACE_CONTEXT_AUDIT a
             ) WHERE rn <= :limit""",
         {"limit": limit},
     )

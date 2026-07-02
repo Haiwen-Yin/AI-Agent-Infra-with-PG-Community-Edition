@@ -1,13 +1,13 @@
-# AI Agent Infra with PostgreSQL - Community Edition v3.7.5
+# AI Agent Infra with PostgreSQL - Community Edition v3.8.0
 
-[![Version](https://img.shields.io/badge/version-v3.7.5-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.8.0-blue.svg)](CHANGELOG.md)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.3-blue.svg)](https://www.postgresql.org/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
-**AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on PostgreSQL 18.3.**
+**AI Agent Infrastructure Architecture — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on PostgreSQL 18.3.**
 
-> **v3.7.5 (2026-06-28): Bug Fixes — connection.py rewrite (oracledb to psycopg2), 10 modules Oracle SQL to PostgreSQL migration, monitor_api column fixes, orchestrator stub fix, event_bus security, message_api DELETED status.** 历史版本信息详见 [CHANGELOG.md](CHANGELOG.md)。
+> **v3.8.0 (2026-07-02): Multi-Agent Integration Testing — connection.py _convert_params rewrite (repeated :param + mixed %s), execute_query_one commit fix, 1_schema.sql double-ON policy fix + loop_audit FK fix, 2_api.sql authenticate v_salt fix, event_bus/monitor_api column name fixes, PROMPT→comment. Full 5-phase deployment on fresh PG 18.3: 69 tables, 176 functions, 4 Business Agents registered, 15/15 functional tests passed.** See CHANGELOG.md for historical versions. [CHANGELOG.md](CHANGELOG.md)
 
 📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.5.md)**
 
@@ -80,7 +80,7 @@ Two independent page systems: **Portal** (user-facing: register/login/chat) and 
 
 - Register/login with local system user authentication
 - Registration checks SYSTEM_USERS (case-insensitive) for duplicates
-- "进入管理页面" button in top-right corner
+- "Enter Admin Portal" button in top-right corner
 
 ### Portal Chat (`/portal/chat`)
 

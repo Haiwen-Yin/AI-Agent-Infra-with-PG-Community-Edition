@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - PG Community Edition - Spec API
+"""AI Agent Infra v3.8.0 - PG Community Edition - Spec API
 
 Spec Driven Development: spec CRUD, plan linkage, validation,
 derivation, and spec status management.

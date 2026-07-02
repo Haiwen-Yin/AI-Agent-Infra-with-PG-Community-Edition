@@ -6164,7 +6164,7 @@ ALTER TABLE public.loop_iterations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.loop_hooks ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS lm_agent_isolation ON public.loop_meta;
-CREATE POLICY lm_agent_isolation ON public.loop_meta ON public.loop_meta
+CREATE POLICY lm_agent_isolation ON public.loop_meta
     USING (EXISTS (
         SELECT 1 FROM public.entities e
         WHERE e.entity_id = loop_meta.entity_id
@@ -6173,7 +6173,7 @@ CREATE POLICY lm_agent_isolation ON public.loop_meta ON public.loop_meta
     ));
 
 DROP POLICY IF EXISTS lr_agent_isolation ON public.loop_runs;
-CREATE POLICY lr_agent_isolation ON public.loop_runs ON public.loop_runs
+CREATE POLICY lr_agent_isolation ON public.loop_runs
     USING (agent_id = current_setting('app.current_agent_id', TRUE)
            OR EXISTS (
                SELECT 1 FROM public.entities e
@@ -6183,7 +6183,7 @@ CREATE POLICY lr_agent_isolation ON public.loop_runs ON public.loop_runs
            ));
 
 DROP POLICY IF EXISTS li_agent_isolation ON public.loop_iterations;
-CREATE POLICY li_agent_isolation ON public.loop_iterations ON public.loop_iterations
+CREATE POLICY li_agent_isolation ON public.loop_iterations
     USING (EXISTS (
         SELECT 1 FROM public.loop_runs r
         WHERE r.run_id = loop_iterations.run_id
@@ -6196,7 +6196,7 @@ CREATE POLICY li_agent_isolation ON public.loop_iterations ON public.loop_iterat
     ));
 
 DROP POLICY IF EXISTS lh_agent_isolation ON public.loop_hooks;
-CREATE POLICY lh_agent_isolation ON public.loop_hooks ON public.loop_hooks
+CREATE POLICY lh_agent_isolation ON public.loop_hooks
     USING (EXISTS (
         SELECT 1 FROM public.entities e
         WHERE e.entity_id = loop_hooks.loop_id
@@ -6206,13 +6206,13 @@ CREATE POLICY lh_agent_isolation ON public.loop_hooks ON public.loop_hooks
 
 -- Allow aiadmin full access
 DROP POLICY IF EXISTS lm_owner_all ON public.loop_meta;
-CREATE POLICY lm_owner_all ON public.loop_meta ON public.loop_meta FOR ALL USING (current_user = :'schema_owner');
+CREATE POLICY lm_owner_all ON public.loop_meta FOR ALL USING (current_user = :'schema_owner');
 DROP POLICY IF EXISTS lr_owner_all ON public.loop_runs;
-CREATE POLICY lr_owner_all ON public.loop_runs ON public.loop_runs FOR ALL USING (current_user = :'schema_owner');
+CREATE POLICY lr_owner_all ON public.loop_runs FOR ALL USING (current_user = :'schema_owner');
 DROP POLICY IF EXISTS li_owner_all ON public.loop_iterations;
-CREATE POLICY li_owner_all ON public.loop_iterations ON public.loop_iterations FOR ALL USING (current_user = :'schema_owner');
+CREATE POLICY li_owner_all ON public.loop_iterations FOR ALL USING (current_user = :'schema_owner');
 DROP POLICY IF EXISTS lh_owner_all ON public.loop_hooks;
-CREATE POLICY lh_owner_all ON public.loop_hooks ON public.loop_hooks FOR ALL USING (current_user = :'schema_owner');
+CREATE POLICY lh_owner_all ON public.loop_hooks FOR ALL USING (current_user = :'schema_owner');
 
 CREATE INDEX IF NOT EXISTS idx_lm_spec ON public.loop_meta(spec_id);
 CREATE INDEX IF NOT EXISTS idx_lm_parent_loop ON public.loop_meta(parent_loop_id);
@@ -6228,8 +6228,8 @@ CREATE INDEX IF NOT EXISTS idx_ts_completion ON public.task_steps(step_completio
 
 
 -- v3.7.5 Extensions
-PROMPT v3.7.5 Extensions: Agent Communication, Orchestration, Events, Observability, Tools
-PROMPT ============================================================
+-- v3.7.5 Extensions: Agent Communication, Orchestration, Events, Observability, Tools
+-- ============================================================
 
 -- D5: Add TRACE_ID columns for distributed tracing
 -- ALTER TABLE AGENT_SESSION ADD (TRACE_ID VARCHAR(64));
@@ -6262,9 +6262,9 @@ CREATE INDEX IDX_TTC_PARENT ON TASK_TOOL_CALLS(PARENT_TOOL_CALL_ID);
 CREATE INDEX IDX_HM_NS ON HARNESS_META(TOOL_NAMESPACE);
 CREATE INDEX IDX_HM_SOURCE ON HARNESS_META(TOOL_SOURCE);
 
-PROMPT ============================================================
-PROMPT 35. COLLAB_MESSAGES (Non-Partitioned) [NEW v3.7.5]
-PROMPT ============================================================
+-- ============================================================
+-- 35. COLLAB_MESSAGES (Non-Partitioned) [NEW v3.7.5]
+-- ============================================================
 
 CREATE TABLE COLLAB_MESSAGES (
     MESSAGE_ID           VARCHAR(64)   PRIMARY KEY,
@@ -6296,9 +6296,9 @@ CREATE INDEX IDX_CM_RECEIVER ON COLLAB_MESSAGES(RECEIVER_AGENT_ID, STATUS, CREAT
 CREATE INDEX IDX_CM_SENDER ON COLLAB_MESSAGES(SENDER_AGENT_ID, CREATED_AT DESC);
 CREATE INDEX IDX_CM_THREAD ON COLLAB_MESSAGES(THREAD_ID, CREATED_AT);
 
-PROMPT ============================================================
-PROMPT 36. STEP_RETRY_POLICY (Non-Partitioned) [NEW v3.7.5]
-PROMPT ============================================================
+-- ============================================================
+-- 36. STEP_RETRY_POLICY (Non-Partitioned) [NEW v3.7.5]
+-- ============================================================
 
 CREATE TABLE STEP_RETRY_POLICY (
     POLICY_ID          VARCHAR(64)  PRIMARY KEY,
@@ -6316,9 +6316,9 @@ CREATE TABLE STEP_RETRY_POLICY (
 );
 CREATE INDEX IDX_SRP_STEP ON STEP_RETRY_POLICY(STEP_ID);
 
-PROMPT ============================================================
-PROMPT 37. STEP_EXECUTION_PLAN (Non-Partitioned) [NEW v3.7.5]
-PROMPT ============================================================
+-- ============================================================
+-- 37. STEP_EXECUTION_PLAN (Non-Partitioned) [NEW v3.7.5]
+-- ============================================================
 
 CREATE TABLE STEP_EXECUTION_PLAN (
     PLAN_ID            VARCHAR(64)  PRIMARY KEY,
@@ -6340,9 +6340,9 @@ CREATE TABLE STEP_EXECUTION_PLAN (
 CREATE INDEX IDX_SEP_PLAN ON STEP_EXECUTION_PLAN(ROOT_PLAN_ID, STEP_ORDER);
 CREATE INDEX IDX_SEP_STATUS ON STEP_EXECUTION_PLAN(STATUS);
 
-PROMPT ============================================================
-PROMPT 38. EVENT_LOG (Non-Partitioned) [NEW v3.7.5]
-PROMPT ============================================================
+-- ============================================================
+-- 38. EVENT_LOG (Non-Partitioned) [NEW v3.7.5]
+-- ============================================================
 
 CREATE TABLE EVENT_LOG (
     EVENT_ID     VARCHAR(64)  PRIMARY KEY,
@@ -6355,9 +6355,9 @@ CREATE TABLE EVENT_LOG (
 CREATE INDEX IDX_EL_TYPE ON EVENT_LOG(EVENT_TYPE, CREATED_AT DESC);
 CREATE INDEX IDX_EL_SOURCE ON EVENT_LOG(SOURCE_ID, EVENT_TYPE);
 
-PROMPT ============================================================
-PROMPT 39. EVENT_SUBSCRIPTIONS (Non-Partitioned) [NEW v3.7.5]
-PROMPT ============================================================
+-- ============================================================
+-- 39. EVENT_SUBSCRIPTIONS (Non-Partitioned) [NEW v3.7.5]
+-- ============================================================
 
 CREATE TABLE EVENT_SUBSCRIPTIONS (
     SUB_ID         VARCHAR(64)  PRIMARY KEY,
@@ -6372,9 +6372,9 @@ CREATE TABLE EVENT_SUBSCRIPTIONS (
 );
 CREATE INDEX IDX_ES_EVENT ON EVENT_SUBSCRIPTIONS(EVENT_TYPE, ENABLED);
 
-PROMPT ============================================================
-PROMPT 40. AGENT_CAPABILITY_INDEX (Non-Partitioned) [NEW v3.7.5]
-PROMPT ============================================================
+-- ============================================================
+-- 40. AGENT_CAPABILITY_INDEX (Non-Partitioned) [NEW v3.7.5]
+-- ============================================================
 
 CREATE TABLE AGENT_CAPABILITY_INDEX (
     CAP_ID        VARCHAR(64)  PRIMARY KEY,
@@ -6388,9 +6388,9 @@ CREATE TABLE AGENT_CAPABILITY_INDEX (
 CREATE INDEX IDX_ACI_CAP ON AGENT_CAPABILITY_INDEX(CAPABILITY);
 CREATE INDEX IDX_ACI_AGENT ON AGENT_CAPABILITY_INDEX(AGENT_ID);
 
-PROMPT ============================================================
-PROMPT 41. TOOL_REGISTRY (Non-Partitioned) [NEW v3.7.5]
-PROMPT ============================================================
+-- ============================================================
+-- 41. TOOL_REGISTRY (Non-Partitioned) [NEW v3.7.5]
+-- ============================================================
 
 CREATE TABLE TOOL_REGISTRY (
     TOOL_ID          VARCHAR(64)  PRIMARY KEY,
@@ -6415,9 +6415,9 @@ CREATE INDEX IDX_TR_NS ON TOOL_REGISTRY(TOOL_NAMESPACE);
 CREATE INDEX IDX_TR_TYPE ON TOOL_REGISTRY(TOOL_TYPE);
 CREATE INDEX IDX_TR_STATUS ON TOOL_REGISTRY(STATUS);
 
-PROMPT ============================================================
-PROMPT 42. TOOL_CHAINS (Non-Partitioned) [NEW v3.7.5]
-PROMPT ============================================================
+-- ============================================================
+-- 42. TOOL_CHAINS (Non-Partitioned) [NEW v3.7.5]
+-- ============================================================
 
 CREATE TABLE TOOL_CHAINS (
     CHAIN_ID         VARCHAR(64)  PRIMARY KEY,
@@ -6428,9 +6428,9 @@ CREATE TABLE TOOL_CHAINS (
     UPDATED_AT       TIMESTAMP     DEFAULT NOW() NOT NULL
 );
 
-PROMPT ============================================================
-PROMPT 43. TOOL_CHAIN_STEPS (Non-Partitioned) [NEW v3.7.5]
-PROMPT ============================================================
+-- ============================================================
+-- 43. TOOL_CHAIN_STEPS (Non-Partitioned) [NEW v3.7.5]
+-- ============================================================
 
 CREATE TABLE TOOL_CHAIN_STEPS (
     CHAIN_STEP_ID    VARCHAR(64)  PRIMARY KEY,
@@ -6446,6 +6446,6 @@ CREATE TABLE TOOL_CHAIN_STEPS (
 );
 CREATE INDEX IDX_TCS_CHAIN ON TOOL_CHAIN_STEPS(CHAIN_ID, STEP_ORDER);
 
-PROMPT ============================================================
+-- ============================================================
 
 

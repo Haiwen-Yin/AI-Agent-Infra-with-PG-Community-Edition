@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - PG Community Edition - Connection Pool Tests"""
+"""AI Agent Infra v3.8.0 - PG Community Edition - Connection Pool Tests"""
 
 import sys
 import os

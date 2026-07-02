@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - PG Community Edition - Event Bus + Hook Execution
+"""AI Agent Infra v3.8.0 - PG Community Edition - Event Bus + Hook Execution
 
 Event publishing, subscription management, and LOOP_HOOKS execution engine.
 Agent capability discovery.
@@ -54,15 +54,15 @@ def subscribe_agent(
     filter_pattern: Optional[str] = None,
 ) -> str:
     existing = execute_query_one(
-        "SELECT SUB_ID FROM EVENT_SUBSCRIPTIONS WHERE AGENT_ID = :aid AND EVENT_TYPE = :etype",
+        "SELECT SUBSCRIPTION_ID FROM EVENT_SUBSCRIPTIONS WHERE AGENT_ID = :aid AND EVENT_TYPE = :etype",
         {"aid": agent_id, "etype": event_type},
     )
     if existing:
         return existing["sub_id"]
 
     return execute_insert_returning_id(
-        """INSERT INTO EVENT_SUBSCRIPTIONS (SUB_ID, AGENT_ID, EVENT_TYPE, FILTER_PATTERN)
-           VALUES (gen_random_uuid()::text, :aid, :etype, :filter) RETURNING SUB_ID """,
+        """INSERT INTO EVENT_SUBSCRIPTIONS (SUBSCRIPTION_ID, AGENT_ID, EVENT_TYPE, FILTER_PATTERN)
+           VALUES (gen_random_uuid()::text, :aid, :etype, :filter) RETURNING SUBSCRIPTION_ID """,
         {"aid": agent_id, "etype": event_type, "filter": filter_pattern},
     )
 
@@ -79,7 +79,7 @@ def get_pending_events(agent_id: str, limit: int = 50) -> List[Dict[str, Any]]:
     rows = execute_query(
         """SELECT e.* FROM EVENT_LOG e
            INNER JOIN EVENT_SUBSCRIPTIONS s ON s.EVENT_TYPE = e.EVENT_TYPE
-           WHERE s.AGENT_ID = :aid AND s.ENABLED = 'Y'
+           WHERE s.AGENT_ID = :aid AND s.STATUS = 'ACTIVE'
              AND e.CREATED_AT > (
                SELECT MAX(CREATED_AT) FROM EVENT_LOG e2
                WHERE e2.SOURCE_ID = :aid AND e2.EVENT_TYPE = 'ACK'
@@ -212,18 +212,18 @@ def _execute_mcp_call(config_str: str, payload: str):
 
 def register_capability(agent_id: str, capability: str, confidence: float = 1.0) -> str:
     existing = execute_query_one(
-        "SELECT CAP_ID FROM AGENT_CAPABILITY_INDEX WHERE AGENT_ID = :aid AND CAPABILITY = :cap",
+        "SELECT CAPABILITY_ID FROM AGENT_CAPABILITY_INDEX WHERE AGENT_ID = :aid AND CAPABILITY = :cap",
         {"aid": agent_id, "cap": capability},
     )
     if existing:
         execute(
-            "UPDATE AGENT_CAPABILITY_INDEX SET CONFIDENCE = :conf, LAST_VERIFIED_AT = NOW() WHERE CAP_ID = :cid",
+            "UPDATE AGENT_CAPABILITY_INDEX SET CONFIDENCE = :conf, LAST_VERIFIED_AT = NOW() WHERE CAPABILITY_ID = :cid",
             {"conf": confidence, "cid": existing["cap_id"]},
         )
         return existing["cap_id"]
     return execute_insert_returning_id(
-        """INSERT INTO AGENT_CAPABILITY_INDEX (CAP_ID, AGENT_ID, CAPABILITY, CONFIDENCE, LAST_VERIFIED_AT)
-           VALUES (gen_random_uuid()::text, :aid, :cap, :conf, NOW()) RETURNING CAP_ID """,
+        """INSERT INTO AGENT_CAPABILITY_INDEX (CAPABILITY_ID, AGENT_ID, CAPABILITY, CONFIDENCE, LAST_VERIFIED_AT)
+           VALUES (gen_random_uuid()::text, :aid, :cap, :conf, NOW()) RETURNING CAPABILITY_ID """,
         {"aid": agent_id, "cap": capability, "conf": confidence},
     )
 

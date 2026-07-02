@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - PG Community Edition - Property Graph API
+"""AI Agent Infra v3.8.0 - PG Community Edition - Property Graph API
 
 Core graph operations using Apache AGE cypher queries with SQL fallback.
 Provides neighbor traversal, path finding, community detection, and graph analytics.

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - Community Edition (PG) - Web Visualization Server
+"""AI Agent Infra v3.8.0 - Community Edition (PG) - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -25,7 +25,7 @@ from lib import spec_api, collab_api, branch_api, loop_api
 from lib import message_api, orchestrator, event_bus, trace_api, monitor_api, tool_registry
 from lib import security, config, user_api
 
-VERSION = "3.7.5"
+VERSION = "3.8.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - PG Community Edition - Loop Engineering API
+"""AI Agent Infra v3.8.0 - PG Community Edition - Loop Engineering API
 
 Loop Engineering: design goal-driven autonomous feedback loops for AI agents.
 Each Loop definition is stored as an ENTITY (ENTITY_TYPE='LOOP_DEFINITION')
@@ -455,7 +455,7 @@ def record_iteration(
             {"tokens": token_usage, "id": run_id})
     if evaluation_passed:
         execute("UPDATE LOOP_RUNS SET STATUS = 'COMPLETED', COMPLETED_AT = NOW(), "
-                "FINAL_RESULT = 'Goal achieved at iteration ' || TO_CHAR(ITERATION_COUNT) "
+                "FINAL_RESULT = 'Goal achieved at iteration ' || ITERATION_COUNT::text "
                 "WHERE RUN_ID = :id", {"id": run_id})
     return iter_id
 
