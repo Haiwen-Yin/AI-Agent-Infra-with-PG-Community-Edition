@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - PG Community Edition - Collaboration Group API
+"""AI Agent Infra v3.9.0 - PG Community Edition - Collaboration Group API
 
 Collaboration group lifecycle, membership management,
 shared/personal workspaces, entity sharing, and group statistics.
@@ -309,3 +309,18 @@ def get_group_loop_status(group_id: int) -> Dict[str, Any]:
         WHERE m.collab_group_id = %s AND e.entity_type = 'LOOP_DEFINITION'
     """, (group_id,))
     return {"group_id": group_id, "loops": [_row_to_dict(r) for r in rows]}
+
+
+def get_member_branches(group_id):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"get_member_branches is not yet implemented in PostgreSQL edition")
+
+
+def sync_group_context(group_id, agent_id):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"sync_group_context is not yet implemented in PostgreSQL edition")
+
+
+def validate_group_against_spec(group_id, spec_id):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"validate_group_against_spec is not yet implemented in PostgreSQL edition")

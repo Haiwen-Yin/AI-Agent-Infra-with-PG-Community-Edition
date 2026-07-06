@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ============================================================
--- AI Agent Infra v3.8.0 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
+-- AI Agent Infra v3.9.0 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
 -- ============================================================
 
 -- ============================================================
@@ -2178,7 +2178,7 @@ DECLARE
     v_hash    TEXT;
 BEGIN
     v_salt := encode(gen_random_bytes(16), 'hex');
-    v_hash := 'SHA256:' || encode(digest(COALESCE(p_password, 'changeme') || v_salt, 'sha256'), 'hex');
+    v_hash := 'SHA256:' || upper(encode(digest(COALESCE(p_password, 'changeme') || v_salt, 'sha256'), 'hex');
 
     INSERT INTO system_users (username, password_hash, salt, role, status, auth_source)
     VALUES (p_username, v_hash, v_salt, p_role, 'ACTIVE', p_auth_source)
@@ -2494,5 +2494,5 @@ $$;
 
 
 -- ============================================================
--- AI Agent Infra v3.8.0 - Community Edition - PostgreSQL 18.3 API Deployment Complete
+-- AI Agent Infra v3.9.0 - Community Edition - PostgreSQL 18.3 API Deployment Complete
 -- ============================================================

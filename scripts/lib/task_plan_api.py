@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - PG Community Edition - Task Plan API
+"""AI Agent Infra v3.9.0 - PG Community Edition - Task Plan API
 
 Task plan creation, step management, dependency tracking,
 snapshot/restore, and plan statistics.
@@ -322,3 +322,13 @@ def get_step_loop(step_id: int) -> Optional[Dict[str, Any]]:
         FROM task_loop_binding b WHERE b.step_id = %s
     """, (step_id,))
     return _row_to_dict(row) if row else None
+
+
+def distribute_plan_to_group(plan_id, group_id):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"distribute_plan_to_group is not yet implemented in PostgreSQL edition")
+
+
+def get_branch_plans(branch_id):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"get_branch_plans is not yet implemented in PostgreSQL edition")

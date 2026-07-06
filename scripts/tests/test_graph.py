@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - PG Community Edition - Property Graph API Tests"""
+"""AI Agent Infra v3.9.0 - PG Community Edition - Property Graph API Tests"""
 
 import sys
 import os

@@ -1,15 +1,15 @@
-# AI Agent Infra with PostgreSQL - Community Edition v3.8.0
+# AI Agent Infra with PostgreSQL - Community Edition v3.9.0
 
-[![Version](https://img.shields.io/badge/version-v3.8.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.9.0-blue.svg)](CHANGELOG.md)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.3-blue.svg)](https://www.postgresql.org/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent Infrastructure Architecture — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on PostgreSQL 18.3.**
 
-> **v3.8.0 (2026-07-02): Multi-Agent Integration Testing — connection.py _convert_params rewrite (repeated :param + mixed %s), execute_query_one commit fix, 1_schema.sql double-ON policy fix + loop_audit FK fix, 2_api.sql authenticate v_salt fix, event_bus/monitor_api column name fixes, PROMPT→comment. Full 5-phase deployment on fresh PG 18.3: 69 tables, 176 functions, 4 Business Agents registered, 15/15 functional tests passed.** See CHANGELOG.md for historical versions. [CHANGELOG.md](CHANGELOG.md)
+> **v3.9.0 (2026-07-05): Ecosystem Connectivity — MCP Server (10 tools, stdio+SSE), SSE streaming output, Human-in-the-Loop approval (step/loop/tool), Agent Protocol compatibility, multi-model routing. New: mcp_server.py, approval_api.py, approvals.html. DB: APPROVAL_REQUESTS table + PAUSED state.** See CHANGELOG.md for historical versions. [CHANGELOG.md](CHANGELOG.md)
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.5.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.9.0.md)**
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 

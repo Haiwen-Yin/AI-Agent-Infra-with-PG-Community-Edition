@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - PG Community Edition - Spec API
+"""AI Agent Infra v3.9.0 - PG Community Edition - Spec API
 
 Spec Driven Development: spec CRUD, plan linkage, validation,
 derivation, and spec status management.
@@ -507,3 +507,8 @@ def derive_loop_from_spec(spec_id: str, agent_id: str) -> Dict[str, Any]:
         "spec_id": spec_id,
         "owned_by_agent": agent_id
     }
+
+
+def validate_branch_against_spec(branch_id, spec_id):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"validate_branch_against_spec is not yet implemented in PostgreSQL edition")

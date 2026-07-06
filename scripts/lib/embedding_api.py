@@ -724,7 +724,7 @@ tag_scores AS (
     WHERE et.ENTITY_ID IN (SELECT ENTITY_ID FROM candidates)
     GROUP BY et.ENTITY_ID
 )"""
-        tag_select_score = "CASE WHEN ts.total_tags > 0 THEN NVL(ts.matched_tags, 0) / ts.total_tags ELSE 0 END AS tag_score"
+        tag_select_score = "CASE WHEN ts.total_tags > 0 THEN COALESCE(ts.matched_tags, 0) / ts.total_tags ELSE 0 END AS tag_score"
 
     graph_cte = ""
     graph_join = ""
@@ -751,7 +751,7 @@ graph_prox AS (
       AND TARGET_ID IN (SELECT ENTITY_ID FROM candidates){depth2_join}
 )"""
         graph_join = "LEFT JOIN (SELECT ENTITY_ID, MAX(proximity) AS proximity FROM graph_prox GROUP BY ENTITY_ID) gp ON gp.ENTITY_ID = c.ENTITY_ID"
-        graph_select = "NVL(gp.proximity, 0) AS graph_proximity"
+        graph_select = "COALESCE(gp.proximity, 0) AS graph_proximity"
 
     tag_join_left = "LEFT JOIN tag_scores ts ON ts.ENTITY_ID = c.ENTITY_ID" if tags else ""
     graph_join_left = graph_join if graph_seed_entity_id else ""
@@ -765,7 +765,7 @@ graph_prox AS (
         existing = rel_score_expr
         rel_score_expr = f"{existing} + CASE WHEN LOWER(c.CATEGORY) = :fcat THEN 0.3 ELSE 0 END"
 
-    importance_part = "NVL(c.IMPORTANCE, 0) / 100.0"
+    importance_part = "COALESCE(c.IMPORTANCE, 0) / 100.0"
     rel_score_expr = f"LEAST({rel_score_expr} + {importance_part}, 1.0)"
 
     tag_final_expr = tag_select_score if tags else "0 AS tag_score"
@@ -775,7 +775,7 @@ graph_prox AS (
         f":vw * (1 - c.vec_distance)"
         f" + :fw * CASE WHEN c.ft_raw > 0 THEN LEAST(c.ft_raw / 100.0, 1.0) ELSE 0 END"
         f" + :rw * ({rel_score_expr} + {tag_final_expr.replace(' AS tag_score', '')}) / 2.0"
-        f" + :gw * ({graph_final_expr.replace(' AS graph_proximity', '')} + LEAST(NVL(ec.edge_count, 0) / 10.0, 0.1)) / 2.0"
+        f" + :gw * ({graph_final_expr.replace(' AS graph_proximity', '')} + LEAST(COALESCE(ec.edge_count, 0) / 10.0, 0.1)) / 2.0"
     )
 
     sql = f"""
@@ -807,7 +807,7 @@ SELECT c.ENTITY_ID, c.ENTITY_TYPE, c.TITLE, c.CATEGORY, c.IMPORTANCE,
        CASE WHEN c.ft_raw > 0 THEN LEAST(c.ft_raw / 100.0, 1.0) ELSE 0 END AS ft_score,
        LEAST({rel_score_expr}, 1.0) AS rel_score,
        {tag_final_expr},
-       NVL(ec.edge_count, 0) AS edge_count,
+       COALESCE(ec.edge_count, 0) AS edge_count,
        {graph_final_expr},
        LEAST({final_score_expr}, 1.0) AS final_score
 FROM candidates c

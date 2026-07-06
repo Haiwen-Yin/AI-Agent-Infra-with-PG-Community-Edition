@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - PG Community Edition - Loop Engineering API
+"""AI Agent Infra v3.9.0 - PG Community Edition - Loop Engineering API
 
 Loop Engineering: design goal-driven autonomous feedback loops for AI agents.
 Each Loop definition is stored as an ENTITY (ENTITY_TYPE='LOOP_DEFINITION')
@@ -490,7 +490,7 @@ def get_loop_stats(loop_id: str) -> Dict[str, Any]:
             (SELECT COUNT(*) FROM LOOP_RUNS WHERE LOOP_ID = :id AND STATUS IN ('RUNNING','PAUSED')) AS running,
             (SELECT COUNT(*) FROM LOOP_ITERATIONS li JOIN LOOP_RUNS lr ON li.RUN_ID = lr.RUN_ID
              WHERE lr.LOOP_ID = :id) AS total_iterations,
-            (SELECT NVL(SUM(TOTAL_TOKENS), 0) FROM LOOP_RUNS WHERE LOOP_ID = :id) AS total_tokens
+            (SELECT COALESCE(SUM(TOTAL_TOKENS), 0) FROM LOOP_RUNS WHERE LOOP_ID = :id) AS total_tokens
         
     """, {"id": loop_id})
     return dict(row) if row else {}

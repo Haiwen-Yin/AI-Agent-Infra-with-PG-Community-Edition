@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - PG Community Edition - Context Branching API
+"""AI Agent Infra v3.9.0 - PG Community Edition - Context Branching API
 
 Context branch lifecycle management: fork, merge, abandon, pause, resume,
 branch comparison, conflict detection, and lesson extraction from abandoned branches.
@@ -351,3 +351,33 @@ def list_branches(workspace_id: Optional[int] = None, agent_id: Optional[str] = 
     where = "WHERE {}".format(" AND ".join(conditions)) if conditions else ""
     params.append(limit)
     return execute_query(f"SELECT * FROM context_branches {where} ORDER BY created_at DESC LIMIT %s", params)
+
+
+def extract_lessons_from_branch(branch_id, agent_id=None):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"extract_lessons_from_branch is not yet implemented in PostgreSQL edition")
+
+
+def fork_branch_for_spec(spec_id, parent_branch_id, agent_id):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"fork_branch_for_spec is not yet implemented in PostgreSQL edition")
+
+
+def fork_parallel_branches(parent_branch_id, agent_ids):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"fork_parallel_branches is not yet implemented in PostgreSQL edition")
+
+
+def get_branch_context_chain(branch_id):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"get_branch_context_chain is not yet implemented in PostgreSQL edition")
+
+
+def merge_branch_with_validation(source_branch_id, target_branch_id, agent_id):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"merge_branch_with_validation is not yet implemented in PostgreSQL edition")
+
+
+def merge_parallel_branches(branch_ids, target_branch_id, agent_id):
+    """Stub — not yet implemented in PG edition."""
+    raise NotImplementedError(f"merge_parallel_branches is not yet implemented in PostgreSQL edition")

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - Community Edition (PG) - Web Visualization Server
+"""AI Agent Infra v3.9.0 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -13,19 +13,22 @@ import signal
 import sys
 import time
 import urllib.parse
+import urllib.request
+import urllib.error
 from decimal import Decimal
 from http.cookies import SimpleCookie
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib import connection, memory_api, knowledge_api, agent_api
 from lib import task_plan_api, workspace_api, harness_api, graph_api
-from lib import spec_api, collab_api, branch_api, loop_api
-from lib import message_api, orchestrator, event_bus, trace_api, monitor_api, tool_registry
+from lib import spec_api, collab_api, branch_api
 from lib import security, config, user_api
+from lib import loop_api
+from lib import message_api, orchestrator, event_bus, trace_api, monitor_api, tool_registry
 
-VERSION = "3.8.0"
+VERSION = "3.9.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -46,6 +49,8 @@ PAGE_ROUTES = {
     '/branches': 'branches.html',
     '/loops': 'loops.html',
     '/monitor': 'monitor.html',
+    '/audit': 'audit.html',
+    '/approvals': 'approvals.html',
 }
 
 PUBLIC_API = {'/api/health', '/api/login', '/portal/api/register', '/portal/api/login', '/api/admin/agent/register', '/api/admin/agent/recover', '/api/admin/token/generate', '/api/admin/token/rotate', '/api/admin/skill/list', '/api/admin/skill/acquire', '/api/admin/skill/create', '/api/admin/skill/update', '/api/admin/skill/delete', '/api/admin/skill/upload'}
@@ -107,25 +112,26 @@ def _get_session(request_handler):
 
 def _authenticate_local(username, password):
     try:
-        result = connection.execute_query_one(
-            "SELECT user_manager.authenticate(%s, %s) AS result",
-            (username, password)
+        row = connection.execute_query_one(
+            "SELECT user_id, username, password_hash, salt, role, status, auth_source FROM system_users WHERE username = :uname",
+            {"uname": username}
         )
     except Exception:
         return None
-    if not result or not result.get('result'):
+    if not row or row.get('status') != 'ACTIVE':
         return None
-    val = result['result']
-    if isinstance(val, str):
-        val = json.loads(val)
-    if isinstance(val, dict) and val.get('authenticated'):
-        return {
-            'user_id': val['user_id'],
-            'username': val['username'],
-            'role': val.get('role', 'USER'),
-            'status': 'ACTIVE',
-            'auth_source': 'LOCAL',
-        }
+    if row.get('auth_source', 'LOCAL') != 'LOCAL':
+        return None
+    stored_hash = row.get('password_hash', '')
+    if stored_hash and stored_hash.startswith('SHA256:'):
+        expected = stored_hash[7:]
+        salt = row.get('salt', '') or ''
+        if salt:
+            actual = hashlib.sha256((password + salt).encode()).hexdigest()
+        else:
+            actual = hashlib.sha256(password.encode()).hexdigest()
+        if actual.upper() == expected.upper():
+            return row
     return None
 
 
@@ -168,7 +174,7 @@ def _graph_all():
     nodes = []
     for item in all_items:
         tc = type_colors.get(item.get('entity_type', ''), '#666')
-        imp = float(item.get('importance', 5) or 5)
+        imp = item.get('importance', 5)
         nodes.append({
             'id': item['entity_id'],
             'label': (item.get('title') or '')[:40],
@@ -279,6 +285,7 @@ def _memory_to_vis():
 
 
 class VisHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     allow_reuse_address = True
 
     def log_message(self, fmt, *args):
@@ -430,6 +437,22 @@ class VisHandler(BaseHTTPRequestHandler):
             self._handle_skill_post(path)
             return
 
+        # v3.9.0: Approval routes
+        if path.startswith('/api/approvals/') and path.endswith('/approve'):
+            self._api_approval_approve(path)
+            return
+        if path.startswith('/api/approvals/') and path.endswith('/reject'):
+            self._api_approval_reject(path)
+            return
+
+        # v3.9.0: Agent Protocol routes
+        if path == '/ap/v1/agent/tasks':
+            self._api_ap_create_task()
+            return
+        if path.startswith('/ap/v1/agent/tasks/') and path.endswith('/steps') and self.command == 'POST':
+            self._api_ap_execute_step(path)
+            return
+
         if path == '/api/branch/fork':
             self._api_branch_fork()
             return
@@ -546,30 +569,29 @@ class VisHandler(BaseHTTPRequestHandler):
             self._handle_admin_skill_upload()
             return
 
-
         if path == '/api/loops/create':
-            self._api_loops_create()
+            self._handle_loop_create()
             return
         if path == '/api/loops/delete':
-            self._api_loops_delete()
+            self._handle_loop_delete()
             return
         if path == '/api/loops/runs/start':
-            self._api_loops_run_start()
+            self._handle_loop_run_start()
             return
         if path == '/api/loops/runs/pause':
-            self._api_loops_run_pause()
+            self._handle_loop_run_control('pause')
             return
         if path == '/api/loops/runs/resume':
-            self._api_loops_run_resume()
+            self._handle_loop_run_control('resume')
             return
         if path == '/api/loops/runs/stop':
-            self._api_loops_run_stop()
+            self._handle_loop_run_control('stop')
             return
         if path == '/api/loops/iterate':
-            self._api_loops_iterate()
+            self._handle_loop_iterate()
             return
         if path == '/api/loops/hooks/add':
-            self._api_loops_hook_add()
+            self._handle_loop_hook_add()
             return
         elif path == '/api/loops/from-spec':
             self._api_loops_from_spec()
@@ -627,6 +649,14 @@ class VisHandler(BaseHTTPRequestHandler):
         try:
             if path == '/api/health':
                 self._send_json({'status': 'ok', 'version': VERSION})
+            elif path == '/api/session/heartbeat':
+                sd = _get_session(self)
+                if sd:
+                    self._send_json({'status': 'ok', 'session': 'active'})
+                else:
+                    self._send_json({'status': 'expired'}, 401)
+            elif path == '/api/knowledge':
+                self._send_json({'status': 'ok', 'version': VERSION})
             elif path == '/api/knowledge':
                 self._send_json(_knowledge_to_vis())
             elif path == '/api/memory':
@@ -681,6 +711,26 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._send_json(graph_api.graph_search(keyword=q if q else None, entity_type=et))
             elif path == '/api/graph/all':
                 self._send_json(_graph_all())
+            elif path == '/api/branches':
+                self._api_branch_list(qs)
+            elif path.startswith('/api/branch/tree/'):
+                self._api_branch_tree(path)
+            elif path.startswith('/api/branch/diff/'):
+                self._api_branch_diff(path)
+            elif path.startswith('/api/branch/') and path.endswith('/chain'):
+                self._api_branch_chain(path, qs)
+            elif path.startswith('/api/branch/') and path.endswith('/stats'):
+                self._api_branch_stats(path)
+            elif path.startswith('/api/branch/') and path.endswith('/spec'):
+                self._api_branch_spec(path)
+            elif path.startswith('/api/branch/') and path.endswith('/plans'):
+                self._api_branch_plans(path)
+            elif path.startswith('/api/branch/') and '/validate-spec/' in path:
+                self._api_branch_validate_spec(path)
+            elif path.startswith('/api/branch/') and path.endswith('/plans'):
+                self._api_branch_plans(path)
+            elif path == '/api/collab/group-branches' or path == '/api/collab/group-spec-validation':
+                self._api_collab_branch(path, qs)
             elif path == '/api/loops':
                 self._api_loops_list(qs)
             elif path.startswith('/api/loops/') and path.endswith('/stats'):
@@ -705,28 +755,28 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_task_step_loop(path)
             elif path.startswith('/api/collab/') and path.endswith('/loop'):
                 self._api_collab_loop(path)
-            elif path == '/api/branches':
-                self._api_branch_list(qs)
-            elif path.startswith('/api/branch/tree/'):
-                self._api_branch_tree(path)
-            elif path.startswith('/api/branch/diff/'):
-                self._api_branch_diff(path)
-            elif path.startswith('/api/branch/') and path.endswith('/chain'):
-                self._api_branch_chain(path, qs)
-            elif path.startswith('/api/branch/') and path.endswith('/stats'):
-                self._api_branch_stats(path)
-            elif path.startswith('/api/branch/') and path.endswith('/spec'):
-                self._api_branch_spec(path)
-            elif path.startswith('/api/branch/') and path.endswith('/plans'):
-                self._api_branch_plans(path)
-            elif path.startswith('/api/branch/') and '/validate-spec/' in path:
-                self._api_branch_validate_spec(path)
-            elif path.startswith('/api/branch/') and path.endswith('/plans'):
-                self._api_branch_plans(path)
-            elif path == '/api/collab/group-branches' or path == '/api/collab/group-spec-validation':
-                self._api_collab_branch(path, qs)
             elif path.startswith('/api/branch/'):
                 self._api_branch_get(path)
+            elif path == '/api/audit':
+                self._api_audit_list(qs)
+            elif path == '/api/audit/stats':
+                self._api_audit_stats(qs)
+            elif path == '/api/approvals':
+                self._api_approvals_list(qs)
+            elif path == '/api/approvals/stats':
+                self._api_approvals_stats(qs)
+            elif path == '/ap/v1/agent/tasks':
+                # Agent Protocol: list tasks
+                from lib import task_plan_api
+                plans = task_plan_api.list_plans()
+                self._send_json([{"task_id": p.get("plan_id"), "input": p.get("goal", ""), "status": p.get("status", "")} for p in plans])
+            elif path.startswith('/ap/v1/agent/tasks/') and path.endswith('/steps'):
+                # Agent Protocol: list steps for a task
+                from lib import task_plan_api
+                parts = path.split('/')
+                task_id = parts[-2]
+                steps = task_plan_api.list_steps(task_id)
+                self._send_json([{"step_id": s.get("step_id"), "status": s.get("status", "")} for s in steps])
             # v3.7.5 new routes
             elif path == '/api/collab/messages':
                 self._api_messages_list(qs)
@@ -760,7 +810,7 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_tools_list(qs)
             elif path == '/api/tools/chains':
                 self._api_tool_chains_list()
-            elif path.startswith('/api/tools/') and not '/import' in path:
+            elif path.startswith('/api/tools/') and '/import' not in path:
                 self._api_tools_get(path)
             elif path == '/api/events/pending':
                 self._api_events_pending(qs)
@@ -780,7 +830,7 @@ class VisHandler(BaseHTTPRequestHandler):
         )
         sessions_list = agent_api.get_active_sessions()
         collaborations = connection.execute_query(
-            "SELECT collab_id, source_agent_id, target_agent_id, col_type, entity_id, "
+            "SELECT collab_id AS col_id, source_agent_id, target_agent_id, col_type, entity_id, "
             "context, strength, created_at FROM agent_collaboration ORDER BY created_at DESC"
         )
         self._send_json({
@@ -803,26 +853,26 @@ class VisHandler(BaseHTTPRequestHandler):
         )
         for ws in workspaces:
             ctx_count = connection.execute_query_one(
-                "SELECT COUNT(*) AS cnt FROM workspace_context WHERE workspace_id = %s",
-                (ws['workspace_id'],)
+                "SELECT COUNT(*) AS cnt FROM workspace_context WHERE workspace_id = :wsid",
+                {"wsid": ws['workspace_id']}
             )
             ws['context_count'] = ctx_count['cnt'] if ctx_count else 0
             br_count = connection.execute_query_one(
-                "SELECT COUNT(*) AS cnt FROM context_branches WHERE workspace_id = %s",
-                (ws['workspace_id'],)
+                "SELECT COUNT(*) AS cnt FROM context_branches WHERE workspace_id = :wsid",
+                {"wsid": ws['workspace_id']}
             )
             ws['branch_count'] = br_count['cnt'] if br_count else 0
             ctx_chain = connection.execute_query(
                 "SELECT context_id, context_type, agent_id, context_data, parent_context_id, created_at "
-                "FROM workspace_context WHERE workspace_id = %s ORDER BY created_at DESC",
-                (ws['workspace_id'],)
+                "FROM workspace_context WHERE workspace_id = :wsid ORDER BY created_at DESC",
+                {"wsid": ws['workspace_id']}
             )
             ws['context_chain'] = [_clean_row(c) for c in ctx_chain]
             linked = connection.execute_query(
                 "SELECT wt.plan_id, tp.goal, tp.status FROM workspace_tasks wt "
                 "JOIN task_plans tp ON wt.plan_id = tp.plan_id "
-                "WHERE wt.workspace_id = %s",
-                (ws['workspace_id'],)
+                "WHERE wt.workspace_id = :wsid",
+                {"wsid": ws['workspace_id']}
             )
             ws['linked_tasks'] = [_clean_row(t) for t in linked]
             ws['task_count'] = len(linked)
@@ -845,8 +895,8 @@ class VisHandler(BaseHTTPRequestHandler):
         for g in groups:
             members = connection.execute_query(
                 "SELECT member_id, agent_id, role, personal_workspace_id, joined_at, status "
-                "FROM collab_group_members WHERE group_id = %s ORDER BY joined_at",
-                (g['group_id'],)
+                "FROM collab_group_members WHERE group_id = :gid ORDER BY joined_at",
+                {"gid": g['group_id']}
             )
             g['members'] = [_clean_row(m) for m in members]
         self._send_json({'groups': [_clean_row(g) for g in groups]})
@@ -1118,7 +1168,7 @@ class VisHandler(BaseHTTPRequestHandler):
         collab_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM collab_groups")
         skill_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'SKILL'")
         try:
-            audit_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entity_access_audit WHERE 1=0")
+            audit_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM context_audit_log WHERE resolution_status = 'OPEN'")
         except Exception:
             audit_row = None
         self._send_json({
@@ -1130,7 +1180,7 @@ class VisHandler(BaseHTTPRequestHandler):
             'collab_count': collab_row['cnt'] if collab_row else 0,
             'skill_count': skill_row['cnt'] if skill_row else 0,
             'audit_open_count': audit_row['cnt'] if audit_row else 0,
-            'active_branches': connection.execute_query_one("SELECT COUNT(*) AS c FROM context_branches WHERE status='ACTIVE'")['c'],
+            'active_branches': connection.execute_query_one("SELECT COUNT(*) AS c FROM context_branches WHERE branch_status='ACTIVE'")['c'],
             'total_branches': connection.execute_query_one("SELECT COUNT(*) AS c FROM context_branches")['c'],
         })
 
@@ -1138,7 +1188,6 @@ class VisHandler(BaseHTTPRequestHandler):
         workspace_id = qs.get('workspace_id', [None])[0]
         agent_id = qs.get('agent_id', [None])[0]
         status = qs.get('status', [None])[0]
-        branch_type = qs.get('branch_type', [None])[0]
         result = branch_api.list_branches(
             workspace_id=workspace_id, agent_id=agent_id,
             status=status,
@@ -1333,7 +1382,7 @@ class VisHandler(BaseHTTPRequestHandler):
             from lib import spec_api
             from lib.connection import execute_query
             specs = execute_query(
-                'SELECT s.entity_id, e.title, s.spec_status FROM spec_meta s JOIN entities e ON s.entity_id=e.entity_id AND s.entity_type=e.entity_type WHERE s.branch_id = %s',
+                'SELECT S.ENTITY_ID, E.TITLE, S.SPEC_STATUS FROM SPEC_META S JOIN ENTITIES E ON S.ENTITY_ID=E.ENTITY_ID AND S.ENTITY_TYPE=E.ENTITY_TYPE WHERE S.BRANCH_ID = :vbid',
                 {'vbid': branch_id}
             )
             self._send_json([_clean_row(r) for r in specs])
@@ -1526,8 +1575,8 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._send_json({'success': False, 'error': 'Username min 3 chars, password min 6 chars'}, 400)
                 return
             db_exists = connection.execute_query_one(
-                "SELECT user_id, auth_source FROM system_users WHERE UPPER(username) = UPPER(%s)",
-                (username,),
+                "SELECT USER_ID, AUTH_SOURCE FROM SYSTEM_USERS WHERE UPPER(USERNAME) = UPPER(%s)",
+                [username],
             )
             if db_exists:
                 if db_exists.get('auth_source') == 'LDAP':
@@ -1542,7 +1591,7 @@ class VisHandler(BaseHTTPRequestHandler):
             session_id = _create_session(result['username'], result['user_id'], result['role'])
             sess = sessions[session_id]
             pool_agent = connection.execute_query_one(
-                "SELECT agent_id FROM agent_registry WHERE status = 'ACTIVE' AND agent_id LIKE 'AGENT_POOL_%%' ORDER BY agent_id LIMIT 1"
+                "SELECT AGENT_ID FROM AGENT_REGISTRY WHERE STATUS = 'ACTIVE' AND AGENT_ID LIKE 'AGENT_POOL_%%' ORDER BY AGENT_ID LIMIT 1"
             )
             if pool_agent:
                 sess['agent_id'] = pool_agent['agent_id']
@@ -1553,53 +1602,6 @@ class VisHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(body_out)))
             self.end_headers()
             self.wfile.write(body_out)
-        except Exception as e:
-            self._send_json({'success': False, 'error': str(e)}, 500)
-
-    def _handle_portal_chat_send(self):
-        try:
-            sess_data = _get_session(self)
-            if not sess_data:
-                self._send_error(401, 'Not authenticated')
-                return
-            session_id, sess = sess_data
-            body = self._read_body()
-            data = json.loads(body) if body else {}
-            message = data.get('message', '').strip()
-            if not message:
-                self._send_json({'success': False, 'error': 'Empty message'})
-                return
-            agent_id = sess.get('agent_id')
-            username = sess.get('username', 'unknown')
-            workspace_id = sess.get('workspace_id')
-            ctx_id = None
-            if workspace_id:
-                ctx_data = json.dumps({'role': 'user', 'content': message, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')})
-                ctx_row = connection.execute_query_one(
-                    "INSERT INTO workspace_context (workspace_id, context_type, context_data, agent_id) "
-                    "VALUES (%s, 'CHAT_MESSAGE', %s, %s) RETURNING context_id",
-                    (workspace_id, ctx_data, agent_id)
-                )
-                if ctx_row:
-                    ctx_id = ctx_row['context_id']
-            connection.execute(
-                "INSERT INTO entities (entity_type, title, content, category, status, importance, owned_by_agent, visibility) "
-                "VALUES ('MEMORY', %s, %s, 'CHAT', 'ACTIVE', 3, %s, 'SHARED')",
-                [message[:200], message, agent_id or username]
-            )
-            if workspace_id:
-                reply_data = json.dumps({'role': 'agent', 'content': 'Message received and stored.', 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')})
-                connection.execute(
-                    "INSERT INTO workspace_context (workspace_id, context_type, context_data, agent_id) "
-                    "VALUES (%s, 'CHAT_MESSAGE', %s, %s)",
-                    (workspace_id, reply_data, agent_id)
-                )
-            self._send_json({
-                'success': True,
-                'reply': 'Message received and stored.',
-                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
-                'user_context_id': ctx_id,
-            })
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
 
@@ -1619,10 +1621,28 @@ class VisHandler(BaseHTTPRequestHandler):
         session_id = _create_session(user['username'], str(user['user_id']), user.get('role', 'user'))
         sess = sessions[session_id]
         pool_agent = connection.execute_query_one(
-            "SELECT agent_id FROM agent_registry WHERE status = 'ACTIVE' AND agent_id LIKE 'AGENT_POOL_%%' ORDER BY agent_id LIMIT 1"
+            "SELECT AGENT_ID FROM AGENT_REGISTRY WHERE STATUS = 'ACTIVE' AND AGENT_ID LIKE 'AGENT_POOL_%%' ORDER BY AGENT_ID LIMIT 1"
         )
         if pool_agent:
             sess['agent_id'] = pool_agent['agent_id']
+        # Auto-load most recent conversation workspace, or create one if none exists
+        try:
+            recent_ws = connection.execute_query_one(
+                "SELECT WORKSPACE_ID FROM WORKSPACES WHERE OWNER_USER_ID = :v_uid AND WORKSPACE_TYPE = 'CONVERSATION' AND STATUS = 'ACTIVE' ORDER BY CREATED_AT DESC LIMIT 1",
+                {"v_uid": str(user['user_id'])},
+            )
+            if recent_ws:
+                sess['workspace_id'] = recent_ws['workspace_id']
+                try:
+                    agent_session = agent_api.create_session(pool_agent['agent_id'] if pool_agent else '', owner_user_id=str(user['user_id']))
+                    sess['agent_session_id'] = agent_session
+                except Exception:
+                    pass
+            else:
+                ws = workspace_api.create_workspace(owner_user_id=str(user['user_id']), name='New Chat', workspace_type='CONVERSATION')
+                sess['workspace_id'] = ws
+        except Exception:
+            pass
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly; Max-Age=3600'.format(session_id))
@@ -1872,6 +1892,111 @@ class VisHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({'error': str(e)}, 500)
 
+    def _handle_portal_chat_send(self):
+        try:
+            sess_data = _get_session(self)
+            if not sess_data:
+                self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+                return
+            session_id, sess = sess_data
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+            message = data.get('message', '').strip()
+            if not message:
+                self._send_json({'success': False, 'error': 'Empty message'})
+                return
+            agent_id = sess.get('agent_id', '')
+            user_id = sess.get('user_id', '')
+            workspace_id = sess.get('workspace_id', '')
+            use_stream = data.get('stream', False)
+
+            ctx_id = None
+            if workspace_id:
+                _clear_portal_agent_context()
+                ctx_data = {'role': 'user', 'content': message, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')}
+                ctx_id = workspace_api.save_context(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id or user_id,
+                    context_type='CHAT_MESSAGE',
+                    context_data=ctx_data,
+                )
+                # Auto-name: if workspace name is "New Chat", rename based on first message
+                try:
+                    ws_info = connection.execute_query_one(
+                        "SELECT WORKSPACE_NAME, WORKSPACE_ALIAS FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid",
+                        {"v_wid": workspace_id},
+                    )
+                    if ws_info:
+                        current_name = ws_info.get('workspace_alias') or ws_info.get('workspace_name', '')
+                        if current_name == 'New Chat' or not current_name:
+                            auto_name = message[:40] + ('...' if len(message) > 40 else '')
+                            connection.execute(
+                                "UPDATE WORKSPACES SET WORKSPACE_ALIAS = :v_name, UPDATED_AT = NOW() WHERE WORKSPACE_ID = :v_wid",
+                                {"v_name": auto_name, "v_wid": workspace_id},
+                            )
+                except Exception:
+                    pass
+
+            if use_stream:
+                self._handle_chat_stream(message, agent_id, user_id, workspace_id, sess, ctx_id)
+            else:
+                _set_portal_agent_context(sess)
+                reply = _call_llm([{"role": "user", "content": message}])
+                if not reply:
+                    reply = _generate_sim_reply(message, agent_id, sess)
+                if workspace_id:
+                    reply_data = {'role': 'agent', 'content': reply, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')}
+                    workspace_api.save_context(
+                        workspace_id=workspace_id,
+                        agent_id=agent_id or user_id,
+                        context_type='CHAT_MESSAGE',
+                        context_data=reply_data,
+                    )
+                self._send_json({
+                    'success': True,
+                    'reply': reply,
+                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                    'user_context_id': ctx_id,
+                })
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_chat_stream(self, message, agent_id, user_id, workspace_id, sess, ctx_id):
+        """Send chat reply as SSE stream with token-by-token output."""
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'keep-alive')
+        self.end_headers()
+
+        def send_sse(data):
+            self.wfile.write(f"data: {json.dumps(data, ensure_ascii=False)}\n\n".encode())
+            self.wfile.flush()
+
+        full_reply = ""
+        model = _select_model_for_task("standard")
+        stream = _call_llm_stream([{"role": "user", "content": message}], model=model)
+
+        if stream is not None:
+            for token in stream:
+                full_reply += token
+                send_sse({"type": "token", "content": token})
+        else:
+            full_reply = _generate_sim_reply(message, agent_id, sess)
+            send_sse({"type": "token", "content": full_reply})
+
+        if workspace_id:
+            reply_data = {'role': 'agent', 'content': full_reply, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')}
+            workspace_api.save_context(
+                workspace_id=workspace_id,
+                agent_id=agent_id or user_id,
+                context_type='CHAT_MESSAGE',
+                context_data=reply_data,
+            )
+
+        send_sse({"type": "done", "timestamp": time.strftime('%Y-%m-%dT%H:%M:%S')})
+        _set_portal_agent_context(sess)
+
     def _handle_portal_chat_new(self):
         session_data = _get_session(self)
         if not session_data:
@@ -1879,7 +2004,6 @@ class VisHandler(BaseHTTPRequestHandler):
             return
         sess = session_data[1]
         agent_id = sess.get('agent_id', '')
-        username = sess.get('username', '')
         user_id = sess.get('user_id', '')
         if not agent_id:
             self._send_json({'success': False, 'error': 'No agent assigned'}, 400)
@@ -1894,7 +2018,7 @@ class VisHandler(BaseHTTPRequestHandler):
                 agent_api.end_session(agent_session_id)
             new_session = agent_api.create_session(agent_id, owner_user_id=user_id)
             sess['agent_session_id'] = new_session
-            ws = workspace_api.create_workspace(owner_user_id=username, name='New Chat', workspace_type='CONVERSATION')
+            ws = workspace_api.create_workspace(owner_user_id=user_id, name='New Chat', workspace_type='CONVERSATION')
             sess['workspace_id'] = ws
             if fork_context_id:
                 branch = branch_api.fork_branch(
@@ -1917,15 +2041,15 @@ class VisHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_body()
             data = json.loads(body)
-            ws_id = data.get('workspace_id')
+            ws_id = data.get('workspace_id', '').strip()
             new_name = data.get('name', '').strip()
-            if ws_id is None or not new_name:
+            if not ws_id or not new_name:
                 self._send_json({'success': False, 'error': 'workspace_id and name required'}, 400)
                 return
             connection.set_agent_context(None)
             connection.execute(
-                "UPDATE workspaces SET workspace_alias = %s, updated_at = CURRENT_TIMESTAMP WHERE workspace_id = %s",
-                (new_name, int(ws_id)),
+                "UPDATE WORKSPACES SET WORKSPACE_ALIAS = :v_name, UPDATED_AT = NOW() WHERE WORKSPACE_ID = :v_wid",
+                {"v_name": new_name, "v_wid": ws_id},
             )
             if session_data[1].get('agent_id'):
                 connection.set_agent_context(session_data[1]['agent_id'])
@@ -1933,32 +2057,51 @@ class VisHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
 
+    def _handle_portal_agent_release(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({"success": False, "error": "Not authenticated"}, 401)
+            return
+        try:
+            connection.set_agent_context(None)
+            _clear_portal_agent_context()
+            sess = session_data[1]
+            sess.pop("agent_id", None)
+            sess.pop("agent_session_id", None)
+            self._send_json({"success": True, "message": "Agent released"})
+        except Exception as e:
+            self._send_json({"success": False, "error": str(e)}, 500)
+
+
     def _handle_portal_chat_delete(self):
         session_data = _get_session(self)
         if not session_data:
             self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
             return
         sess = session_data[1]
-        username = sess.get('username', '')
+        user_id = sess.get('user_id', '')
         try:
             body = self._read_body()
             data = json.loads(body)
-            ws_id = data.get('workspace_id')
+            ws_id = data.get('workspace_id', '').strip()
             if not ws_id:
                 self._send_json({'success': False, 'error': 'workspace_id required'}, 400)
                 return
-            if sess.get('agent_id'):
-                connection.set_agent_context(sess['agent_id'])
+            connection.set_agent_context(None)
             ws = connection.execute_query_one(
-                "SELECT workspace_id FROM workspaces WHERE workspace_id = %s AND owner_user_id = %s",
-                (int(ws_id), username),
+                "SELECT WORKSPACE_ID FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid AND OWNER_USER_ID = :v_uid",
+                {"v_wid": ws_id, "v_uid": user_id},
             )
             if not ws:
+                if sess.get('agent_id'):
+                    connection.set_agent_context(sess['agent_id'])
                 self._send_json({'success': False, 'error': 'Workspace not found'}, 404)
                 return
-            connection.execute("DELETE FROM workspace_context WHERE workspace_id = %s", (int(ws_id),))
-            connection.execute("DELETE FROM workspaces WHERE workspace_id = %s", (int(ws_id),))
-            if sess.get('workspace_id') == int(ws_id):
+            connection.execute("DELETE FROM WORKSPACE_CONTEXT WHERE WORKSPACE_ID = :v_wid", {"v_wid": ws_id})
+            connection.execute("DELETE FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid", {"v_wid": ws_id})
+            if sess.get('agent_id'):
+                connection.set_agent_context(sess['agent_id'])
+            if sess.get('workspace_id') == ws_id:
                 sess.pop('workspace_id', None)
             self._send_json({'success': True})
         except Exception as e:
@@ -1970,24 +2113,27 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
             return
         sess = session_data[1]
-        username = sess.get('username', '')
+        user_id = sess.get('user_id', '')
         try:
             body = self._read_body()
             data = json.loads(body)
-            ws_id = data.get('workspace_id')
+            ws_id = data.get('workspace_id', '').strip()
             if not ws_id:
                 self._send_json({'success': False, 'error': 'workspace_id required'}, 400)
                 return
-            if sess.get('agent_id'):
-                connection.set_agent_context(sess['agent_id'])
+            connection.set_agent_context(None)
             ws = connection.execute_query_one(
-                "SELECT workspace_id FROM workspaces WHERE workspace_id = %s AND owner_user_id = %s AND status = 'ACTIVE'",
-                (int(ws_id), username),
+                "SELECT WORKSPACE_ID FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid AND OWNER_USER_ID = :v_uid AND STATUS = 'ACTIVE'",
+                {"v_wid": ws_id, "v_uid": user_id},
             )
             if not ws:
+                if sess.get('agent_id'):
+                    connection.set_agent_context(sess['agent_id'])
                 self._send_json({'success': False, 'error': 'Workspace not found'}, 404)
                 return
-            sess['workspace_id'] = int(ws_id)
+            if sess.get('agent_id'):
+                connection.set_agent_context(sess['agent_id'])
+            sess['workspace_id'] = ws_id
             self._send_json({'success': True})
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
@@ -2024,15 +2170,15 @@ class VisHandler(BaseHTTPRequestHandler):
             elif path == '/portal/api/chat/history':
                 session_data = _get_session(self)
                 if session_data:
-                    username = session_data[1].get('username', '')
+                    user_id = session_data[1].get('user_id', '')
                     workspace_id = session_data[1].get('workspace_id', '')
                     if workspace_id:
                         connection.set_agent_context(None)
                         rows = connection.execute_query("""
-                            SELECT context_id, context_data FROM workspace_context
-                            WHERE context_type = 'CHAT_MESSAGE' AND workspace_id = %s
-                            ORDER BY created_at ASC
-                        """, (workspace_id,))
+                            SELECT CONTEXT_ID, CONTEXT_DATA FROM WORKSPACE_CONTEXT
+                            WHERE CONTEXT_TYPE = 'CHAT_MESSAGE' AND WORKSPACE_ID = :v_wid
+                            ORDER BY CREATED_AT ASC
+                        """, {"v_wid": workspace_id})
                         messages = []
                         for r in rows:
                             try:
@@ -2052,17 +2198,17 @@ class VisHandler(BaseHTTPRequestHandler):
             elif path == '/portal/api/chat/sessions':
                 session_data = _get_session(self)
                 if session_data:
-                    username = session_data[1].get('username', '')
+                    user_id = session_data[1].get('user_id', '')
                     current_ws = session_data[1].get('workspace_id', '')
                     connection.set_agent_context(None)
                     rows = connection.execute_query("""
-                        SELECT w.workspace_id, w.workspace_name, w.workspace_alias,
-                               to_char(w.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
-                               (SELECT COUNT(*) FROM workspace_context wc WHERE wc.workspace_id = w.workspace_id AND wc.context_type = 'CHAT_MESSAGE') AS msg_count
-                        FROM workspaces w
-                        WHERE w.owner_user_id = %s AND w.workspace_type = 'CONVERSATION' AND w.status = 'ACTIVE'
-                        ORDER BY w.created_at DESC
-                    """, (username,))
+                        SELECT w.WORKSPACE_ID, w.WORKSPACE_NAME, w.WORKSPACE_ALIAS,
+                               TO_CHAR(w.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+                               (SELECT COUNT(*) FROM WORKSPACE_CONTEXT wc WHERE wc.WORKSPACE_ID = w.WORKSPACE_ID AND wc.CONTEXT_TYPE = 'CHAT_MESSAGE') AS MSG_COUNT
+                        FROM WORKSPACES w
+                        WHERE w.OWNER_USER_ID = :v_uid AND w.WORKSPACE_TYPE = 'CONVERSATION' AND w.STATUS = 'ACTIVE'
+                        ORDER BY w.CREATED_AT DESC
+                    """, {"v_uid": user_id})
                     sessions_list = []
                     for r in rows:
                         sessions_list.append({
@@ -2070,7 +2216,7 @@ class VisHandler(BaseHTTPRequestHandler):
                             'name': r.get('workspace_alias') or r.get('workspace_name', ''),
                             'created_at': r.get('created_at', ''),
                             'msg_count': r.get('msg_count', 0),
-                            'is_current': r['workspace_id'] == current_ws,
+                            'is_current': str(r['workspace_id']) == str(current_ws),
                         })
                     if session_data[1].get('agent_id'):
                         connection.set_agent_context(session_data[1]['agent_id'])
@@ -2102,137 +2248,137 @@ class VisHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({'error': str(e)}, 500)
 
+    # -- Loop Engineering API handlers --
 
     def _api_loops_list(self, qs):
-        loops = loop_api.list_loops(limit=100)
-        self._send_json({"loops": loops})
-
-    def _api_loops_stats_all(self, qs):
-        loops = loop_api.list_loops(limit=100)
-        stats = [{"loop_id": l["loop_id"], "title": l["title"], "stats": loop_api.get_loop_stats(l["loop_id"])} for l in loops]
-        self._send_json({"stats": stats})
+        status = qs.get('status', [None])[0]
+        agent_id = qs.get('agent_id', [None])[0]
+        loops = loop_api.list_loops(status=status, agent_id=agent_id)
+        for l in loops:
+            l['stats'] = loop_api.get_loop_stats(l['loop_id'])
+        self._send_json({'loops': loops})
 
     def _api_loops_get(self, path):
-        loop_id = int(path.split('/')[-1])
+        loop_id = path.split('/')[-1]
         loop = loop_api.get_loop(loop_id)
-        if loop:
-            self._send_json(loop)
-        else:
-            self._send_error(404, 'Loop not found')
+        if not loop:
+            self._send_error(404, 'Loop not found'); return
+        loop['stats'] = loop_api.get_loop_stats(loop_id)
+        loop['hooks'] = loop_api.list_hooks(loop_id)
+        self._send_json(loop)
+
+    def _api_loops_runs(self, path, qs):
+        loop_id = path.split('/')[-2]
+        status = qs.get('status', [None])[0]
+        runs = loop_api.list_runs(loop_id=loop_id, status=status)
+        self._send_json({'runs': runs})
+
+    def _api_loops_iterations(self, path, qs):
+        run_id = path.split('/')[-2]
+        limit = int(qs.get('limit', ['50'])[0])
+        iters = loop_api.list_iterations(run_id, limit=limit)
+        self._send_json({'iterations': iters})
 
     def _api_loops_stats(self, path):
-        loop_id = int(path.split('/')[-2])
+        loop_id = path.split('/')[-2]
         self._send_json(loop_api.get_loop_stats(loop_id))
 
-    def _api_loops_runs(self, path, qs=None):
-        loop_id = int(path.split('/')[-2])
-        self._send_json({"runs": loop_api.list_runs(loop_id=loop_id)})
-
     def _api_loops_hooks(self, path):
-        loop_id = int(path.split('/')[-2])
-        self._send_json({"hooks": loop_api.list_hooks(loop_id)})
+        loop_id = path.split('/')[-2]
+        self._send_json({'hooks': loop_api.list_hooks(loop_id)})
 
-    def _api_loops_run_get(self, path):
-        run_id = int(path.split('/')[-1])
+    def _api_run_get(self, path):
+        run_id = path.split('/')[-1]
         run = loop_api.get_run(run_id)
-        if run:
-            self._send_json(run)
-        else:
-            self._send_error(404, 'Run not found')
+        if not run:
+            self._send_error(404, 'Run not found'); return
+        self._send_json(run)
 
-    def _api_loops_run_iterations(self, path):
-        parts = path.split('/')
-        run_id = int(parts[-2])
-        self._send_json({"iterations": loop_api.list_iterations(run_id)})
-
-    def _api_loops_create(self):
-        body = self._read_body()
-        data = json.loads(body)
+    def _handle_loop_create(self):
+        data = json.loads(self._read_body())
+        loop_id = data.get('loop_id')
+        if loop_id:
+            ok = loop_api.update_loop(loop_id, **{k: v for k, v in data.items() if k != 'loop_id'})
+            self._send_json({'success': ok, 'loop_id': loop_id})
+            return
         loop_id = loop_api.create_loop(
-            title=data.get('title', 'Untitled Loop'),
-            goal_definition=data.get('goal_definition', {}),
-            stop_conditions=data.get('stop_conditions', {}),
-            evaluation_config=data.get('evaluation_config', {}),
+            title=data['title'],
+            goal_definition=data.get('goal_definition') or {"goal": data['title']},
+            stop_conditions=data.get('stop_conditions') or {"max_iterations": 10},
+            evaluation_config=data.get('evaluation_config') or {"eval_type": "MANUAL"},
             summary=data.get('summary'),
             trigger_config=data.get('trigger_config'),
-            owned_by_agent=data.get('owned_by_agent'),
+            harness_template_id=data.get('harness_template_id'),
             workspace_id=data.get('workspace_id'),
+            branch_id=data.get('branch_id'),
+            owned_by_agent=data.get('agent_id') or data.get('owned_by_agent'),
+            visibility=data.get('visibility', 'PRIVATE'),
         )
-        self._send_json({"success": True, "loop_id": loop_id})
+        self._send_json({'success': True, 'loop_id': loop_id})
 
-    def _api_loops_delete(self):
-        body = self._read_body()
-        data = json.loads(body)
-        loop_api.delete_loop(int(data['loop_id']))
-        self._send_json({"success": True})
+    def _handle_loop_delete(self):
+        data = json.loads(self._read_body())
+        loop_api.delete_loop(data['loop_id'])
+        self._send_json({'success': True})
 
-    def _api_loops_run_start(self):
-        body = self._read_body()
-        data = json.loads(body)
-        run_id = loop_api.start_run(int(data['loop_id']), data.get('agent_id', 'system'))
-        self._send_json({"success": True, "run_id": run_id})
+    def _handle_loop_run_start(self):
+        data = json.loads(self._read_body())
+        run_id = loop_api.start_run(data['loop_id'],
+                                    data.get('agent_id', 'system'),
+                                    data.get('trigger_type', 'MANUAL'),
+                                    data.get('trigger_source'))
+        self._send_json({'success': True, 'run_id': run_id})
 
-    def _api_loops_run_pause(self):
-        body = self._read_body()
-        data = json.loads(body)
-        loop_api.pause_run(int(data['run_id']))
-        self._send_json({"success": True})
+    def _handle_loop_run_control(self, action):
+        data = json.loads(self._read_body())
+        run_id = data['run_id']
+        if action == 'pause':
+            loop_api.pause_run(run_id)
+        elif action == 'resume':
+            loop_api.resume_run(run_id)
+        elif action == 'stop':
+            loop_api.stop_run(run_id, data.get('reason'))
+        self._send_json({'success': True})
 
-    def _api_loops_run_resume(self):
-        body = self._read_body()
-        data = json.loads(body)
-        loop_api.resume_run(int(data['run_id']))
-        self._send_json({"success": True})
-
-    def _api_loops_run_stop(self):
-        body = self._read_body()
-        data = json.loads(body)
-        loop_api.stop_run(int(data['run_id']), data.get('reason'))
-        self._send_json({"success": True})
-
-    def _api_loops_iterate(self):
-        body = self._read_body()
-        data = json.loads(body)
+    def _handle_loop_iterate(self):
+        data = json.loads(self._read_body())
         result = loop_api.execute_loop_iteration(
-            int(data['run_id']), data.get('agent_id', 'system'),
-            plan_data=data.get('plan_data'), actions=data.get('actions'),
-            observations=data.get('observations'), token_usage=data.get('token_usage', 0),
+            run_id=data['run_id'], agent_id=data.get('agent_id', ''),
+            plan_data=data.get('plan_data'),
+            actions=data.get('actions'),
+            observations=data.get('observations'),
+            token_usage=data.get('token_usage', 0),
         )
-        self._send_json(result)
+        self._send_json({'success': True, 'result': result})
 
-    def _api_loops_hook_add(self):
-        body = self._read_body()
-        data = json.loads(body)
-        hook_id = loop_api.add_hook(
-            int(data['loop_id']), data['hook_event'], data['hook_type'],
-            data.get('hook_config'), data.get('priority', 5),
-        )
-        self._send_json({"success": True, "hook_id": hook_id})
+    def _handle_loop_hook_add(self):
+        data = json.loads(self._read_body())
+        hook_id = loop_api.add_hook(data['loop_id'], data['hook_event'],
+                                    data['hook_type'], data.get('hook_config'),
+                                    data.get('priority', 5))
+        self._send_json({'success': True, 'hook_id': hook_id})
 
     def _api_loops_from_spec(self):
         from lib.loop_api import create_loop_from_spec
         data = json.loads(self._read_body())
-        loop_id = create_loop_from_spec(int(data['spec_id']), data['agent_id'], **{k:v for k,v in data.items() if k not in ('spec_id','agent_id')})
+        loop_id = create_loop_from_spec(data['spec_id'], data['agent_id'], **{k:v for k,v in data.items() if k not in ('spec_id','agent_id')})
         self._send_json({'success': True, 'loop_id': loop_id})
 
     def _api_loops_collab(self):
         from lib.loop_api import create_collab_loop
         data = json.loads(self._read_body())
-        parent_loop_id = data.get('parent_loop_id')
-        if parent_loop_id is not None:
-            parent_loop_id = int(parent_loop_id)
-        loop_id = create_collab_loop(int(data['group_id']), parent_loop_id, data['agent_id'], **{k:v for k,v in data.items() if k not in ('group_id','parent_loop_id','agent_id')})
+        loop_id = create_collab_loop(data['group_id'], data.get('parent_loop_id'), data['agent_id'], **{k:v for k,v in data.items() if k not in ('group_id','parent_loop_id','agent_id')})
         self._send_json({'success': True, 'loop_id': loop_id})
 
     def _api_loops_children(self, path):
         from lib.loop_api import list_loops
-        loop_id = int(path.split('/')[-2])
+        loop_id = path.split('/')[-2]
         children = list_loops(parent_loop_id=loop_id)
         self._send_json({'children': children})
 
     def _api_loops_aggregation(self, path):
         from lib.loop_api import aggregate_child_runs, list_runs
-        loop_id = int(path.split('/')[-2])
+        loop_id = path.split('/')[-2]
         runs = list_runs(loop_id=loop_id, limit=1)
         if runs:
             parent_run_id = runs[0].get('run_id')
@@ -2243,23 +2389,103 @@ class VisHandler(BaseHTTPRequestHandler):
 
     def _api_task_step_bind_loop(self, path):
         from lib.task_plan_api import bind_loop_to_step
-        step_id = int(path.split('/')[4])
+        step_id = path.split('/')[4]
         data = json.loads(self._read_body())
-        binding_id = bind_loop_to_step(step_id, int(data['loop_id']), data.get('binding_type', 'COMPLETION'), data.get('auto_start', 'N'))
+        binding_id = bind_loop_to_step(step_id, data['loop_id'], data.get('binding_type', 'COMPLETION'), data.get('auto_start', 'N'))
         self._send_json({'success': True, 'binding_id': binding_id})
 
     def _api_task_step_loop(self, path):
         from lib.task_plan_api import get_step_loop
-        step_id = int(path.split('/')[4])
+        step_id = path.split('/')[4]
         binding = get_step_loop(step_id)
         self._send_json(binding or {})
 
     def _api_collab_loop(self, path):
         from lib.collab_api import create_group_loop
-        group_id = int(path.split('/')[3])
+        group_id = path.split('/')[3]
         data = json.loads(self._read_body())
         loop_id = create_group_loop(group_id, data['title'], data['goal_definition'], data['agent_id'], **{k:v for k,v in data.items() if k not in ('title','goal_definition','agent_id')})
         self._send_json({'success': True, 'loop_id': loop_id})
+
+    def _api_audit_list(self, qs):
+        from lib import audit_api
+        limit = int(qs.get('limit', ['100'])[0])
+        events = audit_api.get_audit_events(limit=limit)
+        try:
+            stats = audit_api.get_audit_stats()
+        except Exception:
+            stats = {}
+        self._send_json({"events": events, "stats": stats})
+
+    def _api_audit_stats(self, qs):
+        from lib import audit_api
+        stats = audit_api.get_audit_stats()
+        self._send_json(stats)
+
+    def _api_approvals_list(self, qs):
+        from lib import approval_api
+        entity_type = qs.get('type', [None])[0]
+        if entity_type:
+            items = [a for a in approval_api.list_all(limit=50) if a.get("entity_type") == entity_type]
+        else:
+            items = approval_api.list_all(limit=50)
+        self._send_json({"approvals": items})
+
+    def _api_approvals_stats(self, qs):
+        from lib import approval_api
+        stats = approval_api.get_stats()
+        self._send_json(stats)
+
+    def _api_approval_approve(self, path):
+        from lib import approval_api
+        approval_id = path.split('/')[-2]
+        body = self._read_body()
+        data = json.loads(body) if body else {}
+        approver = data.get('approver', 'admin')
+        result = approval_api.approve(approval_id, approver)
+        self._send_json({"success": result})
+
+    def _api_approval_reject(self, path):
+        from lib import approval_api
+        approval_id = path.split('/')[-2]
+        body = self._read_body()
+        data = json.loads(body) if body else {}
+        approver = data.get('approver', 'admin')
+        reason = data.get('reason', '')
+        result = approval_api.reject(approval_id, approver, reason)
+        self._send_json({"success": result})
+
+    # ==================== v3.9.0 Agent Protocol ====================
+
+    def _api_ap_create_task(self):
+        """Agent Protocol: POST /ap/v1/agent/tasks — create a task."""
+        from lib import task_plan_api
+        body = self._read_body()
+        data = json.loads(body) if body else {}
+        goal = data.get('input', data.get('goal', ''))
+        agent_id = data.get('agent_id', 'system')
+        plan_id = task_plan_api.create_plan(agent_id=agent_id, goal=goal)
+        self._send_json({"task_id": plan_id, "input": goal, "status": "CREATED"})
+
+    def _api_ap_execute_step(self, path):
+        """Agent Protocol: POST /ap/v1/agent/tasks/{task_id}/steps — execute a step."""
+        from lib import orchestrator, task_plan_api
+        parts = path.split('/')
+        task_id = parts[-2]
+        body = self._read_body()
+        data = json.loads(body) if body else {}
+        steps = task_plan_api.list_steps(task_id)
+        if not steps:
+            self._send_json({"error": "No steps found for task"}, 404)
+            return
+        step_id = data.get('step_id', steps[0].get('step_id', ''))
+        result = orchestrator.execute_step_with_retry(step_id)
+        self._send_json({
+            "task_id": task_id,
+            "step_id": step_id,
+            "is_last": result,
+            "output": "executed" if result else "pending",
+        })
 
     def _serve_template(self, filename):
         filepath = os.path.join(TEMPLATES_DIR, filename)
@@ -2523,8 +2749,6 @@ class VisHandler(BaseHTTPRequestHandler):
         )
         self._send_json({'plan_id': plan_id}, 201)
 
-
-
 SIM_REPLIES = {
     'hello': 'Hello! I am your AI Agent. How can I help you today?',
     '你好': '你好！我是你的 AI Agent，有什么可以帮你的吗？',
@@ -2536,6 +2760,124 @@ SIM_REPLIES = {
 }
 
 
+def _call_llm_stream(messages, model=None):
+    """Call LLM API in streaming mode, yield tokens one by one.
+
+    Uses config.llm settings. Falls back to None if LLM not configured.
+    Yields: token strings, or None on error.
+    """
+    try:
+        from lib.config import get_config
+        cfg = get_config()
+        llm = cfg.llm
+        if not llm.api_url or not llm.api_key or not llm.model:
+            return None
+
+        api_url = llm.api_url.rstrip('/')
+        if not api_url.endswith('/chat/completions'):
+            api_url += '/chat/completions'
+
+        data = json.dumps({
+            "model": model or llm.model,
+            "messages": messages,
+            "stream": True,
+            "max_tokens": 8192,
+        }).encode()
+
+        req = urllib.request.Request(
+            api_url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {llm.api_key}",
+            },
+            method="POST",
+        )
+
+        resp = urllib.request.urlopen(req, timeout=120)
+        buffer = b""
+        for chunk in iter(lambda: resp.read(4096), b""):
+            buffer += chunk
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith(b"data: "):
+                    data_str = line[6:].decode("utf-8", errors="replace")
+                    if data_str.strip() == "[DONE]":
+                        return
+                    try:
+                        chunk_data = json.loads(data_str)
+                        delta = chunk_data.get("choices", [{}])[0].get("delta", {})
+                        token = delta.get("content", "")
+                        if token:
+                            yield token
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
+
+    except Exception as e:
+        logger.error("LLM stream error: %s", e)
+        return None
+
+
+def _call_llm(messages, model=None):
+    """Call LLM API in non-streaming mode. Returns full response text or None."""
+    try:
+        from lib.config import get_config
+        cfg = get_config()
+        llm = cfg.llm
+        if not llm.api_url or not llm.api_key or not llm.model:
+            return None
+
+        api_url = llm.api_url.rstrip('/')
+        if not api_url.endswith('/chat/completions'):
+            api_url += '/chat/completions'
+
+        data = json.dumps({
+            "model": model or llm.model,
+            "messages": messages,
+            "stream": False,
+            "max_tokens": 8192,
+        }).encode()
+
+        req = urllib.request.Request(
+            api_url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {llm.api_key}",
+            },
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read().decode())
+            msg = result.get("choices", [{}])[0].get("message", {})
+            content = msg.get("content", "")
+            if not content:
+                content = msg.get("reasoning_content", "")
+            return content if content else None
+
+    except Exception as e:
+        logger.error("LLM call error: %s", e)
+        return None
+
+
+def _select_model_for_task(complexity="standard"):
+    """Select model based on task complexity and routing config."""
+    from lib.config import get_config
+    cfg = get_config()
+    mr = cfg.model_routing
+    if complexity == "simple" and mr.simple_model:
+        return mr.simple_model
+    elif complexity == "complex" and mr.complex_model:
+        return mr.complex_model
+    elif mr.standard_model:
+        return mr.standard_model
+    return cfg.llm.model if cfg.llm.model else None
+
+
 def _generate_sim_reply(message, agent_id, sess):
     msg_lower = message.lower().strip()
     for key, reply in SIM_REPLIES.items():
@@ -2543,6 +2885,9 @@ def _generate_sim_reply(message, agent_id, sess):
             return reply
     agent_name = sess.get('agent_name', 'Agent')
     return f"[{agent_name}] I received your message: \"{message}\". I'm processing it and will respond more intelligently once connected to a real LLM backend. For now, I can help with basic memory, knowledge, and workspace operations."
+
+
+
 
 
 def main():
@@ -2560,17 +2905,15 @@ def main():
         from lib.config import get_config
         emb_cfg = get_config().embedding
         if not emb_cfg.model or not emb_cfg.api_url:
-            print("[server] WARNING: Embedding model not configured. "
-                  "Set embedding.api_url and embedding.model in config.json. "
-                  "Vector search will be unavailable until configured.")
+            print("[server] WARNING: Embedding model not configured (embedding.api_url/model in config.json)")
+            print("[server]          Vector search will be unavailable until configured.")
         else:
             print("[server] Embedding: {} (dim={})".format(emb_cfg.model, emb_cfg.dimension or "auto"))
     except Exception:
         pass
 
-    server = HTTPServer((host, port), VisHandler)
-    server.daemon_threads = True
-    print("[server] AI Agent Infra v{} visualization server".format(VERSION))
+    server = ThreadingHTTPServer((host, port), VisHandler)
+    print("[server] AI Agent Infra v{} Community Edition visualization server".format(VERSION))
     print("[server] Listening on http://{}:{}".format(host, port))
     try:
         server.serve_forever()

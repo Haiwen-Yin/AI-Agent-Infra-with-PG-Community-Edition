@@ -1,3 +1,49 @@
+## [3.9.0] - 2026-07-05
+
+### Summary
+
+AI Agent ecosystem connectivity release. Adds MCP Server, SSE streaming output, Human-in-the-Loop approval, Agent Protocol compatibility, and multi-model routing.
+
+### Added - All Editions
+
+- **MCP Server** (`mcp_server.py`, `mcp_server_main.py`): Exposes 10 tools via Model Context Protocol with stdio + SSE dual transport
+- **Tool invocation** (`tool_registry.invoke_tool()`): Executes registered tools via HTTP calls
+- **SSE streaming output**: Web Portal chat supports token-by-token streaming via Server-Sent Events
+- **Approval API** (`approval_api.py`): Unified approval queue for Human-in-the-Loop workflows (PG-native SQL with %s params)
+- **Approval web page** (`approvals.html`): Approval queue UI
+- **Agent Protocol endpoints**: `POST/GET /ap/v1/agent/tasks`
+- **Multi-model routing** (`ModelRoutingConfig`): simple/standard/complex model selection
+- **LLM configuration** (`LLMConfig`) and **MCP configuration** (`MCPConfig`)
+
+### Added - Database
+
+- `APPROVAL_REQUESTS` table with CK_APRV_STATUS and CK_APRV_ENTITY constraints
+- `STEP_EXECUTION_PLAN`: REQUIRES_APPROVAL, APPROVED_BY, APPROVED_AT columns
+- `LOOP_META`: REQUIRE_APPROVAL column
+- `TOOL_REGISTRY`: REQUIRES_APPROVAL column
+
+### Fixed - All Editions
+
+- **ThreadingHTTPServer**: Replaced single-threaded HTTPServer with ThreadingHTTPServer — SSE streaming was blocking all other requests
+- **HTTP/1.1 protocol**: Set protocol_version = HTTP/1.1 — HTTP/1.0 didn't support chunked transfer
+- **Session heartbeat**: Added /api/session/heartbeat endpoint; 120-second periodic heartbeat in all 14 HTML templates
+- **_authenticate_local salt support**: Now queries salt column; SHA256(password + salt) when salt exists
+- **_handle_portal_agent_release**: Added missing method causing AttributeError crash on portal exit
+- **Portal auto-session on login**: Auto-loads most recent conversation workspace or creates new one
+- **Portal auto-naming**: First message auto-renames "New Chat" workspace to first 40 chars
+- **Portal is_current comparison**: Fixed int vs str comparison for workspace_id
+- **appendMessage return value**: Fixed not returning bubble element — SSE pump crashed on undefined.textContent
+- **SSE pump robustness**: Added finishStream() helper and .catch() error handler
+- **LLM streaming performance**: Changed resp.read(1) to resp.read(4096); max_tokens 4096 to 8192
+- **Non-streaming LLM fallback**: Added reasoning_content fallback when content is empty
+- **Approvals page JS**: Rewrote approvals.html with correct timer JS
+- **Approvals sidebar link**: Fixed broken HTML in all 14 templates
+- **Approvals API filter**: Fixed no-filter case returning only pending items
+
+
+
+---
+
 ## [3.8.0] - 2026-07-02
 
 ### Summary

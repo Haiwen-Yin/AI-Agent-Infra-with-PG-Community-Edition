@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - PG Community Edition - Multi-Agent Orchestration
+"""AI Agent Infra v3.9.0 - Community Edition - Multi-Agent Orchestration
 
 DAG execution engine, fan-out/fan-in, pipeline orchestration,
 and retry policies for task steps.
@@ -88,7 +88,7 @@ def resolve_dag(plan_id: str) -> List[Dict[str, Any]]:
         for sid in group["steps"]:
             execute(
                 """INSERT INTO STEP_EXECUTION_PLAN (PLAN_ID, ROOT_PLAN_ID, STEP_GROUP_ID, STEP_ORDER, STEP_ID, STATUS)
-                   VALUES (gen_random_uuid()::text, :root, :gid, :p_order, :sid, 'PENDING')""",
+                   VALUES (RAWTOHEX(SYS_GUID()), :root, :gid, :p_order, :sid, 'PENDING')""",
                 {"root": plan_id, "gid": group["parallel_group"],
                  "order": group["parallel_group"], "sid": sid},
             )
@@ -192,7 +192,7 @@ def create_pipeline(step_ids: List[str], mode: str = "SEQUENTIAL") -> str:
         raise ValueError(f"Unknown pipeline mode: {mode}")
 
     plan_id = execute_insert_returning_id(
-        "INSERT INTO TASK_PLANS (PLAN_ID, AGENT_ID, GOAL, STRATEGY, STATUS) VALUES (gen_random_uuid()::text, 'SYSTEM', 'Pipeline', :p_mode, 'PENDING') RETURNING PLAN_ID ",
+        "INSERT INTO TASK_PLANS (PLAN_ID, AGENT_ID, GOAL, STRATEGY, STATUS) VALUES (RAWTOHEX(SYS_GUID()), 'SYSTEM', 'Pipeline', :p_mode, 'PENDING') RETURNING PLAN_ID INTO :ret_id",
         {"p_mode": mode},
     )
 
@@ -200,7 +200,7 @@ def create_pipeline(step_ids: List[str], mode: str = "SEQUENTIAL") -> str:
         parallel_group = 1 if mode == "PARALLEL" else order
         execute(
             """INSERT INTO STEP_EXECUTION_PLAN (PLAN_ID, ROOT_PLAN_ID, STEP_GROUP_ID, STEP_ORDER, STEP_ID, STATUS)
-               VALUES (gen_random_uuid()::text, :root, :gid, :p_order, :sid, 'PENDING')""",
+               VALUES (RAWTOHEX(SYS_GUID()), :root, :gid, :p_order, :sid, 'PENDING')""",
             {"root": plan_id, "gid": parallel_group, "p_order": order, "sid": step_id},
         )
     return plan_id
@@ -218,8 +218,8 @@ def add_retry_policy(
         """INSERT INTO STEP_RETRY_POLICY
            (POLICY_ID, STEP_ID, MAX_RETRIES, BACKOFF_SECONDS, BACKOFF_MULTIPLIER,
             TIMEOUT_SECONDS, FALLBACK_ACTION, RETRY_COUNT)
-           VALUES (gen_random_uuid()::text, :sid, :max_r, :bo_sec, :bo_mult,
-                   :timeout, :fallback, 0) RETURNING POLICY_ID """,
+           VALUES (RAWTOHEX(SYS_GUID()), :sid, :max_r, :bo_sec, :bo_mult,
+                   :timeout, :fallback, 0) RETURNING POLICY_ID INTO :ret_id""",
         {"sid": step_id, "max_r": max_retries, "bo_sec": backoff_seconds,
          "bo_mult": backoff_multiplier, "timeout": timeout_seconds, "fallback": fallback_action},
     )
@@ -261,6 +261,30 @@ def execute_step_with_retry(step_id: str) -> bool:
     if not step:
         logger.error("Step %s not found", step_id)
         return False
+
+    # v3.9.0: Check if step requires approval before execution
+    try:
+        from .approval_api import check_approval_needed, get_pending_for_entity, create_request
+        if check_approval_needed("STEP", step_id):
+            pending = get_pending_for_entity("STEP", step_id)
+            if pending:
+                logger.info("Step %s waiting for approval %s", step_id, pending.get("approval_id"))
+                execute(
+                    "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'PAUSED' WHERE STEP_ID = :sid AND STATUS = 'PENDING'",
+                    {"sid": step_id},
+                )
+                return False
+            else:
+                requested_by = step.get("agent_id", "system")
+                create_request("STEP", step_id, requested_by)
+                execute(
+                    "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'PAUSED' WHERE STEP_ID = :sid AND STATUS = 'PENDING'",
+                    {"sid": step_id},
+                )
+                logger.info("Step %s paused for approval", step_id)
+                return False
+    except Exception as e:
+        logger.warning("Approval check failed for step %s: %s", step_id, e)
 
     for attempt in range(max_retries + 1):
         execute(
@@ -317,3 +341,35 @@ def execute_step_with_retry(step_id: str) -> bool:
                 )
                 return False
     return False
+
+
+def approve_step(step_id: str, approver: str) -> bool:
+    """Approve a paused step and resume it."""
+    from .approval_api import approve, get_pending_for_entity
+    pending = get_pending_for_entity("STEP", step_id)
+    if not pending:
+        return False
+    result = approve(pending["approval_id"], approver)
+    if result:
+        execute(
+            "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'PENDING', APPROVED_BY = :approver, APPROVED_AT = NOW() WHERE STEP_ID = :sid AND STATUS = 'PAUSED'",
+            {"approver": approver, "sid": step_id},
+        )
+        logger.info("Step %s approved by %s, resuming", step_id, approver)
+    return result
+
+
+def reject_step(step_id: str, approver: str, reason: str = "") -> bool:
+    """Reject a paused step and skip it."""
+    from .approval_api import reject, get_pending_for_entity
+    pending = get_pending_for_entity("STEP", step_id)
+    if not pending:
+        return False
+    result = reject(pending["approval_id"], approver, reason)
+    if result:
+        execute(
+            "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'SKIPPED', APPROVED_BY = :approver, APPROVED_AT = NOW() WHERE STEP_ID = :sid AND STATUS = 'PAUSED'",
+            {"approver": approver, "sid": step_id},
+        )
+        logger.info("Step %s rejected by %s: %s", step_id, approver, reason)
+    return result

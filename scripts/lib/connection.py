@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - PG Enterprise Edition - Database Connection Pool Manager
+"""AI Agent Infra v3.9.0 - PG Enterprise Edition - Database Connection Pool Manager
 
 psycopg2-based connection pool with parameterized query support.
 Supports Admin/Agent separation modes (standalone, admin, agent).

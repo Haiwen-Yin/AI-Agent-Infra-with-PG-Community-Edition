@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - PG Community Edition - Event Bus + Hook Execution
+"""AI Agent Infra v3.9.0 - Community Edition - Event Bus + Hook Execution
 
 Event publishing, subscription management, and LOOP_HOOKS execution engine.
 Agent capability discovery.
@@ -39,8 +39,8 @@ def publish_event(
 ) -> str:
     return execute_insert_returning_id(
         """INSERT INTO EVENT_LOG (EVENT_ID, EVENT_TYPE, SOURCE_ID, SOURCE_TYPE, PAYLOAD)
-           VALUES (gen_random_uuid()::text, :etype, :sid, :stype, :payload)
-           RETURNING EVENT_ID """,
+           VALUES (RAWTOHEX(SYS_GUID()), :etype, :sid, :stype, :payload)
+           RETURNING EVENT_ID INTO :ret_id""",
         {
             "etype": event_type, "sid": source_id, "stype": source_type,
             "payload": json.dumps(payload) if payload else None,
@@ -54,15 +54,15 @@ def subscribe_agent(
     filter_pattern: Optional[str] = None,
 ) -> str:
     existing = execute_query_one(
-        "SELECT SUBSCRIPTION_ID FROM EVENT_SUBSCRIPTIONS WHERE AGENT_ID = :aid AND EVENT_TYPE = :etype",
+        "SELECT SUB_ID FROM EVENT_SUBSCRIPTIONS WHERE AGENT_ID = :aid AND EVENT_TYPE = :etype",
         {"aid": agent_id, "etype": event_type},
     )
     if existing:
         return existing["sub_id"]
 
     return execute_insert_returning_id(
-        """INSERT INTO EVENT_SUBSCRIPTIONS (SUBSCRIPTION_ID, AGENT_ID, EVENT_TYPE, FILTER_PATTERN)
-           VALUES (gen_random_uuid()::text, :aid, :etype, :filter) RETURNING SUBSCRIPTION_ID """,
+        """INSERT INTO EVENT_SUBSCRIPTIONS (SUB_ID, AGENT_ID, EVENT_TYPE, FILTER_PATTERN)
+           VALUES (RAWTOHEX(SYS_GUID()), :aid, :etype, :filter) RETURNING SUB_ID INTO :ret_id""",
         {"aid": agent_id, "etype": event_type, "filter": filter_pattern},
     )
 
@@ -79,13 +79,13 @@ def get_pending_events(agent_id: str, limit: int = 50) -> List[Dict[str, Any]]:
     rows = execute_query(
         """SELECT e.* FROM EVENT_LOG e
            INNER JOIN EVENT_SUBSCRIPTIONS s ON s.EVENT_TYPE = e.EVENT_TYPE
-           WHERE s.AGENT_ID = :aid AND s.STATUS = 'ACTIVE'
+           WHERE s.AGENT_ID = :aid AND s.ENABLED = 'Y'
              AND e.CREATED_AT > (
                SELECT MAX(CREATED_AT) FROM EVENT_LOG e2
                WHERE e2.SOURCE_ID = :aid AND e2.EVENT_TYPE = 'ACK'
              )
            ORDER BY e.CREATED_AT DESC
-           LIMIT %s""",
+           FETCH FIRST :limit ROWS ONLY""",
         {"aid": agent_id, "limit": limit},
     )
     return [_row_to_dict(r) for r in rows]
@@ -206,24 +206,65 @@ def _execute_notification(hook: Dict[str, Any], context: Optional[Dict[str, Any]
 
 
 def _execute_mcp_call(config_str: str, payload: str):
+    """Execute an MCP tool call as a hook callback.
+
+    Config should contain:
+        - server_url: URL of the MCP server (for SSE mode)
+        - tool_name: Name of the MCP tool to call
+        - arguments: Arguments dict to pass to the tool
+    Or for stdio mode:
+        - command: Command to start the MCP server
+        - tool_name: Name of the MCP tool to call
+        - arguments: Arguments dict to pass to the tool
+    """
     config = json.loads(config_str) if config_str else {}
-    logger.info("MCP call: %s", config)
+    tool_name = config.get("tool_name", "")
+    arguments = config.get("arguments", {})
+    if payload:
+        try:
+            ctx = json.loads(payload)
+            arguments.setdefault("_context", ctx)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    server_url = config.get("server_url", "")
+    command = config.get("command", "")
+
+    if server_url:
+        try:
+            import urllib.request
+            data = json.dumps({"tool_name": tool_name, "arguments": arguments}).encode()
+            req = urllib.request.Request(
+                f"{server_url}/messages",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read().decode())
+                logger.info("MCP call %s result: %s", tool_name, str(result)[:200])
+        except Exception as e:
+            logger.error("MCP call %s failed: %s", tool_name, e)
+    elif command:
+        logger.info("MCP stdio call %s (not yet supported in sync mode)", tool_name)
+    else:
+        logger.info("MCP call %s with no server configured", tool_name)
 
 
 def register_capability(agent_id: str, capability: str, confidence: float = 1.0) -> str:
     existing = execute_query_one(
-        "SELECT CAPABILITY_ID FROM AGENT_CAPABILITY_INDEX WHERE AGENT_ID = :aid AND CAPABILITY = :cap",
+        "SELECT CAP_ID FROM AGENT_CAPABILITY_INDEX WHERE AGENT_ID = :aid AND CAPABILITY = :cap",
         {"aid": agent_id, "cap": capability},
     )
     if existing:
         execute(
-            "UPDATE AGENT_CAPABILITY_INDEX SET CONFIDENCE = :conf, LAST_VERIFIED_AT = NOW() WHERE CAPABILITY_ID = :cid",
+            "UPDATE AGENT_CAPABILITY_INDEX SET CONFIDENCE = :conf, LAST_VERIFIED_AT = SYSTIMESTAMP WHERE CAP_ID = :cid",
             {"conf": confidence, "cid": existing["cap_id"]},
         )
         return existing["cap_id"]
     return execute_insert_returning_id(
-        """INSERT INTO AGENT_CAPABILITY_INDEX (CAPABILITY_ID, AGENT_ID, CAPABILITY, CONFIDENCE, LAST_VERIFIED_AT)
-           VALUES (gen_random_uuid()::text, :aid, :cap, :conf, NOW()) RETURNING CAPABILITY_ID """,
+        """INSERT INTO AGENT_CAPABILITY_INDEX (CAP_ID, AGENT_ID, CAPABILITY, CONFIDENCE, LAST_VERIFIED_AT)
+           VALUES (RAWTOHEX(SYS_GUID()), :aid, :cap, :conf, SYSTIMESTAMP) RETURNING CAP_ID INTO :ret_id""",
         {"aid": agent_id, "cap": capability, "conf": confidence},
     )
 
@@ -290,7 +331,7 @@ def recommend_agents(task_description: str, limit: int = 5) -> List[Dict[str, An
                JOIN AGENT_REGISTRY a ON a.AGENT_ID = c.AGENT_ID
                WHERE UPPER(c.CAPABILITY) LIKE :kw AND a.STATUS IN ('ACTIVE', 'POOL')
                ORDER BY c.CONFIDENCE DESC
-               LIMIT %s""",
+               FETCH FIRST :limit ROWS ONLY""",
             {"kw": f"%{kw.upper()}%", "limit": limit},
         )
         for r in rows:
