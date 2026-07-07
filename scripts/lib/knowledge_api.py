@@ -30,7 +30,7 @@ def create_knowledge(
         INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, SUMMARY, CATEGORY,
                               IMPORTANCE, STATUS, OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
                               WORKSPACE_ID)
-        VALUES (gen_random_uuid()::text, 'KNOWLEDGE', :title, :content, :summary, :category,
+        VALUES (DEFAULT, 'KNOWLEDGE', :title, :content, :summary, :category,
                 :importance, 'ACTIVE', :owned_by_agent, NULL, :visibility,
                 :wsid)
         RETURNING ENTITY_ID 
@@ -276,7 +276,7 @@ def add_edge(
     sql = """
         INSERT INTO ENTITY_EDGES (EDGE_ID, SOURCE_ID, SOURCE_TYPE, TARGET_ID, EDGE_TYPE,
                                   STRENGTH, CONFIDENCE, METADATA)
-        VALUES ('E_' || gen_random_uuid()::text, :source_id, :source_type, :target_id, :edge_type,
+        VALUES (DEFAULT, :source_id, :source_type, :target_id, :edge_type,
                 :strength, :confidence, :metadata)
         RETURNING EDGE_ID 
     """

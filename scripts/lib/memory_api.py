@@ -27,7 +27,7 @@ def create_memory(
         INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, SUMMARY, CATEGORY,
                               IMPORTANCE, STATUS, OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
                               WORKSPACE_ID)
-        VALUES (gen_random_uuid()::text, 'MEMORY', :title, :content, :summary, :category,
+        VALUES (DEFAULT, 'MEMORY', :title, :content, :summary, :category,
                 :importance, 'ACTIVE', :owned_by_agent, :source_agent, :visibility,
                 :wsid)
         RETURNING ENTITY_ID 
@@ -273,7 +273,7 @@ def consolidate_branch_memories(branch_id: str, target_workspace_id: str) -> Dic
         execute_insert_returning_id(
             """INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, CATEGORY,
                WORKSPACE_ID, VISIBILITY, CREATED_AT)
-               VALUES (gen_random_uuid()::text, 'MEMORY', :title, :content, :cat,
+               VALUES (DEFAULT, 'MEMORY', :title, :content, :cat,
                        :wid, 'SHARED', NOW())
                RETURNING ENTITY_ID """,
             {"title": m["title"], "content": m["content"],

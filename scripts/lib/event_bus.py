@@ -39,7 +39,7 @@ def publish_event(
 ) -> str:
     return execute_insert_returning_id(
         """INSERT INTO EVENT_LOG (EVENT_ID, EVENT_TYPE, SOURCE_ID, SOURCE_TYPE, PAYLOAD)
-           VALUES (RAWTOHEX(SYS_GUID()), :etype, :sid, :stype, :payload)
+           VALUES (gen_random_uuid()::text, :etype, :sid, :stype, :payload)
            RETURNING EVENT_ID INTO :ret_id""",
         {
             "etype": event_type, "sid": source_id, "stype": source_type,
@@ -62,7 +62,7 @@ def subscribe_agent(
 
     return execute_insert_returning_id(
         """INSERT INTO EVENT_SUBSCRIPTIONS (SUB_ID, AGENT_ID, EVENT_TYPE, FILTER_PATTERN)
-           VALUES (RAWTOHEX(SYS_GUID()), :aid, :etype, :filter) RETURNING SUB_ID INTO :ret_id""",
+           VALUES (gen_random_uuid()::text, :aid, :etype, :filter) RETURNING SUB_ID INTO :ret_id""",
         {"aid": agent_id, "etype": event_type, "filter": filter_pattern},
     )
 
@@ -264,7 +264,7 @@ def register_capability(agent_id: str, capability: str, confidence: float = 1.0)
         return existing["cap_id"]
     return execute_insert_returning_id(
         """INSERT INTO AGENT_CAPABILITY_INDEX (CAP_ID, AGENT_ID, CAPABILITY, CONFIDENCE, LAST_VERIFIED_AT)
-           VALUES (RAWTOHEX(SYS_GUID()), :aid, :cap, :conf, SYSTIMESTAMP) RETURNING CAP_ID INTO :ret_id""",
+           VALUES (gen_random_uuid()::text, :aid, :cap, :conf, SYSTIMESTAMP) RETURNING CAP_ID INTO :ret_id""",
         {"aid": agent_id, "cap": capability, "conf": confidence},
     )
 

@@ -16,7 +16,7 @@ from lib.loop_api import (
 from lib.agent_api import register_agent, heartbeat
 from lib.connection import close_pool
 
-TEST_AGENT = "agent-alpha"
+TEST_AGENT = "PG_AGENT_001"
 
 
 def _ensure_agent():
@@ -54,8 +54,8 @@ def test_create_loop():
         owned_by_agent=TEST_AGENT,
         visibility="PRIVATE",
     )
-    assert isinstance(loop_id, int)
-    assert loop_id > 0
+    assert loop_id and str(loop_id).isdigit()
+    assert int(loop_id) > 0
     print(f"PASS: test_create_loop (id={loop_id}...)")
     return loop_id
 
@@ -109,7 +109,7 @@ def test_list_loops():
 def test_start_run():
     loop_id = test_create_loop()
     run_id = start_run(loop_id, TEST_AGENT, "MANUAL", "test")
-    assert isinstance(run_id, int)
+    assert run_id and str(run_id).isdigit()
     run = get_run(run_id)
     assert run is not None
     assert run["status"] == "RUNNING"
@@ -123,7 +123,7 @@ def test_get_run():
     run_id = start_run(loop_id, TEST_AGENT)
     run = get_run(run_id)
     assert run is not None
-    assert run["loop_id"] == loop_id
+    assert str(run["loop_id"]) == str(loop_id)
     assert run["agent_id"] == TEST_AGENT
     print("PASS: test_get_run")
     delete_loop(loop_id)
@@ -177,7 +177,7 @@ def test_record_iteration():
         evaluation_passed=False,
         token_usage=500,
     )
-    assert isinstance(iter_id, int)
+    assert iter_id and str(iter_id).isdigit()
     run = get_run(run_id)
     assert run["iteration_count"] == 1
     assert run["total_tokens"] == 500
@@ -233,7 +233,7 @@ def test_check_stop_conditions():
 def test_add_remove_hook():
     loop_id = test_create_loop()
     hook_id = add_hook(loop_id, "POST_ITERATION", "LOG", {"message": "iter done"}, 3)
-    assert isinstance(hook_id, int)
+    assert hook_id and str(hook_id).isdigit()
     hooks = list_hooks(loop_id)
     assert len(hooks) >= 1
     assert hooks[0]["hook_event"] == "POST_ITERATION"

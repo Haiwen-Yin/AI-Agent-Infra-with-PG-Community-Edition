@@ -63,7 +63,7 @@ def create_loop(
         INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, SUMMARY, STATUS,
                               OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
                               IMPORTANCE, RETRIEVAL_COUNT, WORKSPACE_ID)
-        VALUES (gen_random_uuid()::text, 'LOOP_DEFINITION', :title, :summary, 'ACTIVE',
+        VALUES (DEFAULT, 'LOOP_DEFINITION', :title, :summary, 'ACTIVE',
                 :owned_by_agent, :source_agent, :visibility, 5, 0, :workspace_id)
         RETURNING ENTITY_ID 
     """, {
@@ -174,7 +174,7 @@ def start_run(loop_id: str, agent_id: str, trigger_type: str = "MANUAL",
         INSERT INTO LOOP_RUNS (RUN_ID, LOOP_ID, AGENT_ID, TRIGGER_TYPE, TRIGGER_SOURCE,
                                STATUS, ITERATION_COUNT, TOTAL_TOKENS, STARTED_AT,
                                PARENT_RUN_ID)
-        VALUES (gen_random_uuid()::text, :loop_id, :agent_id, :trigger_type, :trigger_source,
+        VALUES (DEFAULT, :loop_id, :agent_id, :trigger_type, :trigger_source,
                 'RUNNING', 0, 0, NOW(), :parent_run_id)
         RETURNING RUN_ID 
     """, {"loop_id": loop_id, "agent_id": agent_id,
@@ -346,7 +346,7 @@ def bind_loop_to_step(loop_id: str, step_id: str,
     binding_id = execute_insert_returning_id("""
         INSERT INTO TASK_LOOP_BINDING (BINDING_ID, LOOP_ID, STEP_ID, BINDING_TYPE,
                                        AUTO_START, CREATED_AT)
-        VALUES (gen_random_uuid()::text, :loop_id, :step_id, :binding_type,
+        VALUES (DEFAULT, :loop_id, :step_id, :binding_type,
                 :auto_start, NOW())
         RETURNING BINDING_ID 
     """, {"loop_id": loop_id, "step_id": step_id,
@@ -434,7 +434,7 @@ def record_iteration(
                                      PLAN_DATA, ACTIONS, OBSERVATIONS,
                                      EVALUATION_RESULT, EVALUATION_PASSED, ADJUSTMENT,
                                      TOKEN_USAGE, STARTED_AT, COMPLETED_AT)
-        VALUES (gen_random_uuid()::text, :run_id, :iter_order,
+        VALUES (DEFAULT, :run_id, :iter_order,
                 :plan_data, :actions, :observations,
                 :eval_result, :eval_passed, :adjustment,
                 :tokens, NOW(), NOW())
@@ -528,7 +528,7 @@ def add_hook(loop_id: str, hook_event: str, hook_type: str,
     return execute_insert_returning_id("""
         INSERT INTO LOOP_HOOKS (HOOK_ID, LOOP_ID, HOOK_EVENT, HOOK_TYPE,
                                 HOOK_CONFIG, PRIORITY, ENABLED, CREATED_AT)
-        VALUES (gen_random_uuid()::text, :loop_id, :event, :type,
+        VALUES (DEFAULT, :loop_id, :event, :type,
                 :config, :priority, 'Y', NOW())
         RETURNING HOOK_ID 
     """, {"loop_id": loop_id, "event": hook_event, "type": hook_type,
