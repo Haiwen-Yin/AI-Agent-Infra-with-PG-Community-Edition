@@ -1,3 +1,28 @@
+## [3.10.0] - 2026-07-09
+
+### Summary
+
+Universal Property Graph release. Extends the graph model from entity-level adjacency to 8 functional domains, adding 30+ graph functions and 23 new edge types: knowledge causality, agent collaboration (group-scoped dynamic trust), task orchestration, skill dependencies, approval propagation, data flow, memory evolution, and loop iteration.
+
+### Added
+
+- **30+ graph functions** in graph_api.py across 8 domains (knowledge causal, agent collaboration, task orchestration, skill dependency, approval propagation, data flow, memory evolution, loop iteration)
+- **23 new edge types**: CAUSES, CONTRADICTS, SUPERSEDES, DERIVED_FROM, DERIVED_FROM_DATA, TRUSTS, DELEGATED_TO, COMPLEMENTS_SKILL, COMMUNICATED_WITH, FEEDS_INTO, PRODUCED_ARTIFACT, CONSUMED_ARTIFACT, REQUIRES_OUTPUT_OF, REQUIRES, ENHANCES, BLOCKS, DEPENDS_ON, PROMOTED_TO, MERGED_INTO, SUPERSEDED_BY, INFORMS, CORRECTS, BUILDS_ON
+- **Dynamic trust configuration** via SYSTEM_CONFIG (6 configurable values)
+- **3 new API endpoints**: /api/graph/causal, /api/graph/collaboration, /api/graph/lineage
+- **3 new MCP tools**: graph_causal, graph_lineage, graph_collaboration
+- **Memory promotion** now writes PROMOTED_TO graph edge
+- **Collab group join** now initializes TRUSTS edges
+
+### Fixed
+
+- PG: audit_api.purge_audit_logs column name (access_time -> accessed_at)
+- PG: Missing AGE create_graph in deployment scripts
+- PG ENT: memory_api.py and knowledge_api.py edition label fix
+- graph_api.py version string (v3.5.0 -> v3.10.0)
+
+---
+
 ## [3.9.0] - 2026-07-05
 
 ### Summary

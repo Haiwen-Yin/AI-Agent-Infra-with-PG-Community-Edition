@@ -30,7 +30,7 @@ def create_memory(
         VALUES (DEFAULT, 'MEMORY', :title, :content, :summary, :category,
                 :importance, 'ACTIVE', :owned_by_agent, :source_agent, :visibility,
                 :wsid)
-        RETURNING ENTITY_ID 
+        RETURNING ENTITY_ID INTO :ret_id
     """
     params = {
         "title": title[:500],
@@ -150,7 +150,7 @@ def get_agent_memories(agent_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         WHERE ENTITY_TYPE = 'MEMORY'
           AND (VISIBILITY = 'SHARED' OR VISIBILITY = 'PUBLIC' OR OWNED_BY_AGENT = :agent)
         ORDER BY CREATED_AT DESC
-        LIMIT %s
+        FETCH FIRST :lim ROWS ONLY
     """
     return [_row_to_dict(r) for r in execute_query(sql, {"agent": agent_id, "lim": limit})]
 
@@ -170,7 +170,7 @@ def add_memory_tags(entity_id: str, tag_names: List[str]) -> int:
     for tag_name in tag_names:
         merge_sql = """
             MERGE INTO TAGS t
-            USING (SELECT :tag_name AS TAG_NAME ) src
+            USING (SELECT :tag_name AS TAG_NAME FROM DUAL) src
             ON (t.TAG_NAME = src.TAG_NAME)
             WHEN NOT MATCHED THEN INSERT (TAG_NAME) VALUES (src.TAG_NAME)
         """
@@ -186,7 +186,7 @@ def add_memory_tags(entity_id: str, tag_names: List[str]) -> int:
         tag_id = tag_row["tag_id"]
         insert_sql = """
             INSERT INTO ENTITY_TAGS (ENTITY_ID, ENTITY_TYPE, TAG_ID)
-            SELECT :eid, 'MEMORY', :tid 
+            SELECT :eid, 'MEMORY', :tid FROM DUAL
             WHERE NOT EXISTS (
                 SELECT 1 FROM ENTITY_TAGS
                 WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'MEMORY' AND TAG_ID = :tid
@@ -275,7 +275,7 @@ def consolidate_branch_memories(branch_id: str, target_workspace_id: str) -> Dic
                WORKSPACE_ID, VISIBILITY, CREATED_AT)
                VALUES (DEFAULT, 'MEMORY', :title, :content, :cat,
                        :wid, 'SHARED', NOW())
-               RETURNING ENTITY_ID """,
+               RETURNING ENTITY_ID INTO :ret_id""",
             {"title": m["title"], "content": m["content"],
              "cat": m.get("category", "CONSOLIDATED"), "wid": target_workspace_id},
         )
@@ -302,10 +302,17 @@ def promote_to_semantic(memory_id: str) -> Optional[str]:
     )
 
     execute(
-        "UPDATE ENTITIES SET METADATA = JSON_OBJECT('promoted_to' VALUE :kid, 'promoted_at' VALUE NOW()) "
+        "UPDATE ENTITIES SET METADATA = jsonb_build_object('promoted_to', :kid, 'promoted_at', NOW()) "
         "WHERE ENTITY_ID = :mid",
         {"kid": knowledge_id, "mid": memory_id},
     )
+
+    # v3.10.0: Write PROMOTED_TO graph edge
+    try:
+        from .graph_api import record_promotion
+        record_promotion(memory_id, knowledge_id)
+    except Exception:
+        pass
 
     return knowledge_id
 

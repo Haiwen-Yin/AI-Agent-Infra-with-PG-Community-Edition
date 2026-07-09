@@ -6481,3 +6481,11 @@ CREATE TABLE IF NOT EXISTS APPROVAL_REQUESTS (
 );
 CREATE INDEX IF NOT EXISTS IDX_AR_STATUS ON APPROVAL_REQUESTS(APPROVAL_STATUS, CREATED_AT DESC);
 CREATE INDEX IF NOT EXISTS IDX_AR_ENTITY ON APPROVAL_REQUESTS(ENTITY_TYPE, ENTITY_ID);
+
+-- v3.10.0: Trust configuration
+INSERT INTO system_config (config_key, config_value, description) VALUES ('trust_success_delta', '0.1', 'Trust increase on task success') ON CONFLICT DO NOTHING;
+INSERT INTO system_config (config_key, config_value, description) VALUES ('trust_failure_delta', '0.15', 'Trust decrease on task failure') ON CONFLICT DO NOTHING;
+INSERT INTO system_config (config_key, config_value, description) VALUES ('trust_min_threshold', '0.3', 'Min trust for task delegation') ON CONFLICT DO NOTHING;
+INSERT INTO system_config (config_key, config_value, description) VALUES ('trust_max_value', '1.0', 'Max trust value') ON CONFLICT DO NOTHING;
+INSERT INTO system_config (config_key, config_value, description) VALUES ('trust_initial_coordinator', '0.5', 'Initial trust to group coordinator') ON CONFLICT DO NOTHING;
+INSERT INTO system_config (config_key, config_value, description) VALUES ('trust_initial_member', '0.3', 'Initial trust to other group members') ON CONFLICT DO NOTHING;

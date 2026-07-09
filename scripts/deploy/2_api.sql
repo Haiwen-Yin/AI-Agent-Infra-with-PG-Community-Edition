@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ============================================================
--- AI Agent Infra v3.9.0 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
+-- AI Agent Infra v3.10.0 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
 -- ============================================================
 
 -- ============================================================
@@ -508,7 +508,7 @@ DECLARE
     v_perm   INT;
 BEGIN
     DELETE FROM entity_access_log
-    WHERE access_time < CURRENT_TIMESTAMP - (p_days_to_keep || ' days')::INTERVAL;
+    WHERE accessed_at < CURRENT_TIMESTAMP - (p_days_to_keep || ' days')::INTERVAL;
     GET DIAGNOSTICS v_access = ROW_COUNT;
 
     DELETE FROM agent_permission_log
@@ -2494,5 +2494,17 @@ $$;
 
 
 -- ============================================================
--- AI Agent Infra v3.9.0 - Community Edition - PostgreSQL 18.3 API Deployment Complete
+-- AI Agent Infra v3.10.0 - Community Edition - PostgreSQL 18.3 API Deployment Complete
 -- ============================================================
+
+-- v3.10.0: Create AGE graph if not exists
+DO $$
+BEGIN
+    PERFORM * FROM ag_catalog.graph WHERE name = 'oracle_memory_graph';
+EXCEPTION WHEN OTHERS THEN
+    BEGIN
+        PERFORM ag_catalog.create_graph('oracle_memory_graph');
+    EXCEPTION WHEN OTHERS THEN
+        -- AGE extension not available or graph already exists, continue with SQL fallback
+    END;
+END $$;
