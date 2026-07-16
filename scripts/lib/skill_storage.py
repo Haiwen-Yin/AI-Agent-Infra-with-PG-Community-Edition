@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - PG Community Edition - Skill Resource Storage Abstraction Layer"""
+"""AI Agent Infra v3.10.2 - PG Community Edition - Skill Resource Storage Abstraction Layer"""
 
 import hashlib
 import mimetypes

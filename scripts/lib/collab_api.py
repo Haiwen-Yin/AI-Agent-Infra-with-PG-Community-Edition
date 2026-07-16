@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - PG Community Edition - Collaboration Group API
+"""AI Agent Infra v3.10.2 - PG Community Edition - Collaboration Group API
 
 Collaboration group lifecycle, membership management,
 shared/personal workspaces, entity sharing, and group statistics.

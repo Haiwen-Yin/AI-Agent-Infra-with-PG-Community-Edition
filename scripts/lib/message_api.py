@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - PG Community Edition - Agent Communication Protocol
+"""AI Agent Infra v3.10.2 - PG Community Edition - Agent Communication Protocol
 
 Inter-agent messaging for collaboration groups. Supports direct messages,
 broadcast, threaded replies, priority levels, and attachment references.

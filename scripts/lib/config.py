@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - Community Edition - Unified Configuration Manager
+"""AI Agent Infra v3.10.2 - Enterprise Edition - Unified Configuration Manager
 
 Reads from encrypted config.json with environment variable fallback.
 Supports encrypted database credentials, LDAP configuration, and enterprise features.
@@ -15,20 +15,23 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-VERSION = "3.10.1"
+VERSION = "3.10.2"
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @dataclass(frozen=True)
 class DatabaseConfig:
+    user: str = "aiadmin"
+    password: str = ""
     host: str = "localhost"
     port: int = 5432
     dbname: str = "ai_agent"
-    user: str = "pgsql"
-    password: str = ""
+    dsn: str = ""
     min_conn: int = 2
-    max_conn: int = 10
+    max_conn: int = 5
+    _encrypted: Optional[str] = None
+    _key_source: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -153,16 +156,35 @@ def _decrypt_database_section(db_raw: dict) -> dict:
     if not encrypted_blob:
         return db_raw
     try:
-        from .connection_crypto import decrypt_section
-        decrypted = decrypt_section(encrypted_blob)
-        merged = dict(db_raw)
-        for k, v in decrypted.items():
-            if k not in ("_encrypted", "_key_source"):
-                merged[k] = v
-        return merged
+        from .connection_crypto import decrypt_database_section as _dec
+        return _dec(db_raw)
     except Exception as e:
         logger.error("Failed to decrypt database config: %s", e)
         return db_raw
+
+
+def _decrypt_llm_section(llm_raw: dict) -> dict:
+    encrypted_blob = llm_raw.get("_encrypted")
+    if not encrypted_blob:
+        return llm_raw
+    try:
+        from .connection_crypto import decrypt_llm_section as _dec
+        return _dec(llm_raw)
+    except Exception as e:
+        logger.error("Failed to decrypt llm config: %s", e)
+        return llm_raw
+
+
+def _decrypt_model_routing_section(mr_raw: dict) -> dict:
+    encrypted_blob = mr_raw.get("_encrypted")
+    if not encrypted_blob:
+        return mr_raw
+    try:
+        from .connection_crypto import decrypt_model_routing_section as _dec
+        return _dec(mr_raw)
+    except Exception as e:
+        logger.error("Failed to decrypt model_routing config: %s", e)
+        return mr_raw
 
 
 def load_config() -> Config:
@@ -174,15 +196,25 @@ def load_config() -> Config:
     sec_raw = raw.get("security", {})
     ldap_raw = raw.get("ldap", {})
     ent_raw = raw.get("enterprise", {})
+    llm_raw = raw.get("llm", {})
+    mr_raw = raw.get("model_routing", {})
 
+    db_resolved = _decrypt_database_section(db_raw)
+    llm_resolved = _decrypt_llm_section(llm_raw)
+    mr_resolved = _decrypt_model_routing_section(mr_raw)
+
+    # Priority: config.json (decrypted) > Environment Variables > Defaults
     db = DatabaseConfig(
-        host=db_raw.get("host") or os.environ.get("PG_HOST", DatabaseConfig.host),
-        port=int(db_raw.get("port") or os.environ.get("PG_PORT", DatabaseConfig.port)),
-        dbname=db_raw.get("dbname") or os.environ.get("PG_DBNAME", DatabaseConfig.dbname),
-        user=db_raw.get("user") or os.environ.get("PG_USER", DatabaseConfig.user),
-        password=db_raw.get("password") or os.environ.get("PG_PASSWORD", DatabaseConfig.password),
-        min_conn=int(db_raw.get("min_conn", DatabaseConfig.min_conn)),
-        max_conn=int(db_raw.get("max_conn", DatabaseConfig.max_conn)),
+        user=db_resolved.get("user") or os.environ.get("MEMORY_DB_USER", DatabaseConfig.user),
+        password=db_resolved.get("password") or os.environ.get("MEMORY_DB_PASSWORD", DatabaseConfig.password),
+        host=db_resolved.get("host") or os.environ.get("MEMORY_DB_HOST", DatabaseConfig.host),
+        port=int(db_resolved.get("port") or os.environ.get("MEMORY_DB_PORT", DatabaseConfig.port)),
+        dbname=db_resolved.get("dbname") or os.environ.get("MEMORY_DB_NAME", DatabaseConfig.dbname),
+        dsn=db_resolved.get("dsn") or os.environ.get("MEMORY_DB_DSN", DatabaseConfig.dsn),
+        min_conn=int(db_resolved.get("min_conn", DatabaseConfig.min_conn)),
+        max_conn=int(db_resolved.get("max_conn", DatabaseConfig.max_conn)),
+        _encrypted=db_raw.get("_encrypted"),
+        _key_source=db_raw.get("_key_source"),
     )
 
     srv = ServerConfig(
@@ -236,9 +268,9 @@ def load_config() -> Config:
 
     llm_raw = raw.get("llm", {})
     llm = LLMConfig(
-        api_url=llm_raw.get("api_url") or os.environ.get("LLM_API_URL", LLMConfig.api_url),
-        api_key=llm_raw.get("api_key") or os.environ.get("LLM_API_KEY", LLMConfig.api_key),
-        model=llm_raw.get("model") or os.environ.get("LLM_MODEL", LLMConfig.model),
+        api_url=llm_resolved.get("api_url") or os.environ.get("LLM_API_URL", LLMConfig.api_url),
+        api_key=llm_resolved.get("api_key") or os.environ.get("LLM_API_KEY", LLMConfig.api_key),
+        model=llm_resolved.get("model") or os.environ.get("LLM_MODEL", LLMConfig.model),
         max_context=int(llm_raw.get("max_context", LLMConfig.max_context)),
         stream_enabled=bool(llm_raw.get("stream_enabled", LLMConfig.stream_enabled)),
     )

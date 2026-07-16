@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - PG Enterprise Edition - Database Connection Pool Manager
+"""AI Agent Infra v3.10.2 - PG Enterprise Edition - Database Connection Pool Manager
 
 psycopg2-based connection pool with parameterized query support.
 Supports Admin/Agent separation modes (standalone, admin, agent).
@@ -50,8 +50,49 @@ def get_pool() -> pg_pool.ThreadedConnectionPool:
     return _pool
 
 
+_agent_eu_creds = None
+_agent_eu_lock = threading.Lock()
+_end_user_connections: dict = {}
+
+
+def _load_agent_eu_creds() -> dict:
+    global _agent_eu_creds
+    with _agent_eu_lock:
+        if _agent_eu_creds is not None:
+            return _agent_eu_creds
+        cfg = get_config()
+        config_path = cfg.project_root / "agent_config.json"
+        if not config_path.exists():
+            raise FileNotFoundError(f"agent_config.json not found at {config_path}")
+        from .connection_crypto import load_agent_config
+        creds = load_agent_config(config_path)
+        _agent_eu_creds = creds
+        return _agent_eu_creds
+
+
+def _get_agent_mode_connection():
+    import psycopg2
+    creds = _load_agent_eu_creds()
+    conn = psycopg2.connect(
+        host=creds.get("dsn", "").split(":")[0] if ":" in creds.get("dsn", "") else "localhost",
+        dbname=creds.get("dsn", ""),
+        user=creds.get("username"),
+        password=creds.get("password"),
+    )
+    conn.autocommit = False
+    return conn
+
+
 @contextmanager
 def get_connection():
+    cfg = get_config()
+    if cfg.agent.mode == "agent":
+        conn = _get_agent_mode_connection()
+        try:
+            yield conn
+        finally:
+            conn.close()
+        return
     pool = get_pool()
     conn = pool.getconn()
     try:
@@ -77,6 +118,14 @@ def close_end_user_connections():
 
 @contextmanager
 def get_connection_for_agent(agent_id: Optional[str] = None):
+    cfg = get_config()
+    if cfg.agent.mode == "agent":
+        conn = _get_agent_mode_connection()
+        try:
+            yield conn
+        finally:
+            conn.close()
+        return
     with get_connection() as conn:
         yield conn
 
@@ -109,7 +158,7 @@ def _convert_params(sql: str, params: Optional[Any]) -> tuple:
     - %s placeholders are used as-is with values in order
     """
     if params is None:
-        return sql, ()
+        return sql, None
     if isinstance(params, dict):
         import re
         ordered_values = []
@@ -153,7 +202,7 @@ def _convert_params(sql: str, params: Optional[Any]) -> tuple:
         return converted, tuple(ordered_values)
     elif isinstance(params, (list, tuple)):
         return sql, tuple(params)
-    return sql, ()
+    return sql, None
 
 
 def execute(sql: str, params: Optional[Dict[str, Any]] = None) -> int:

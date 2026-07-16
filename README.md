@@ -1,15 +1,15 @@
-# AI Agent Infra with PostgreSQL - Community Edition v3.10.1
+# AI Agent Infra with PostgreSQL - Community Edition v3.10.2
 
-[![Version](https://img.shields.io/badge/version-v3.10.1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.10.2-blue.svg)](CHANGELOG.md)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.3-blue.svg)](https://www.postgresql.org/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
-**AI Agent Infrastructure Architecture — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on PostgreSQL 18.3.**
+**AI Agent Infrastructure Architecture — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Row-Level Security, Portal user system, and Agent pool management — built on PostgreSQL 18.3.**
 
-> **v3.10.1 (2026-07-14): Offline Deployment - vendor/ directory with 30 pre-downloaded cp314 wheels, install_offline.sh for air-gapped installation, verify_deps.py for integrity check. Pure-Python deploy_oracle.py replaces SQLcl (125MB+Java) with state-machine SQL parser. 544/544 tests pass.**
+> **v3.10.2 (2026-07-16): Encryption enhancement — per-Agent independent crypto keys stored in SYSTEM_CONFIG, config.json auto-encryption on startup (database + LLM + model_routing), key rotation API (global and per-Agent), encrypt_config.py CLI unified across all editions, Portal Markdown rendering. 544/544 tests pass.**
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.10.1.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.10.2.md)**
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
@@ -164,7 +164,7 @@ UPDATE system_config SET config_value = '10' WHERE config_key = 'dormant_timeout
 | PL/pgSQL Functions/Packages | 22 base + 78 API in 14 schemas | 22 base + 91 API in 16 schemas |
 | pg_cron Jobs | 13 | 17 |
 | Row Security Policies | 25+ | 31 |
-| Tests | 105 | 135 |
+| Tests | 103 | 103 |
 | **License** | Apache 2.0 | BSL 1.1 |
 
 ---

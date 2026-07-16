@@ -1,4 +1,4 @@
-# Migration Guide - AI Agent Infra v3.10.1 (2026-06-18) - PG Community Edition
+# Migration Guide - AI Agent Infra v3.10.2 (2026-07-16) - PG Community Edition
 
 ## Oracle to PostgreSQL Migration
 
@@ -169,7 +169,7 @@ $$) AS (a_id VARCHAR, b_id VARCHAR, edge_type VARCHAR);
 ```json
 // Oracle config.json
 {
-  "database": {"user": "openclaw", "password": "hermes", "dsn": "10.10.10.130:1521/openclaw"}
+  "database": {"user": "openclaw", "password": "hermes", "dsn": "10.10.10.130:1521/your_service"}
 }
 
 // PostgreSQL config.json

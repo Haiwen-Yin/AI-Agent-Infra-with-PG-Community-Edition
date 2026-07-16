@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-pg-community
-version: v3.10.1
+version: v3.10.2
 author: Haiwen Yin
-description: "AI Agent Infra with PostgreSQL - Community Edition v3.10.1 - AI Agent的基础设施架构"
+description: "AI Agent Infra with PostgreSQL - Community Edition v3.10.2 - AI Agent的基础设施架构"
 tags: [postgresql, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, psycopg2, property-graph, apache-age, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, spec-driven, elastic-agent, collaboration, admin-agent-separation, pgvector, pg-cron, plpython3u, pgcrypto, row-security-policies]
 related_skills: [postgresql-18, psycopg2-execution-methodology]
 ---
 
-# AI Agent Infra with PostgreSQL - Community Edition v3.10.1
+# AI Agent Infra with PostgreSQL - Community Edition v3.10.2
 
 **Author:** Haiwen Yin
-**Version:** v3.10.1 - 2026-07-14
+**Version:** v3.10.2 - 2026-07-16
 **Website:** https://db4agent.top
 **License:** Apache License 2.0 (Community Edition)
 
@@ -20,7 +20,7 @@ related_skills: [postgresql-18, psycopg2-execution-methodology]
 
 **Minimum required version: PostgreSQL 18.3**
 
-v3.7.5 extends PostgreSQL features that require version 18.3 or later: pgvector for vector similarity search, Apache AGE for property graph queries, pgcrypto for in-database encryption, Row Security Policies for data isolation, and pg_cron for scheduled jobs.
+v3.10.2 extends PostgreSQL features that require version 18.3 or later: pgvector for vector similarity search, Apache AGE for property graph queries, pgcrypto for in-database encryption, Row Security Policies for data isolation, and pg_cron for scheduled jobs.
 
 ```sql
 SELECT version();
@@ -50,7 +50,7 @@ pip install psycopg2-binary>=2.9
 ## Architecture Overview
 
 ```
-AI Agent Infra with PostgreSQL — Community Edition v3.7.5
+AI Agent Infra with PostgreSQL — Community Edition v3.10.2
 │
 ├── ENTITIES (LIST partitioned by ENTITY_TYPE, 8 partitions)
 │   ├── P_MEMORY      — MEMORY
@@ -89,11 +89,11 @@ Five-plus-one-layer database access security model with Row Security Policies:
 
 ### Row Security Policies — Agent Usage Guide
 
-v3.7.5 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provides declarative row-level access control using `current_setting('app.current_agent_id', TRUE)` to enforce per-agent data filtering.
+v3.10.2 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provides declarative row-level access control using `current_setting('app.current_agent_id', TRUE)` to enforce per-agent data filtering.
 
 **Zero trust**: If no agent context is set, Row Security Policies return **no data**.
 
-#### Current Enforcement Status (v3.7.5)
+#### Current Enforcement Status (v3.10.2)
 
 | Security Mechanism | Deployed? | Enforcing? | Details |
 |---|---|---|---|
@@ -121,7 +121,7 @@ v3.7.5 uses PostgreSQL Row Security Policies (RLS) for data isolation. RLS provi
 
 ## Admin/Agent Separation Architecture
 
-v3.7.5 introduces a mode system that separates Admin Agent (runs Web Portal, holds schema owner credentials) from Business Agent (independent process, only holds restricted user credentials).
+v3.10.2 introduces a mode system that separates Admin Agent (runs Web Portal, holds schema owner credentials) from Business Agent (independent process, only holds restricted user credentials).
 
 ### Modes
 
@@ -340,3 +340,215 @@ Loop Engineering is the 4th generation AI engineering methodology (after Prompt 
 - **Loop detail close button** — Added ❌ close button to loop detail panel header
 - **PG authentication** — Fixed `user_manager.authenticate()` hash comparison with `upper()`
 - **Server startup** — Fixed startup script using `nohup` instead of `setsid` to prevent timeout deadlocks
+
+## Database Schema (35 Tables)
+
+### Core Tables (7)
+
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| ENTITIES | Unified entity store (13 types) | entity_id BIGINT IDENTITY, entity_type, title, content, visibility, status, workspace_id |
+| ENTITY_EDGES | Directed relationships | edge_id BIGINT, source_id BIGINT, target_id BIGINT, edge_type VARCHAR, strength FLOAT |
+| KNOWLEDGE_META | Knowledge metadata | entity_id, domain, topic, difficulty_level |
+| ENTITY_EMBEDDINGS | Vector embeddings (pgvector) | entity_id, entity_type, embedding VECTOR(1024), model |
+| SPEC_META | Specification metadata | entity_id, spec_version, spec_status, spec_scope, complexity |
+| HARNESS_META | Harness template metadata | entity_id, execution_mode, timeout_seconds |
+| ENTITY_TAGS | Tags for categorization | entity_id, entity_type, tag |
+
+### System Tables (2)
+
+| Table | Purpose |
+|-------|---------|
+| SYSTEM_USERS | User accounts (SHA256 password hashes, salt, role, status, auth_source) |
+| SYSTEM_CONFIG | Key-value store (config_key, config_value, description) |
+
+### Agent Tables (5)
+
+| Table | Purpose |
+|-------|---------|
+| AGENT_REGISTRY | Agent definitions + elastic management |
+| AGENT_CREDENTIALS | Encrypted credential storage |
+| AGENT_SESSION | Session with handoff chain (context JSONB) |
+| ENTITY_ACCESS_LOG | Audit trail of entity access |
+| AGENT_PERMISSION_LOG | Agent action audit trail |
+
+### Collaboration Tables (3)
+
+| Table | Purpose |
+|-------|---------|
+| AGENT_COLLABORATION | Inter-agent collaboration records |
+| COLLAB_GROUPS | Group definitions |
+| COLLAB_GROUP_MEMBERS | Group membership |
+
+### Workspace Tables (3)
+
+| Table | Purpose |
+|-------|---------|
+| WORKSPACES | Isolated environments (isolation_mode) |
+| WORKSPACE_CONTEXT | Append-only context chain (context_data JSONB) |
+| WORKSPACE_TASKS | Junction: workspaces ↔ task plans |
+
+### Task Tables (5)
+
+| Table | Purpose |
+|-------|---------|
+| TASK_PLANS | Plan definitions |
+| TASK_STEPS | Plan steps (step_data JSONB) |
+| TASK_CONTEXT_SNAPSHOTS | Step execution context |
+| TASK_TOOL_CALLS | Tool invocation records |
+| TASK_DEPENDENCIES | Step dependency graph |
+
+### Loop Tables (4)
+
+| Table | Purpose |
+|-------|---------|
+| LOOP_META | Loop definitions (stop_conditions JSONB) |
+| LOOP_RUNS | Loop execution instances |
+| LOOP_ITERATIONS | Per-iteration records (evaluation_result JSONB) |
+| LOOP_HOOKS | Lifecycle hook definitions |
+
+## PL/pgSQL Functions (170+ Functions)
+
+| Schema | Count | Key Functions |
+|--------|-------|---------------|
+| memory_api | 8 | create_memory, get_memory, search_memories, update_memory, delete_memory, reinforce_memory, decay_memories, get_agent_memories |
+| knowledge_api | 7 | create_knowledge, get_knowledge, search_knowledge, validate_knowledge, link_knowledge, add_edge, get_edges |
+| agent_api | 15 | register_agent, get_agent, create_session, end_session, issue_credential, verify_credential, hibernate_agent, wake_agent, register_pool_agent, assign_pool_agent |
+| task_plan_api | 6 | create_plan, get_plan, update_plan_status, add_step, update_step_status, list_steps |
+| harness_api | 6 | create_template, get_template, list_templates, instantiate_template, derive_template, validate_template |
+| graph_api | 30+ | graph_search, get_neighbors, get_subgraph, add_edge, remove_edge, graph_causal, graph_lineage, graph_collaboration, graph_stats |
+| workspace_api | 14 | create_workspace, get_workspace, save_context, get_context_chain, get_latest_context, create_handoff_session, recover_workspace |
+| spec_api | 10 | create_spec, get_spec, update_spec, list_specs, delete_spec, create_plan_from_spec, link_spec_to_plan, derive_spec |
+| collab_api | 10 | create_collab_group, add_group_member, remove_group_member, share_memory_to_group, get_group_shared_memories |
+| security | 4 | hash_password, verify_password, encrypt_value, decrypt_value (pgcrypto) |
+| loop_api | 33 | create_loop, start_run, stop_run, add_iteration, evaluate_iteration, register_hook, trigger_hook, get_loop_stats |
+
+## Python API (29 Modules)
+
+PG uses `psycopg2` with `RealDictCursor` for dict returns, and `_convert_params()` for Oracle `:param` → PG `%s` conversion. All 29 modules share identical function signatures with Oracle editions.
+
+Key PG differences:
+- `execute_insert_returning_id()` returns `int` for BIGINT identity (vs `str` for Oracle VARCHAR GUID)
+- `_convert_params()` transparently handles `:param` → `%s` conversion
+- PG `jsonb` columns accept Python dict/list directly via psycopg2 auto-adaptation
+- PG `VECTOR(1024)` requires pgvector extension
+
+## pg_cron Jobs (16 Jobs)
+
+| Job | Schedule | Description |
+|-----|----------|-------------|
+| MEMORY_FUSION_JOB | Weekly Sunday 06:00 | Fuses similar memories, decays importance |
+| MEMORY_FUSION_CYCLE | Daily 04:00 | Full fusion cycle |
+| SESSION_CLEANUP_JOB | Hourly | Ends stale active sessions |
+| KNOWLEDGE_EXTRACTION_JOB | Daily 06:00 | Extracts knowledge from high-importance memories |
+| WORKSPACE_CLEANUP_JOB | Daily 04:00 | Archives completed workspaces |
+| DORMANT_AGENT_JOB | Every 30 min | Auto-hibernates inactive agents |
+| CREDENTIAL_CLEANUP_JOB | Daily 02:00 | Purges expired credentials |
+| EMBEDDING_GENERATION_JOB | Every 2 hours | Auto-generates embeddings for new entities |
+| LOOP_TRIGGER_JOB | Every 1 min | Triggers pending loop runs |
+| LOOP_STUCK_CHECK_JOB | Every 5 min | Detects stuck loop runs |
+| LOOP_CLEANUP_JOB | Weekly Sunday | Cleans up finished/failed loop runs |
+
+## Harness Templates (5 Built-in)
+
+| Template | Description |
+|----------|-------------|
+| RESEARCH_AGENT | Multi-step research: gather, synthesize, produce report |
+| CODE_REVIEW_AGENT | Code analysis: parse, identify issues, suggest improvements |
+| DATA_ANALYSIS_AGENT | Data pipeline: load, compute stats, generate visualizations |
+| CONVERSATION_AGENT | Multi-turn dialogue: maintain context, track intent |
+| TASK_EXECUTION_AGENT | General task execution: plan steps, execute, handle errors |
+
+## Critical PostgreSQL / psycopg2 Quirks
+
+- **RealDictCursor**: Returns `RealDictRow`; use `dict(row)` for plain dict
+- **BIGINT identity**: Returns Python `int` from `RETURNING`, not `str`
+- **Empty tuple params**: `cur.execute(sql, ())` fails with `%` in LIKE patterns. Pass `None` instead
+- **VECTOR type**: Pass list `[1.0, 2.0,...]` to pgvector columns
+- **JSONB**: psycopg2 auto-adapts Python dict/list; no manual `json.dumps()`
+- **PL/pgSQL**: Functions use `SECURITY DEFINER` for privilege escalation
+- **pg_cron**: Requires `shared_preload_libraries = 'pg_cron'` in postgresql.conf
+- **Apache AGE**: Graph queries use `cypher()` function
+- **Port**: 5432 for COM, 5433 for ENT. Separate data directories
+
+## Database Connection
+
+| Parameter | Value |
+|-----------|-------|
+| Host | `<pg_host>` |
+| Port | 5432 (COM) / 5433 (ENT) |
+| Database | `ai_agent` (COM) / `ai_agent_ee` (ENT) |
+| User | `pgsql` |
+| Driver | psycopg2 2.9+ |
+| Python | 3.14+ |
+| Server URL | `http://<host>:18080` (COM) / `http://<host>:18090` (ENT) |
+
+## Quick Start
+
+### Prerequisites
+
+**PostgreSQL 18.3** with these extensions:
+```sql
+CREATE EXTENSION IF NOT EXISTS pgvector;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS age;
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+CREATE EXTENSION IF NOT EXISTS plpython3u;
+```
+
+### Install Dependencies
+
+**Option A — Offline (recommended for air-gapped environments):**
+```bash
+bash scripts/install_offline.sh
+python3.14 scripts/verify_deps.py
+```
+The `vendor/` directory contains 30 pre-downloaded cp314 wheels. No internet required.
+
+**Option B — Online:**
+```bash
+pip install -r requirements.txt
+```
+
+### Deploy Schema
+
+```bash
+psql -U pgsql -d ai_agent -f scripts/deploy/1_schema.sql
+psql -U pgsql -d ai_agent -f scripts/deploy/2_api.sql
+psql -U pgsql -d ai_agent -f scripts/deploy/3_jobs.sql
+psql -U pgsql -d ai_agent -f scripts/deploy/4_harness_templates.sql
+```
+
+### Configure
+
+Edit `scripts/lib/config.py` or set environment variables:
+```bash
+export MEMORY_DB_HOST="<db_host>"
+export MEMORY_DB_PORT="5432"
+export MEMORY_DB_NAME="ai_agent"
+export MEMORY_DB_USER="pgsql"
+export MEMORY_DB_PASSWORD=""
+```
+
+Then optionally encrypt the config:
+```bash
+python3.14 -m tools.encrypt_config auto
+```
+
+### Start Web Server
+
+```bash
+python3.14 scripts/visualization/server.py &
+```
+Access at `http://<host>:18080`. Admin login: admin/admin.
+
+### Database Connection
+
+| Parameter | Value |
+|-----------|-------|
+| Host | `<pg_host>` |
+| Port | 5432 (COM) / 5433 (ENT) |
+| Database | `ai_agent` (COM) / `ai_agent_ee` (ENT) |
+| User | `pgsql` |
+| Driver | psycopg2 2.9+ |
+

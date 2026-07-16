@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - PG Community Edition - Skill Storage & Distribution API
+"""AI Agent Infra v3.10.2 - PG Community Edition - Skill Storage & Distribution API
 
 Supports direct database access and Admin API mode for Business Agents.
 """
@@ -37,16 +37,20 @@ def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def register_skill(
     skill_name: str,
+    skill_id_prefix: Optional[str] = None,
     skill_version: str = "1.0.0",
     description: Optional[str] = None,
     skill_type: str = "TOOL",
     category: Optional[str] = None,
+    runtime: Optional[str] = None,
     visibility: str = "SHARED",
     owned_by_agent: Optional[str] = None,
     input_schema: Optional[Any] = None,
     output_schema: Optional[Any] = None,
     dependencies: Optional[Any] = None,
     resource_path: Optional[str] = None,
+    resource_uri: Optional[str] = None,
+    spec_id: Optional[str] = None,
 ) -> int:
     row = execute_query_one(
         """SELECT skill_manager.register(

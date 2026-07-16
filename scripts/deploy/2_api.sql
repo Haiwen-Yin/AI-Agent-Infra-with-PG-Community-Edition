@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ============================================================
--- AI Agent Infra v3.10.1 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
+-- AI Agent Infra v3.10.2 - Community Edition - PostgreSQL 18.3 - Phase 2: PL/pgSQL API Schemas
 -- ============================================================
 
 -- ============================================================
@@ -2494,7 +2494,7 @@ $$;
 
 
 -- ============================================================
--- AI Agent Infra v3.10.1 - Community Edition - PostgreSQL 18.3 API Deployment Complete
+-- AI Agent Infra v3.10.2 - Community Edition - PostgreSQL 18.3 API Deployment Complete
 -- ============================================================
 
 -- v3.10.0: Create AGE graph if not exists

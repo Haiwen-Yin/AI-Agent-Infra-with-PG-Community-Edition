@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - PG Community Edition - Loop Engineering API
+"""AI Agent Infra v3.10.2 - PG Community Edition - Loop Engineering API
 
 Loop Engineering: design goal-driven autonomous feedback loops for AI agents.
 Each Loop definition is stored as an ENTITY (ENTITY_TYPE='LOOP_DEFINITION')
@@ -59,6 +59,11 @@ def create_loop(
     parent_loop_id: Optional[str] = None,
     collab_group_id: Optional[str] = None,
 ) -> str:
+    # PG compatibility: convert int params to str
+    if harness_template_id is not None and not isinstance(harness_template_id, str):
+        harness_template_id = str(harness_template_id)
+    if owned_by_agent is not None and not isinstance(owned_by_agent, str):
+        owned_by_agent = str(owned_by_agent)
     entity_id = execute_insert_returning_id("""
         INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, SUMMARY, STATUS,
                               OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,

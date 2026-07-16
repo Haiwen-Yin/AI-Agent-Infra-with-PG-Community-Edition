@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - PG Community Edition - Security Module
+"""AI Agent Infra v3.10.2 - PG Community Edition - Security Module
 
 Data masking, context-aware masking, reversible encryption via pgcrypto,
 password hashing, and admin token management.
@@ -216,7 +216,17 @@ def verify_admin_token(token: str) -> bool:
 
 
 def _get_encryption_key() -> bytes:
-    return os.urandom(32)
+    try:
+        from .connection import execute_query_one
+        row = execute_query_one(
+            "SELECT config_value FROM system_config WHERE config_key = 'credential_encryption_key'"
+        )
+        if row and row.get('config_value'):
+            key_str = row['config_value']
+            return hashlib.sha256(key_str.encode('utf-8')).digest()[:32]
+    except Exception:
+        pass
+    return hashlib.sha256(b'CHANGE_ME_IN_PRODUCTION').digest()[:32]
 
 
 default_masking_service = DataMaskingService()

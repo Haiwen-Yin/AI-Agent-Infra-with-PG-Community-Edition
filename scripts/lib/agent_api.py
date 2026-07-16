@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - PG Community Edition - Agent API
+"""AI Agent Infra v3.10.2 - PG Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 collaboration tracking, pool management, and Admin/Agent separation support.
@@ -38,7 +38,19 @@ def _row_to_dict(row: Any) -> Dict[str, Any]:
 
 
 def _get_crypto_key() -> bytes:
-    return _os.urandom(32)
+    try:
+        from .connection import execute_query_one
+        row = execute_query_one(
+            "SELECT config_value FROM system_config WHERE config_key = 'credential_encryption_key'"
+        )
+        if row and row.get('config_value'):
+            key_str = row['config_value']
+            import hashlib
+            return hashlib.sha256(key_str.encode('utf-8')).digest()[:32]
+    except Exception:
+        pass
+    import hashlib
+    return hashlib.sha256(b'CHANGE_ME_IN_PRODUCTION').digest()[:32]
 
 
 def register_agent(
@@ -542,10 +554,17 @@ def register_agent_via_admin(
     register_agent(agent_id, agent_name, agent_type=agent_type,
                    description=description, capabilities=capabilities, config=config)
 
+    from .connection_crypto import generate_agent_crypto_key
+    agent_crypto_key = generate_agent_crypto_key()
+    _store_agent_crypto_key(agent_id, agent_crypto_key)
+    _store_agent_crypto_key_version(agent_id, 1)
+
     recovery_codes = generate_recovery_codes(agent_id)
 
     return {
         "agent_id": agent_id,
+        "crypto_key": agent_crypto_key,
+        "crypto_key_version": 1,
         "recovery_codes": recovery_codes,
     }
 
@@ -716,3 +735,65 @@ def elastic_pool_scale(target_pool_size: int) -> Dict[str, Any]:
         "activated": activated,
         "target_pool_size": target_pool_size,
     }
+
+
+def _store_agent_crypto_key(agent_id: str, crypto_key: str) -> None:
+    execute(
+        "INSERT INTO system_config (config_key, config_value, description) "
+        "VALUES (%s, %s, %s) ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value",
+        [f"agent_crypto_key:{agent_id}", crypto_key, f"Per-Agent encryption key for {agent_id}"],
+    )
+
+
+def _get_agent_crypto_key(agent_id: str) -> Optional[str]:
+    row = execute_query_one(
+        "SELECT config_value FROM system_config WHERE config_key = %s",
+        [f"agent_crypto_key:{agent_id}"],
+    )
+    return row["config_value"] if row else None
+
+
+def _store_agent_crypto_key_version(agent_id: str, version: int) -> None:
+    execute(
+        "INSERT INTO system_config (config_key, config_value, description) "
+        "VALUES (%s, %s, %s) ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value",
+        [f"agent_crypto_key_version:{agent_id}", str(version), f"Crypto key version for {agent_id}"],
+    )
+
+
+def get_agent_crypto_key_version(agent_id: str) -> int:
+    row = execute_query_one(
+        "SELECT config_value FROM system_config WHERE config_key = %s",
+        [f"agent_crypto_key_version:{agent_id}"],
+    )
+    try:
+        return int(row["config_value"]) if row else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def rotate_agent_crypto_key(agent_id: str) -> Optional[Dict[str, Any]]:
+    from .connection_crypto import generate_agent_crypto_key
+    new_key = generate_agent_crypto_key()
+    current_version = get_agent_crypto_key_version(agent_id)
+    new_version = current_version + 1
+
+    _store_agent_crypto_key(agent_id, new_key)
+    _store_agent_crypto_key_version(agent_id, new_version)
+
+    logger.info("Rotated crypto key for agent %s to version %d", agent_id, new_version)
+    return {"agent_id": agent_id, "key_version": new_version}
+
+
+def rotate_all_crypto_keys() -> List[Dict[str, Any]]:
+    agents = execute_query(
+        "SELECT DISTINCT agent_id FROM agent_registry WHERE status != 'DELETED'",
+        [],
+    )
+    results = []
+    for row in agents:
+        result = rotate_agent_crypto_key(row["agent_id"])
+        if result:
+            results.append(result)
+    logger.info("Rotated crypto keys for %d agents", len(results))
+    return results

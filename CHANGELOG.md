@@ -1,7 +1,35 @@
+## [3.10.2] - 2026-07-16
+
+### Summary
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params empty tuple fix.
+
+### Added
+
+- **Per-Agent independent crypto keys**: Each Agent gets its own 32-byte encryption key stored in SYSTEM_CONFIG (key=agent_crypto_key:{agent_id}), distributed via admin_token at registration
+- **Key rotation API**: POST /api/admin/crypto/rotate (global) and POST /api/admin/crypto/rotate/{agent_id} (per-Agent), with automatic re-encryption of affected credentials
+- **Config.json auto-encryption on startup**: server.py now calls auto_encrypt_config() which encrypts database, llm.api_key, and model_routing.*_api_key sections transparently
+- **encrypt_config.py CLI tool**: Unified across all 4 editions (was Oracle ENT only)
+- **PG Business Agent mode**: connection.py now supports mode='agent' with encrypted agent_config.json loading
+- **Portal Markdown rendering**: portal_chat.html now renders LLM responses with Markdown (headers, code blocks, lists, bold/italic, links), auto-scroll during streaming, exit button with session cleanup, auto-detection of expired sessions
+
+### Fixed
+
+- **PG _get_crypto_key() critical bug**: Was returning os.urandom(32) on every call (different key each time), making encryption irreversible. Now reads from system_config table
+- **PG security.py _get_encryption_key()**: Same random-key bug, now reads from DB
+- **PG config.py _decrypt_database_section()**: Was dead code (never called), now wired into load_config()
+
+### Changed
+
+- config.json now encrypts database + llm + model_routing sections (was database only)
+- Agent heartbeat checks crypto key version for rotation detection
+
+---
+
 ## [3.10.1] - 2026-07-14
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 Enterprise deployment enhancement: offline dependency bundling + pure Python Oracle schema deployment tool.
 
 ### Added
@@ -21,7 +49,7 @@ No internet, SQLcl, or Java required. Copy ZIP to isolated network, run install_
 ## [3.10.0] - 2026-07-09
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 Universal Property Graph release. Extends the graph model from entity-level adjacency to 8 functional domains, adding 30+ graph functions and 23 new edge types: knowledge causality, agent collaboration (group-scoped dynamic trust), task orchestration, skill dependencies, approval propagation, data flow, memory evolution, and loop iteration.
 
 ### Added
@@ -46,7 +74,7 @@ Universal Property Graph release. Extends the graph model from entity-level adja
 ## [3.9.0] - 2026-07-05
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 AI Agent ecosystem connectivity release. Adds MCP Server, SSE streaming output, Human-in-the-Loop approval, Agent Protocol compatibility, and multi-model routing.
 
 ### Added - All Editions
@@ -92,7 +120,7 @@ AI Agent ecosystem connectivity release. Adds MCP Server, SSE streaming output, 
 ## [3.8.0] - 2026-07-02
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 Multi-Agent integration testing release for PostgreSQL editions. Completed full 5-phase deployment and 15-module functional test suite with zero failures on a fresh PG 18.3 database. Multiple runtime bugs discovered and fixed during testing.
 
 ### Fixed - PG COM/ENT
@@ -124,7 +152,7 @@ Multi-Agent integration testing release for PostgreSQL editions. Completed full 
 ## [3.7.5] - 2026-06-28
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 Critical bug fix release for PostgreSQL editions. Fixes connection layer and SQL compatibility issues that prevented PG editions from functioning.
 
 ### Fixed - PG COM/ENT
@@ -142,7 +170,7 @@ Critical bug fix release for PostgreSQL editions. Fixes connection layer and SQL
 ## [3.7.4] - 2026-06-26
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 6 expansion directions: Agent Communication Protocol, Multi-Agent Orchestration, Event-Driven Architecture, Advanced Memory Management, Observability, and Tool Ecosystem.
 
 ### Added - All Editions
@@ -160,7 +188,7 @@ Critical bug fix release for PostgreSQL editions. Fixes connection layer and SQL
 ## [3.7.3] - 2026-06-23
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 Deployment fix release — resolves schema creation order issues, hardcoded schema owner names, configuration priority, and embedding model auto-detection discovered during fresh deployment testing.
 
 ### Fixed - Oracle COM/ENT
@@ -262,7 +290,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [3.7.1] - 2026-06-19
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 **Loop Engineering Collaborative Integration** — Connects Loop Engineering with Spec, Task, Branch, Collab, and Skill modules, enabling Spec-driven loops, Task-Loop bindings, and Collaborative Loops. Also fixes session persistence, PG loop API compatibility, and adds SPEC_VALIDATION and AGGREGATE evaluation types.
 
 ### Added - Both Editions
@@ -308,7 +336,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [3.7.0] - 2026-06-18
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 **Loop Engineering** — Introduces Loop Engineering as the 4th generation AI engineering methodology (after Prompt Engineering, Context Engineering, and Harness Engineering), proposed by Peter Steinberger in June 2026. Adds 4 new tables, LOOP_MANAGER PL/SQL package, loop_api.py Python module, evaluation engine with 4 evaluation types, lifecycle hooks, and 3 scheduler jobs.
 
 ### Added - Both Editions
@@ -328,7 +356,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed - Both Editions
 
-- **Test suite** — Community Edition: 121 tests; Enterprise Edition: 151 tests
+- **Test suite** — Community Edition: 103 tests; Enterprise Edition: 103 tests
 - **Schema** — COM: 30 → 34 tables, 13 → 14 PL/SQL packages, 13 → 16 scheduler jobs; ENT: 35 → 40 tables, 16 → 17 PL/SQL packages, 17 → 20 scheduler jobs
 - **Python modules** — COM: 23 → 24 modules; ENT: 24 → 25 modules
 
@@ -347,7 +375,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [3.6.2] - 2026-06-18
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 Bug fix release with 15 bug fixes, updated schema statistics, and improved PG compatibility.
 
 ### Schema & Database
@@ -417,7 +445,7 @@ Bug fix release with 15 bug fixes, updated schema statistics, and improved PG co
 ## [3.6.1] - 2026-06-16
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption, key rotation API, Portal Markdown rendering. PG-specific: credential encryption bug fix, Business Agent mode, _convert_params fix, Oracle SQL syntax replacement.
 Initial PostgreSQL Community Edition release — feature-matching Oracle Community Edition v3.6.1, adapted for PostgreSQL 18.3 with psycopg2, pgvector, Apache AGE, pg_cron, PL/Python3u, pgcrypto, and Row Security Policies.
 
 ### Added
@@ -450,4 +478,4 @@ Initial PostgreSQL Community Edition release — feature-matching Oracle Communi
 - **5-Signal Unified Hybrid Search** — Vector, fulltext, relational, tag, graph signal fusion via `unified_sql` single-SQL strategy
 - **Encrypted Credentials** — config.json auto-encryption, pgcrypto in-database encryption, master key management
 - **Row Security Policies** — 23 RLS policies for row-level access control, zero-trust security model
-- **Test suite** — 105 tests across 16 modules
+- **Test suite** — 103 tests across 16 modules

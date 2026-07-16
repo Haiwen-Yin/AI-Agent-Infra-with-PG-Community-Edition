@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - PG Community Edition - Workspace API
+"""AI Agent Infra v3.10.2 - PG Community Edition - Workspace API
 
 Workspace lifecycle management, context chains, agent handoff sessions,
 workspace recovery, and task linking.
@@ -368,3 +368,13 @@ def get_user_workspaces(
             ORDER BY updated_at DESC
         """, [user_id])
     return [_row_to_dict(r) for r in rows]
+
+def recover_workspace(workspace_id: str) -> dict:
+    from .connection import execute
+    execute("UPDATE workpaces SET status = 'ACTIVE' WHERE workspace_id = %s", [workspace_id])
+    return {"workspace_id": workspace_id, "status": "ACTIVE"}
+
+def create_handoff_session(agent_id, workspace_id, predecessor_session_id, owner_user_id=None) -> dict:
+    from .agent_api import create_session
+    sid = create_session(agent_id, owner_user_id, str(workspace_id))
+    return {"session_id": sid, "workspace_id": workspace_id}

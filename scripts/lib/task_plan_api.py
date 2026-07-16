@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - PG Community Edition - Task Plan API
+"""AI Agent Infra v3.10.2 - PG Community Edition - Task Plan API
 
 Task plan creation, step management, dependency tracking,
 snapshot/restore, and plan statistics.
