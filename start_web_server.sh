@@ -1,26 +1,12 @@
 #!/bin/bash
-# AI Agent Infra v3.6.1 - Community Edition (PG) - Web Server Start Script
+# Auto-generated start script for editions without a custom start_web_server.sh
+set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-export PYTHONPATH="${SCRIPT_DIR}/scripts:${PYTHONPATH}"
-
-CONFIG_FILE="${SCRIPT_DIR}/config.json"
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "[ERROR] config.json not found at ${CONFIG_FILE}"
-    exit 1
+# First-run config wizard: prompts if config.json still has <PLACEHOLDER> tokens
+if [ -x "$SCRIPT_DIR/scripts/config_wizard.sh" ]; then
+    "$SCRIPT_DIR/scripts/config_wizard.sh" || true
 fi
 
-SERVER_PORT=$(python3 -c "import json; c=json.load(open('${CONFIG_FILE}')); print(c.get('server_port', 18080))")
-
-echo "============================================"
-echo " AI Agent Infra v3.6.1 - Community Edition (PG)"
-echo " Visualization Server"
-echo "============================================"
-echo " Config:  ${CONFIG_FILE}"
-echo " Port:    ${SERVER_PORT}"
-echo "============================================"
-
-cd "${SCRIPT_DIR}/scripts/visualization"
-
-exec python3 server.py
+cd "$SCRIPT_DIR"
+python3.14 scripts/visualization/server.py
