@@ -4,11 +4,12 @@
         "password": "<DB_PASSWORD>",
         "host": "<DB_HOST>",
         "port": 5432,
-        "database": "<DB_NAME>"
+        "dbname": "<DB_NAME>"
     },
     "server": {
         "host": "0.0.0.0",
-        "port": 18080
+        "port": 18080,
+        "node_id": ""
     },
     "embedding": {
         "api_url": "<EMBEDDING_API_URL>",
@@ -22,8 +23,8 @@
     },
     "security": {
         "admin_username": "admin",
-        "session_timeout": 3600,
-        "secret_key": "pg-community-v4.0.0"
+        "session_timeout": 300,
+        "secret_key": "pg-community-v4.0.1"
     },
     "agent": {
         "mode": "standalone"

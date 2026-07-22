@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with PostgreSQL
 
-> **Version:** 4.0.0 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
+> **Version:** 4.0.1 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
 
 This is the operations guide for the AI Agent Infra with PostgreSQL
 release package. It covers everything an operator (human or AI Agent)
@@ -32,7 +32,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.0.0.md         # this release's notes
+├── RELEASE_NOTES_v4.0.1.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -96,7 +96,7 @@ The release zip is self-contained - no PyPI access needed.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.0.0.zip
+unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.0.1.zip
 cd AI-Agent-Infra-with-PG-Enterprise-Edition
 
 # 2. Install Python dependencies from the bundled wheels
@@ -135,10 +135,11 @@ vim config.json   # replace every <PLACEHOLDER> with a real value
 ```
 
 ### Auto-encryption
-On first startup, `auto_encrypt_config()` rewrites the `database`, `llm`,
-and `model_routing` sections of `config.json` in place as `_encrypted`
-blobs (PBKDF2-derived key, AES via `pgcrypto`). The plaintext is
-discarded; the server decrypts transparently on every read.
+On first startup, `auto_encrypt_config()` encrypts sensitive fields in the
+`database`, `security`, `llm`, and `model_routing` sections of `config.json`
+as AES-256-GCM `_encrypted` blobs. This includes database credentials, API
+keys, and `security.secret_key`; non-sensitive policy remains readable. The
+server enforces owner-only (`0600`) permissions and decrypts transparently.
 
 Manual encrypt / decrypt:
 ```bash
@@ -278,7 +279,7 @@ Tests use the configured `config.json` connection. Set
 | Server starts but RLS not filtering | `app.current_agent_id` not set | ensure connection.py `apply_agent_context` is called |
 | Portal chat returns 500 | LLM `api_url` not configured | edit `config.json` -> `llm.api_url` |
 | Deployment fails with "schema_version exists" | DB already has schema | drop schema or use `--force` |
-| `config.json` has `_encrypted` but server can't decrypt | `MASTER_DB_KEY` env var changed | unset it (key is derived from `secret_key` in config) |
+| `config.json` has `_encrypted` but server can't decrypt | configured master key does not match | restore the matching `MASTER_DB_KEY` or `~/.ai-agent-infra/master.key` backup |
 
 Server log: `viz_server.log` in the project directory.
 
