@@ -1,16 +1,30 @@
 # SKILL.md - AI Agent Infra with PostgreSQL
 
-> **Version:** 4.0.1 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
+> **Version:** 4.1.0 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
 
 This is the operations guide for the AI Agent Infra with PostgreSQL
 release package. It covers everything an operator (human or AI Agent)
 needs to deploy, configure, start, register against, and operate this
 edition.
 
+> **Product brand:** Chuanxu (川序) · **Product:** AI Agent Management Platform
+>
+> **Technical project:** AI Agent Infra with DB. The database-specific package name
+> identifies the PostgreSQL adapter and edition; it is not a separate product
+> brand.
+
+This package is **Skill-first and framework-neutral**. Any Agent runtime that
+can install or read `SKILL.md` and execute the packaged HTTP, MCP, or CLI
+workflows can use the platform; OpenClaw and Hermes Agent are confirmed
+integration examples. The runtime does not need to be created by this
+platform. Registration and authentication are still required before an Agent
+enters the managed inventory, identity, permission, and audit scope.
+
 ## 1. Overview
 
-AI Agent Infra is a **database-native agent infrastructure** built on
-**PostgreSQL 18.3+**. It collapses the conventional
+AI Agent Infra with DB is the technical foundation of the **Chuanxu AI Agent
+Management Platform**, built on **PostgreSQL 18.3+**. It collapses the
+conventional
 "Redis + vector DB + graph DB + object store" stack into a single
 PostgreSQL kernel - leveraging `pgvector` for embeddings, `pg_trgm` for
 fuzzy search, Row-Level Security (RLS) for per-agent isolation,
@@ -18,11 +32,20 @@ fuzzy search, Row-Level Security (RLS) for per-agent isolation,
 
 | Edition             | Port  | License          |
 |---------------------|-------|------------------|
-| Community           | 18080 (默认，可配置) | Apache 2.0       |
-| Enterprise          | 18090 (默认，可配置) | BSL 1.1          |
+| Community           | 18080 (default, configurable) | Apache 2.0       |
+| Enterprise          | 18090 (default, configurable) | BSL 1.1          |
 
-Enterprise adds: per-agent encryption keys, LDAP auth, audit trail,
-compliance logs, skill tokens, orchestrator approvals.
+Enterprise adds: registered-Agent governance, resource policies and bounded
+grants, server-attributed N-of-M approvals, emergency control, risk-based audit
+and evidence export, per-agent encryption keys, LDAP auth, compliance logs,
+skill tokens, and orchestrator approvals.
+
+v4.1.0 requires every external or platform-hosted Agent to register and
+authenticate before using non-bootstrap APIs. The Enterprise resource catalog
+is authoritative for classification; unknown or sensitive resources without an
+explicit policy are denied. Approval, emergency, audit, retention, legal-hold,
+and evidence-export controls are enforced by the server and database rather
+than by Dashboard visibility.
 
 ## 2. Package Contents
 
@@ -32,14 +55,14 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.0.1.md   # this release's notes
+├── RELEASE_NOTES_v4.1.0.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
 ├── config.example.json             # placeholder config template
 ├── start_web_server.sh             # server control script
 ├── docs/                           # deep-dive docs
-│   ├── introduction_zh.md          # 中文项目介绍
+│   ├── introduction_zh.md          # Chinese project introduction
 │   ├── architecture.md
 │   ├── api-reference.md
 │   ├── security.md
@@ -56,12 +79,14 @@ AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
     │   ├── 2_api.sql               #   PL/pgSQL functions (API layer)
     │   ├── 3_jobs.sql              #   pg_cron jobs
     │   ├── 4_harness_templates.sql #   agent harness templates
-    │   └── 4_grants.sql            #   RLS policy grants
+    │   ├── 4_grants.sql            #   RLS policy grants
+    │   ├── 8_v4_1_0_registration.sql # registered-Agent boundary
+    │   └── 8_v4_1_0_governance.sql   # Enterprise governance objects
     ├── lib/                        # business modules
     │   ├── connection.py           #   psycopg2 connection pool
     │   ├── config.py               #   config loader (auto-decrypts)
     │   ├── connection_crypto.py    #   PBKDF2 + AES via pgcrypto
-    │   ├── agent_api.py            #   shared-role + RLS agent identity
+    │   ├── agent_api.py            #   dedicated LOGIN role + RLS identity
     │   └── ...                     #   knowledge/graph/memory/loop/...
     ├── tools/
     │   └── encrypt_config.py       # manual encrypt/decrypt CLI
@@ -96,7 +121,7 @@ The release zip is self-contained - no PyPI access needed.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.0.1.zip
+unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.1.0.zip
 cd AI-Agent-Infra-with-PG-Enterprise-Edition
 
 # 2. Install Python dependencies from the bundled wheels
@@ -208,11 +233,10 @@ python3 scripts/agent_bootstrap.py recover \
 The bootstrap CLI auto-detects the driver from `agent_config.json`'s
 `db_type` field (set to `"pg"` by this adapter) and imports `psycopg2`.
 
-PostgreSQL uses a **shared DB role** model: all Business Agents connect
-as the same PostgreSQL user. Per-agent isolation is achieved by setting
-`app.current_agent_id = '<agent_id>'` immediately after connect; RLS
-policies on every table scope rows to the current agent. There are no
-per-agent PostgreSQL users.
+Each Business Agent uses a dedicated PostgreSQL LOGIN role mapped to its
+registered Agent identity. The role receives the least-privilege runtime grant
+set and RLS still scopes rows to `app.current_agent_id`; a connection failure
+or identity mismatch fails closed and never falls back to the Schema Owner.
 
 ## 9. API Reference
 
@@ -237,6 +261,11 @@ Once the server is running, these endpoints are available:
 | **Enterprise** | `/api/admin/crypto/rotate` | POST | Rotate encryption keys |
 | **Enterprise** | `/api/approvals` | GET/POST | Approval requests |
 | **Enterprise** | `/api/audit` | GET | Audit trail |
+| **Enterprise** | `/api/governance/resources` | GET/POST | Governed resource catalog |
+| **Enterprise** | `/api/governance/decide` | POST | Server-side policy decision |
+| **Enterprise** | `/api/governance/approvals/{id}/decision` | POST | N-of-M approval decision |
+| **Enterprise** | `/api/governance/emergency` | GET/POST | Emergency disable and retry |
+| **Enterprise** | `/api/governance/evidence/export` | GET | Scoped evidence export |
 | **Agent Protocol** | `/ap/v1/agent/tasks` | POST | Agent Protocol compat |
 
 Full API details: `docs/api-reference.md`.
@@ -249,10 +278,12 @@ Full API details: `docs/api-reference.md`.
 | Column encryption | `pgcrypto` extension (AES) |
 | Auth | Local users + LDAP (Enterprise) |
 | Audit | `entity_access_log` + `audit_api` (Enterprise) |
+| Governance | Resource policy, bounded grants, approvals, emergency control (Enterprise) |
 
 Business Agents connect with the shared DB role, then issue
 `SET app.current_agent_id = '<agent_id>'` to activate RLS scoping. The
-shared credentials are distributed encrypted via the registration API.
+credentials are distributed encrypted via the registration API; the Schema
+Owner is Admin-only and is never a Business Agent fallback.
 
 ## 11. Testing
 
