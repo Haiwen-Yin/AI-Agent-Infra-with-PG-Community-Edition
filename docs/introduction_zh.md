@@ -1,6 +1,6 @@
-# AI Agent Infra with PostgreSQL — 社区版 v4.1.0
+# AI Agent Infra with PostgreSQL — 社区版 v4.2.0
 
-**版本**: v4.1.0 | **日期**: 2026-07-24 | **作者**: 尹海文 | **许可**: Apache License 2.0
+**版本**: v4.2.0 | **日期**: 2026-07-25 | **作者**: 尹海文 | **许可**: Apache License 2.0
 
 📄 **官方网站：https://db4agent.top**
 
@@ -1412,3 +1412,22 @@ cd scripts && python -m tests.test_all
 
 - GitHub: [https://github.com/Haiwen-Yin](https://github.com/Haiwen-Yin)
 - 博客: [https://blog.csdn.net/yhw1809](https://blog.csdn.net/yhw1809)
+
+## v4.2.0 实验性 Graph Engineering
+
+v4.2.0 在 v4.1.0 的基础上增加数据库支撑的执行图能力，并以
+`experimental-4.2` 配置构建。它包含版本化 Graph Definition、确定性编译、
+持久化 Graph Run、State Event、Checkpoint、Worker 租约与 fencing、事件
+Inbox/Outbox、Artifact、评估、人工干预和 Task/Loop 兼容桥。原有关系型图
+探索仍然保留，新的执行图在 Dashboard 中提供定义、运行监控和证据视图。
+
+PostgreSQL 18 使用 Apache AGE 实现 Property Graph 投影，`GRAPH_*` 关系表
+仍是共享执行事务和恢复的权威来源。PostgreSQL 19 原生 Property Graph 属于
+后续适配方向，不是本版本的前置条件。Worker 只获得受限输入和短期
+Lease Token，不会获得 Schema Owner 凭证；过期 fencing token 不能覆盖更新
+后的执行结果。
+
+v4.2.x 是实验性版本线，Graph 合约可以敏捷迭代，但每次破坏性变化必须新增
+定义或 Schema 版本，提供迁移或人工复核状态，并重新完成三数据库验证。待
+Graph Engineering 行业规范和项目合约稳定后，最新验证通过的 v4.2.x 可直接
+作为下一正式稳定版本基础，不维护第二套长期实现。

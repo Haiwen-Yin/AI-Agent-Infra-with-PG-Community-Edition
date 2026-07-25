@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with PostgreSQL
 
-> **Version:** 4.1.0 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
+> **Version:** 4.2.0 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
 
 This is the operations guide for the AI Agent Infra with PostgreSQL
 release package. It covers everything an operator (human or AI Agent)
@@ -55,7 +55,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.1.0.md   # this release's notes
+├── RELEASE_NOTES_v4.2.0.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -121,7 +121,7 @@ The release zip is self-contained - no PyPI access needed.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.1.0.zip
+unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.2.0.zip
 cd AI-Agent-Infra-with-PG-Enterprise-Edition
 
 # 2. Install Python dependencies from the bundled wheels
@@ -313,6 +313,52 @@ Tests use the configured `config.json` connection. Set
 | `config.json` has `_encrypted` but server can't decrypt | configured master key does not match | restore the matching `MASTER_DB_KEY` or `~/.ai-agent-infra/master.key` backup |
 
 Server log: `viz_server.log` in the project directory.
+
+## 14. v4.2.0 Experimental Graph Engineering
+
+This package uses the `experimental-4.2` profile. It adds versioned Graph
+Definitions, deterministic compilation, durable Graph Runs, State Events,
+Checkpoints, Workers, Event Inbox/Outbox, Artifacts, evaluators, and
+reason-required interventions while preserving the v4.1 Graph Explorer and
+Task/Loop compatibility.
+
+PostgreSQL 18 uses **Apache AGE** for the database graph projection. The
+relational `GRAPH_*` runtime tables remain the portable transaction and
+recovery authority. PostgreSQL 19 native Property Graph is a future adapter
+target and is not required for this package.
+
+### Agent Skill Workflow
+
+After registration and authentication, an external Agent can use the common
+HTTP or MCP contract:
+
+```bash
+# Discover AGE-backed graph capability and registered types
+curl -b cookies.txt http://localhost:<port>/api/graph/capabilities
+curl -b cookies.txt http://localhost:<port>/api/graph-types
+
+# Create a definition, import or create a Draft, compile, and publish
+curl -b cookies.txt -H 'Content-Type: application/json' -d '{"name":"support-flow"}' \
+  http://localhost:<port>/api/graphs
+curl -b cookies.txt -H 'Content-Type: application/json' -d @graph-version.json \
+  http://localhost:<port>/api/graphs/<graph_id>/versions
+curl -b cookies.txt -H 'Content-Type: application/json' -d '{"reason":"validated POC topology"}' \
+  http://localhost:<port>/api/graph-versions/<version_id>/compile
+curl -b cookies.txt -H 'Content-Type: application/json' -d '{"reason":"approved for test execution"}' \
+  http://localhost:<port>/api/graph-versions/<version_id>/publish
+```
+
+Workers receive bounded input and a short Lease Token, never database
+credentials. They must heartbeat, checkpoint, and complete/fail with the
+fencing token. Stale or expired tokens cannot overwrite a newer Attempt. Use
+`/api/graph-runs/<run_id>/state` and `/snapshot` after a restart to recover
+managed state. Existing Task Plan and Loop behavior remains available through
+the v4.1 compatibility bridge.
+
+The v4.2.x Graph contract is experimental and may evolve. Breaking changes
+require a new definition/schema version, migration or review state, and new
+release evidence. The latest validated v4.2.x release can graduate to the next
+Stable line without maintaining a second implementation.
 
 ## 13. Offline Deployment
 
