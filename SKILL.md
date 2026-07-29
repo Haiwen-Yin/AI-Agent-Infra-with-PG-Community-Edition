@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with PostgreSQL
 
-> **Version:** 4.2.0 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
+> **Version:** 4.3.0 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
 
 This is the operations guide for the AI Agent Infra with PostgreSQL
 release package. It covers everything an operator (human or AI Agent)
@@ -40,8 +40,10 @@ grants, server-attributed N-of-M approvals, emergency control, risk-based audit
 and evidence export, per-agent encryption keys, LDAP auth, compliance logs,
 skill tokens, and orchestrator approvals.
 
-v4.1.0 requires every external or platform-hosted Agent to register and
-authenticate before using non-bootstrap APIs. The Enterprise resource catalog
+v4.3.0 requires every human and external or platform-hosted Agent to resolve to
+an active database Principal before using non-bootstrap APIs. Agent enrollment
+uses a one-time user-sponsored token; Business Agents receive neither database
+credentials nor a Schema Owner fallback. The Enterprise resource catalog
 is authoritative for classification; unknown or sensitive resources without an
 explicit policy are denied. Approval, emergency, audit, retention, legal-hold,
 and evidence-export controls are enforced by the server and database rather
@@ -55,7 +57,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.2.0.md   # this release's notes
+├── RELEASE_NOTES_v4.3.0.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -68,7 +70,7 @@ AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
 │   ├── security.md
 │   ├── deployment.md
 │   └── ...
-├── vendor/                         # 30 pre-downloaded wheels (offline)
+├── vendor/                         # bundled Python wheels; verify before offline install
 └── scripts/
     ├── config_wizard.sh            # first-run interactive config prompt
     ├── install_offline.sh          # install vendor/ wheels (no PyPI)
@@ -80,8 +82,18 @@ AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
     │   ├── 3_jobs.sql              #   pg_cron jobs
     │   ├── 4_harness_templates.sql #   agent harness templates
     │   ├── 4_grants.sql            #   RLS policy grants
-    │   ├── 8_v4_1_0_registration.sql # registered-Agent boundary
-    │   └── 8_v4_1_0_governance.sql   # Enterprise governance objects
+    │   ├── 8_v4_1_0_registration.sql # registered-Agent boundary (Community)
+    │   ├── 8_v4_1_0_governance.sql   # registration + governance (Enterprise)
+    │   ├── 9_v4_2_0_graph_engineering.sql
+    │   ├── 10_v4_2_0_graph_runtime.sql
+    │   ├── 11_v4_2_0_graph_control.sql
+    │   ├── 12_v4_2_0_graph_edge_scope.sql
+    │   ├── 13_v4_2_0_scheduler_ha.sql # Enterprise overlay only
+    │   ├── 14_v4_2_0_graph_triggers.sql
+    │   ├── 15_v4_2_1_executor_registry.sql # internal closure
+    │   ├── 16_v4_3_0_identity_channels.sql
+    │   ├── 17_v4_3_0_governance_lifecycle.sql
+    │   └── 18_v4_3_0_security_lifecycle.sql
     ├── lib/                        # business modules
     │   ├── connection.py           #   psycopg2 connection pool
     │   ├── config.py               #   config loader (auto-decrypts)
@@ -102,9 +114,9 @@ AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
 | Component | Minimum | Notes |
 |-----------|---------|-------|
 | PostgreSQL | 18.3+ | requires `pgvector`, `pg_trgm`, `pgcrypto`, `pg_cron` extensions |
-| Python | 3.8+ (3.14 recommended) | |
+| Python | 3.14+ | selected through `scripts/python_runtime.sh` |
 | psycopg2 driver | 2.9+ | bundled in `vendor/` |
-| Extensions | `pgvector`, `pg_trgm`, `pgcrypto`, `pg_cron` | install via `CREATE EXTENSION` |
+| Extensions | `pgvector`, `pg_trgm`, `pgcrypto`, `pg_cron`, Apache AGE 1.7+ | install AGE and the other extensions as a privileged PostgreSQL operator |
 | Memory | 2 GB free | for connection pool + vector search |
 
 Install required PostgreSQL extensions (as superuser):
@@ -113,23 +125,87 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pg_cron;
+CREATE EXTENSION IF NOT EXISTS age;
 ```
 
-## 4. Installation (offline-friendly)
+Apache AGE is installed by the PostgreSQL operator, not by the restricted
+application role. Grant the runtime database role the minimum projection
+access after installation:
 
-The release zip is self-contained - no PyPI access needed.
+```sql
+GRANT USAGE ON SCHEMA ag_catalog TO <APP_ROLE>;
+GRANT SELECT ON ALL TABLES IN SCHEMA ag_catalog TO <APP_ROLE>;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ag_catalog TO <APP_ROLE>;
+GRANT USAGE ON TYPE ag_catalog.agtype TO <APP_ROLE>;
+```
+
+The v4.3.0 migration does not issue `LOAD 'age'`: hardened PostgreSQL
+installations commonly reserve `LOAD` for superusers, and an already
+installed AGE extension exposes the required SQL objects without that
+session-level command. The `ag_catalog` grants above are required for the
+runtime role to create and use `ai_execution_graph`.
+
+### PostgreSQL Agent role provisioning prerequisite
+
+The Admin Agent connects as the Schema Owner when it provisions a Business
+Agent. The Schema Owner therefore needs two narrowly scoped PostgreSQL role
+management prerequisites:
+
+1. `CREATEROLE`, so it can create the per-Agent `LOGIN` role.
+2. `ADMIN OPTION` on the pre-created `ai_agent_runtime` role, so it can grant
+   that shared `NOLOGIN` runtime role to the new Agent login.
+
+Ask a PostgreSQL DBA to apply the following once. Replace the placeholder with
+the configured Schema Owner; never grant these privileges to a Business Agent
+or to `ai_agent_runtime` itself:
+
+```sql
+ALTER ROLE <SCHEMA_OWNER> CREATEROLE;
+GRANT ai_agent_runtime TO <SCHEMA_OWNER> WITH ADMIN OPTION;
+```
+
+If `ai_agent_runtime` does not exist, the first Admin provisioning request can
+create it, provided the Schema Owner has `CREATEROLE`; a DBA-created runtime
+role still requires the explicit `ADMIN OPTION` grant above. The resulting
+per-Agent login remains `NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`.
+If either prerequisite is missing, registration fails closed with an
+actionable provisioning error and never falls back to the Schema Owner.
+
+## 4. Installation (offline-capable runtime)
+
+The compiled Web assets run without Node.js, npm, or network access. Python
+installation is offline only when every requirement in `requirements.txt` has
+an exact compatible wheel in `vendor/`; `verify_deps.py` is the release gate
+and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.2.0.zip
+unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.3.0.zip
 cd AI-Agent-Infra-with-PG-Enterprise-Edition
+
+# Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
+source scripts/python_runtime.sh
+export PYTHON_BIN="$(cx_resolve_python)"
+cx_prepare_python_environment "$PYTHON_BIN"
 
 # 2. Install Python dependencies from the bundled wheels
 bash scripts/install_offline.sh
 
 # 3. Verify all dependencies are present
-python3 scripts/verify_deps.py
+"$PYTHON_BIN" scripts/verify_deps.py
 ```
+
+The installer fails closed when a required wheel is missing or incompatible;
+obtain the missing release dependencies from the approved internal mirror
+before retrying.
+
+`vendor/` may contain both the upstream `cryptography==49.0.0` wheel for
+glibc 2.34+ and the RHEL 8/glibc 2.28 source-built wheel. The installer and
+`verify_deps.py` select the compatible one automatically. Customers on newer
+systems do not need to rebuild cryptography; the reproducible source-build
+procedure is documented in `docs/cryptography-build.md`.
+The current v4.3.0 archive includes the verified glibc 2.28 wheel; do not
+rename the `manylinux_2_34` wheel or substitute an older cryptography release.
 
 ## 5. Configuration
 
@@ -168,8 +244,8 @@ server enforces owner-only (`0600`) permissions and decrypts transparently.
 
 Manual encrypt / decrypt:
 ```bash
-python3 scripts/tools/encrypt_config.py encrypt config.json
-python3 scripts/tools/encrypt_config.py decrypt config.json
+"$PYTHON_BIN" scripts/tools/encrypt_config.py encrypt config.json
+"$PYTHON_BIN" scripts/tools/encrypt_config.py decrypt config.json
 ```
 
 ## 6. Database Schema Deployment
@@ -194,6 +270,17 @@ curl http://localhost:<port>/api/agent/deployment-check
 The schema script `1_schema.sql` is idempotent - it auto-aborts if
 `system_config.schema_version` already exists.
 
+For the integrated v4.3.0 profile, use `scripts/migration_runner.py` for the
+additive migration tail. Community applies these nine scripts in order:
+`9_v4_2_0_graph_engineering.sql`, `10_v4_2_0_graph_runtime.sql`,
+`11_v4_2_0_graph_control.sql`, `12_v4_2_0_graph_edge_scope.sql`,
+`14_v4_2_0_graph_triggers.sql`, `15_v4_2_1_executor_registry.sql`,
+`16_v4_3_0_identity_channels.sql`, and
+`17_v4_3_0_governance_lifecycle.sql`, and
+`18_v4_3_0_security_lifecycle.sql`. Enterprise inserts
+`13_v4_2_0_scheduler_ha.sql` between `12` and `14`, for ten scripts total.
+The internal `15` step is part of v4.3.0 and is not a public v4.2.1 release.
+
 ## 7. Start the Server
 
 ```bash
@@ -213,17 +300,17 @@ database credentials:
 
 ```bash
 # Register a new Business Agent
-python3 scripts/agent_bootstrap.py register \
+"$PYTHON_BIN" scripts/agent_bootstrap.py register \
     --agent-id MY_AGENT \
     --agent-name "My Business Agent" \
     --admin-token AT_xxx \
     --admin-url http://<admin-host>:<port>
 
 # Test the resulting connection
-python3 scripts/agent_bootstrap.py test
+"$PYTHON_BIN" scripts/agent_bootstrap.py test
 
 # Recover if the agent crashed and lost credentials
-python3 scripts/agent_bootstrap.py recover \
+"$PYTHON_BIN" scripts/agent_bootstrap.py recover \
     --agent-id MY_AGENT \
     --recovery-code RC-XXXX-XXXX-XXXX \
     --admin-token AT_xxx \
@@ -270,6 +357,20 @@ Once the server is running, these endpoints are available:
 
 Full API details: `docs/api-reference.md`.
 
+### Canonical And Legacy Entry Points
+
+New integrations use the authenticated FastAPI service (`web_app:app`) and
+its Principal-aware `/api/auth/*`, resource, Graph, Channel, Barrier, Gateway,
+and governance routes, or the equivalent HTTP/MCP/Skill workflow. The
+established Dashboard, Portal, and Agent paths are retained through the
+request-local compatibility bridge to `visualization/server.py`; the bridge
+does not open a second listener or grant direct database access. Legacy callers
+remain subject to session, CSRF, Agent identity, and permission checks. The
+`production` runtime profile exposes the integrated v4.3.0 stable core and is
+the current production recommendation; the v4.3.0 release and closure evidence
+are PASS. `graph-preview` and `development` remain explicitly controlled
+profiles for experimental capabilities.
+
 ## 10. Security Model
 
 | Layer | Mechanism |
@@ -289,10 +390,10 @@ Owner is Admin-only and is never a Business Agent fallback.
 
 ```bash
 # Run the full test suite
-python3 -m pytest scripts/tests/ -v
+"$PYTHON_BIN" -m pytest scripts/tests/ -v
 
 # Or the legacy runner
-cd scripts && python -m tests.test_all
+cd scripts && "$PYTHON_BIN" -m tests.test_all
 ```
 
 Tests use the configured `config.json` connection. Set
@@ -314,18 +415,33 @@ Tests use the configured `config.json` connection. Set
 
 Server log: `viz_server.log` in the project directory.
 
-## 14. v4.2.0 Experimental Graph Engineering
+## 14. v4.3.0 Integrated Graph Engineering and Governed Collaboration
 
-This package uses the `experimental-4.2` profile. It adds versioned Graph
-Definitions, deterministic compilation, durable Graph Runs, State Events,
-Checkpoints, Workers, Event Inbox/Outbox, Artifacts, evaluators, and
-reason-required interventions while preserving the v4.1 Graph Explorer and
-Task/Loop compatibility.
+This package uses the v4.3.0 shared code line. It includes the internal v4.2.1
+Graph closure: versioned Graph Definitions, deterministic compilation, durable
+Graph Runs, State Events, Checkpoints, Workers, Event Inbox/Outbox, Artifacts,
+evaluators, reason-required interventions, a versioned Node Executor registry,
+bounded delivery attempts, dead-letter replay, and operator governance events.
+The internal v4.2.1 milestone is not a separately published package.
+
+The migration tail above is part of the same profile and must be applied
+through the checksum ledger before using the new Graph, Channel, Barrier, or
+governance lifecycle objects.
 
 PostgreSQL 18 uses **Apache AGE** for the database graph projection. The
 relational `GRAPH_*` runtime tables remain the portable transaction and
 recovery authority. PostgreSQL 19 native Property Graph is a future adapter
 target and is not required for this package.
+
+Human and Agent activity is governed by the same Principal and database-backed
+Session boundary. A permitted user creates a one-time Enrollment Token that
+fixes sponsorship, owner, runtime, environment, risk tier, quota, and Security
+Domain. A Channel is a collaboration view, not an authorization grant: it
+cannot enlarge database, API, Skill, Tool, model, memory, Artifact, or export
+access. Barrier arrivals and decisions are durable and attributable. The Agent
+Gateway delivers channel events through short-lived instance tokens, fencing,
+acknowledgement, retry, and dead-letter rules; web restart recovery is scoped to
+the local node.
 
 ### Agent Skill Workflow
 
@@ -355,16 +471,42 @@ fencing token. Stale or expired tokens cannot overwrite a newer Attempt. Use
 managed state. Existing Task Plan and Loop behavior remains available through
 the v4.1 compatibility bridge.
 
-The v4.2.x Graph contract is experimental and may evolve. Breaking changes
-require a new definition/schema version, migration or review state, and new
-release evidence. The latest validated v4.2.x release can graduate to the next
-Stable line without maintaining a second implementation.
+### Executor and delivery operations
+
+Executors are declarative manifests, not arbitrary Python, SQL, shell, or
+network callbacks. Built-in `CONTROL`, `WORKER`, and `WAIT` Executors are
+resolved for every node before claim and completion. Custom manifests require
+an authenticated registration actor; disabling or deprecating one requires a
+reason and affects new claims only.
+
+```bash
+curl -b cookies.txt 'http://localhost:<port>/api/graph-executors?include_inactive=true'
+curl -b cookies.txt http://localhost:<port>/api/graph/events/inbox
+curl -b cookies.txt http://localhost:<port>/api/graph/events/dead-letter
+curl -b cookies.txt http://localhost:<port>/api/graph/events/outbox
+curl -b cookies.txt -H 'Content-Type: application/json' \
+  -d '{"reason":"verified downstream availability"}' \
+  http://localhost:<port>/api/graph/events/inbox/<inbox_id>/replay
+```
+
+The database stores attempt counters, next-available time, maximum attempts,
+and terminal `DEAD_LETTER` state. Non-idempotent external work is not blindly
+replayed after an uncertain outcome.
+
+The Graph contract may evolve within the v4.3.x maturity cycle. Breaking
+changes require a new definition/schema version, migration or review state,
+and new release evidence. The v4.3.0 production profile is the current
+production baseline; v4.1.x remains available as the prior baseline.
+Graduation is controlled by configuration and evidence, not a second code line.
 
 ## 13. Offline Deployment
 
-The release zip is fully self-contained:
-- `vendor/` - 30 wheels (no PyPI access needed)
-- `scripts/install_offline.sh` - installs all wheels
+The release zip contains the compiled Web runtime and the bundled dependency
+set. The Web assets require no Node.js, npm, or network access. Python is
+offline-installable only after `scripts/verify_deps.py` reports PASS; the
+installer fails closed when a required wheel is absent or incompatible.
+- `vendor/` - bundled Python wheels
+- `scripts/install_offline.sh` - installs verified wheels
 - `scripts/verify_deps.py` - integrity check
 - Schema deployment via `psql -f scripts/deploy/*.sql`
 - `docs/deployment.md` - detailed deployment guide
