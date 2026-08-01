@@ -16,7 +16,7 @@ if ! PYTHON="$(cx_resolve_python "${PYTHON_BIN:-}")"; then
 fi
 cx_prepare_python_environment "$PYTHON"
 
-DB_DIALECT="postgresql"
+DB_DIALECT="{{DATABASE_DIALECT}}"
 PROFILE="${CX_RUNTIME_PROFILE:-production}"
 HOST="${MEMORY_SERVER_HOST:-0.0.0.0}"
 PORT="${MEMORY_SERVER_PORT:-8000}"
