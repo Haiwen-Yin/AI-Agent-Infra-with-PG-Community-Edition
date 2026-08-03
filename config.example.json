@@ -24,7 +24,7 @@
     "security": {
         "admin_username": "admin",
         "session_timeout": 300,
-        "secret_key": "pg-community-v4.3.2"
+        "secret_key": "pg-community-v4.3.3"
     },
     "agent": {
         "mode": "standalone"

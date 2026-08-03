@@ -1,5 +1,5 @@
 -- ============================================================================
--- AI Agent Infra v4.3.2 - PostgreSQL 18.3 - Phase 3: Scheduler Jobs
+-- AI Agent Infra v4.3.3 - PostgreSQL 18.3 - Phase 3: Scheduler Jobs
 -- ============================================================================
 -- NOTE: pg_cron must be installed and configured before running this script.
 -- See deployment.md for pg_cron setup instructions.
@@ -410,4 +410,4 @@ ORDER BY jobname;
 
 \endif
 
--- AI Agent Infra v4.3.2 - PostgreSQL 18.3 - Scheduler Jobs Complete
+-- AI Agent Infra v4.3.3 - PostgreSQL 18.3 - Scheduler Jobs Complete
