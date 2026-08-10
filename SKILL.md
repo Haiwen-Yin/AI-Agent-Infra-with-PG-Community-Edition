@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with PostgreSQL
 
-> **Version:** 4.3.6 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
+> **Version:** 4.3.7 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
 
 This is the operations guide for the AI Agent Infra with PostgreSQL
 release package. It covers everything an operator (human or AI Agent)
@@ -95,7 +95,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.3.6.md   # this release's notes
+├── RELEASE_NOTES_v4.3.7.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -219,7 +219,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.3.6.zip
+unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.3.7.zip
 cd AI-Agent-Infra-with-PG-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -549,7 +549,7 @@ installer fails closed when a required wheel is absent or incompatible.
 - `vendor/` - bundled Python wheels
 - `scripts/install_offline.sh` - installs verified wheels
 - `scripts/verify_deps.py` - integrity check
-- Schema deployment via `psql -f scripts/deploy/*.sql`
+- `scripts/install_platform.sh` - manifest-checked deployment without `psql`
 - `docs/deployment.md` - detailed deployment guide
 ## v4.3.6 Native Agent Provisioning
 
@@ -561,3 +561,21 @@ level, and audit reason. External Skill-first enrollment remains available
 and is controlled for new registrations by `ENABLED`, `APPROVAL_ONLY`, or
 `DISABLED` policy. Use `migration_runner.py --version 4.3.6` and do not put
 Schema Owner credentials in a Business Agent configuration.
+
+## v4.3.7 Bootstrap Deployment And Embedding Contracts
+
+For a prepared target, run the package-local Bootstrap Deployment Agent:
+
+```bash
+bash scripts/install_platform.sh initialize --database pg \
+  --edition <community|enterprise> --config config.json
+```
+
+The PostgreSQL deployer uses the packaged Python driver and does not require
+an external Agent or `psql`. It verifies a checksum-bound manifest, executes
+only packaged SQL, records sanitized evidence, and retires its temporary
+identity after native-management handoff. Embedding Profiles, immutable
+Contracts, Spaces, and bindings govern vector writes and retrieval. Choose
+one mode: `PLATFORM_MANAGED`, `ENTERPRISE_DIRECT`, `ENTERPRISE_PROXY`,
+`PRECOMPUTED_IMPORT`, or `NONE`; run managed batches separately with
+`scripts/embedding_worker.py --limit 10`.

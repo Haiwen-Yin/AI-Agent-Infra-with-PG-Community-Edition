@@ -1,5 +1,5 @@
 -- ============================================================================
--- AI Agent Infra v4.3.6 - PostgreSQL 18.3 - Phase 3: Scheduler Jobs
+-- AI Agent Infra v4.3.7 - PostgreSQL 18.3 - Phase 3: Scheduler Jobs
 -- ============================================================================
 -- NOTE: pg_cron must be installed and configured before running this script.
 -- See deployment.md for pg_cron setup instructions.
@@ -11,9 +11,6 @@ EXCEPTION WHEN OTHERS THEN
     RAISE NOTICE 'pg_cron not available. Job scheduling skipped. Install pg_cron first.';
     RETURN;
 END $$;
-
-SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') AS cron_available \gset
-\if :cron_available
 
 -- 1. Memory Fusion Job: merge similar memories + decay old priorities
 -- Schedule: Daily at 02:00
@@ -250,18 +247,6 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- Verify all 13 jobs are scheduled
-SELECT jobname, schedule, command
-FROM cron.job
-WHERE jobname IN (
-    'memory_fusion_job', 'knowledge_extraction_job', 'knowledge_review_job',
-    'session_cleanup_job', 'access_log_purge_job', 'entity_archive_job',
-    'collab_expiry_job', 'workspace_cleanup_job', 'stale_workspace_detect_job',
-    'dormant_agent_job', 'credential_cleanup_job', 'embedding_generation_job',
-    'branch_cleanup_job'
-)
-ORDER BY jobname;
-
 -- ============================================================
 -- ENT-only pg_cron jobs (14-17)
 -- ============================================================
@@ -393,21 +378,8 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- Verify all 20 jobs (13 COM + 4 ENT + 3 Loop) are scheduled
-SELECT jobname, schedule, command
-FROM cron.job
-WHERE jobname IN (
-    'memory_fusion_job', 'knowledge_extraction_job', 'knowledge_review_job',
-    'session_cleanup_job', 'access_log_purge_job', 'entity_archive_job',
-    'collab_expiry_job', 'workspace_cleanup_job', 'stale_workspace_detect_job',
-    'dormant_agent_job', 'credential_cleanup_job', 'embedding_generation_job',
-    'branch_cleanup_job',
-    'audit_cleanup_job', 'compliance_report_job', 'skill_token_cleanup_job',
-    'ldap_sync_job',
-    'loop_trigger_job', 'loop_stuck_check_job', 'loop_cleanup_job'
-)
-ORDER BY jobname;
+-- Individual scheduling blocks above safely no-op when pg_cron is not
+-- available.  Do not query cron.job here: a prepared PostgreSQL target may
+-- deliberately use an external scheduler and therefore omit the extension.
 
-\endif
-
--- AI Agent Infra v4.3.6 - PostgreSQL 18.3 - Scheduler Jobs Complete
+-- AI Agent Infra v4.3.7 - PostgreSQL 18.3 - Scheduler Jobs Complete

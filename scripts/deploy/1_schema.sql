@@ -305,12 +305,15 @@ DROP FUNCTION IF EXISTS public.collab_group_manager_create(p_group_name characte
 DROP FUNCTION IF EXISTS public.collab_group_manager_add_member(p_group_id bigint, p_agent_id character varying, p_role character varying);
 DROP FUNCTION IF EXISTS public.agent_perm_grant(p_agent_id character varying, p_action character varying, p_target_type character varying, p_target_id character varying, p_details jsonb);
 DROP FUNCTION IF EXISTS public.agent_perm_check(p_agent_id character varying, p_action character varying, p_target_type character varying, p_target_id character varying);
-DROP SCHEMA IF EXISTS public;
+-- The prepared PostgreSQL target already enables required extensions in
+-- public. Dropping the schema would also drop or block pgvector/AGE and makes
+-- a clean Bootstrap Deployment Agent installation fail before any platform
+-- object is created.
 --
 -- Name: public; Type: SCHEMA; Schema: -; Owner: -
 --
 
-CREATE SCHEMA public;
+CREATE SCHEMA IF NOT EXISTS public;
 
 CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 
