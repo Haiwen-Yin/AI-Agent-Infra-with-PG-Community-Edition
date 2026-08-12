@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.0 - Community Edition - Unified Configuration Manager
+"""AI Agent Infra v4.4.1 - Community Edition - Unified Configuration Manager
 
 Reads from encrypted config.json with environment variable fallback.
 Supports encrypted database credentials, LDAP configuration, and enterprise features.
@@ -15,7 +15,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-VERSION = "4.4.0"
+VERSION = "4.4.1"
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -244,8 +244,12 @@ def load_config() -> Config:
         port=int(db_resolved.get("port") or os.environ.get("MEMORY_DB_PORT", DatabaseConfig.port)),
         dbname=db_resolved.get("dbname") or os.environ.get("MEMORY_DB_NAME", DatabaseConfig.dbname),
         dsn=db_resolved.get("dsn") or os.environ.get("MEMORY_DB_DSN", DatabaseConfig.dsn),
-        min_conn=int(db_resolved.get("min_conn", DatabaseConfig.min_conn)),
-        max_conn=int(db_resolved.get("max_conn", DatabaseConfig.max_conn)),
+        # Editions have historically used pool_min/pool_max while the
+        # PostgreSQL adapter originally exposed min_conn/max_conn.  Accept
+        # both names so an encrypted configuration survives an in-place
+        # upgrade without silently falling back to adapter defaults.
+        min_conn=int(db_resolved.get("min_conn", db_resolved.get("pool_min", DatabaseConfig.min_conn))),
+        max_conn=int(db_resolved.get("max_conn", db_resolved.get("pool_max", DatabaseConfig.max_conn))),
         _encrypted=db_raw.get("_encrypted"),
         _key_source=db_raw.get("_key_source"),
     )

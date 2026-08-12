@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.0 - Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v4.4.1 - Community Edition - Database Connection Pool Manager
 
 psycopg2-based connection pool with parameterized query support.
 Supports Admin/Agent separation modes (standalone, admin, agent).
@@ -8,6 +8,7 @@ import json
 import re
 import threading
 import logging
+import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +32,8 @@ def merge_scalar_suffix() -> str:
 
 _pool: Optional[pg_pool.ThreadedConnectionPool] = None
 _lock = threading.Lock()
+_pool_slots: Optional[threading.BoundedSemaphore] = None
+_POOL_WAIT_SECONDS = 5.0
 
 
 def _init_pool(cfg: DatabaseConfig) -> pg_pool.ThreadedConnectionPool:
@@ -49,7 +52,7 @@ def _init_pool(cfg: DatabaseConfig) -> pg_pool.ThreadedConnectionPool:
 
 
 def get_pool() -> pg_pool.ThreadedConnectionPool:
-    global _pool
+    global _pool, _pool_slots
     if _pool is None:
         with _lock:
             if _pool is None:
@@ -61,6 +64,11 @@ def get_pool() -> pg_pool.ThreadedConnectionPool:
                             db_cfg.user, db_cfg.host, db_cfg.port, db_cfg.dbname,
                             db_cfg.min_conn, db_cfg.max_conn)
                 _pool = _init_pool(db_cfg)
+                # psycopg2 raises PoolError immediately when its configured
+                # maximum is in use. Dashboard views legitimately issue a
+                # short burst of guarded reads, so queue briefly while still
+                # honoring the configured database connection ceiling.
+                _pool_slots = threading.BoundedSemaphore(db_cfg.max_conn)
     return _pool
 
 
@@ -131,15 +139,26 @@ def get_connection():
             conn.close()
         return
     pool = get_pool()
-    conn = pool.getconn()
+    slots = _pool_slots
+    if slots is None or not slots.acquire(timeout=_POOL_WAIT_SECONDS):
+        raise RuntimeError(
+            f"PostgreSQL connection pool is busy after {_POOL_WAIT_SECONDS:g}s; "
+            "reduce concurrent requests or increase database.pool_max"
+        )
+    conn = None
     try:
+        conn = pool.getconn()
         yield conn
     finally:
         try:
-            conn.rollback()
-        except Exception:
-            pass
-        pool.putconn(conn)
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                pool.putconn(conn)
+        finally:
+            slots.release()
 
 
 def get_current_agent_id() -> Optional[str]:
@@ -206,10 +225,11 @@ def clear_agent_context(conn) -> None:
 
 
 def close_pool():
-    global _pool
+    global _pool, _pool_slots
     if _pool is not None:
         _pool.closeall()
         _pool = None
+    _pool_slots = None
 
 
 def _convert_params(sql: str, params: Optional[Any]) -> tuple:
