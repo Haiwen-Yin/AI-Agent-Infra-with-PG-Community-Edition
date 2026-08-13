@@ -2,6 +2,24 @@
 -- PostgreSQL 18 / Apache AGE adapter.  JSON payloads are intentionally kept
 -- as text at this boundary so the portable service can use one canonical form.
 
+-- Some v4.2 baselines contain agent_db_identity but not the function created
+-- by the original v4.0.1 migration.  Define the dependency here as well so
+-- the v4.3 identity/Channel migration is self-contained and resumable.
+CREATE TABLE IF NOT EXISTS public.agent_db_identity (
+    role_name name PRIMARY KEY,
+    agent_id varchar(64) NOT NULL UNIQUE
+);
+REVOKE ALL ON public.agent_db_identity FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION public.current_agent_identity() RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+    SELECT COALESCE(
+        (SELECT identity.agent_id::text FROM public.agent_db_identity identity
+          WHERE identity.role_name = current_user),
+        current_setting('app.current_agent_id', true)
+    )
+$$;
+
 CREATE TABLE IF NOT EXISTS cx_principals (
     principal_id varchar(128) PRIMARY KEY,
     principal_type varchar(16) NOT NULL CHECK (principal_type IN ('HUMAN','AGENT','SERVICE')),
