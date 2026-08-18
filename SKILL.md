@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with PostgreSQL
 
-> **Version:** 4.4.7 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
+> **Version:** 4.4.8 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
 
 This is the operations guide for the AI Agent Infra with PostgreSQL
 release package. It covers everything an operator (human or AI Agent)
@@ -177,7 +177,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.4.7.md   # this release's notes
+├── RELEASE_NOTES_v4.4.8.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -305,7 +305,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.4.7.zip
+unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.4.8.zip
 cd AI-Agent-Infra-with-PG-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -410,9 +410,9 @@ Use the checksum-journaled migration runner for every additive release step;
 do not select or reorder individual migration files manually:
 
 ```bash
-"$PYTHON_BIN" scripts/migration_runner.py --preflight --version 4.4.7 \
+"$PYTHON_BIN" scripts/migration_runner.py --preflight --version 4.4.8 \
   --database pg --edition <community|enterprise> --pg-config config.json
-"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.7 \
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.8 \
   --database pg --edition <community|enterprise> --pg-config config.json \
   --backup-evidence release_evidence/backup.json
 ```
@@ -754,3 +754,13 @@ lease conflicts, missing capability evidence, or authorization failures.
 
 v4.4.7 adds saved LLM probing and lifecycle safety without changing the
 database authorization boundary.
+
+v4.4.8 hardens the platform command and maintenance control plane. Command
+discovery and help come from the database registry, not from an Agent Card or
+prompt. Safe autonomy is disabled by default; high-impact work always needs a
+final human approval. The Enterprise Compliance Agent remains proposal-only.
+PostgreSQL platform private knowledge and control tables use forced RLS.
+Identity resolves from the trusted `agent_db_identity` role mapping first; a
+client-set `app.current_agent_id` is not authoritative when that mapping
+exists. Apply steps `48` and `49` only through the migration runner with
+backup evidence.
