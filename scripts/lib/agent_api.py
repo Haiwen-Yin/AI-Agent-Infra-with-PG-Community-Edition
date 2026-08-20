@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.8 - Community Edition - Agent API
+"""AI Agent Infra v4.4.9 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 collaboration tracking, pool management, and Admin/Agent separation support.
@@ -20,6 +20,16 @@ from .connection import (execute_query, execute_query_one, execute,
 logger = logging.getLogger(__name__)
 
 _RUNTIME_ROLE = "ai_agent_runtime"
+
+_RUNTIME_DENY_TABLES = (
+    "cx_platform_commands", "cx_platform_command_executors",
+    "cx_platform_maintenance_tasks", "cx_platform_maintenance_attempts",
+    "cx_platform_safe_autonomy_policies", "cx_platform_knowledge",
+    "cx_platform_knowledge_chunks", "cx_platform_knowledge_grants",
+    "cx_database_isolation_inventory", "cx_platform_admin_commands",
+    "cx_platform_capabilities", "cx_platform_capability_dependencies",
+    "cx_platform_capability_history",
+)
 
 _JSON_COLUMNS = {"capabilities", "config", "context"}
 
@@ -835,6 +845,17 @@ def _provision_agent_login(agent_id: str) -> Dict[str, Any]:
             cur.execute(pg_sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {}").format(
                 pg_sql.Identifier(_RUNTIME_ROLE)
             ))
+            # Keep legacy data-plane access without reopening platform control
+            # tables after the v4.4.9 security migration.
+            cur.execute("""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = ANY(%s)
+            """, (list(_RUNTIME_DENY_TABLES),))
+            for row in cur.fetchall():
+                cur.execute(pg_sql.SQL("REVOKE ALL PRIVILEGES ON TABLE public.{} FROM {}").format(
+                    pg_sql.Identifier(row[0]), pg_sql.Identifier(_RUNTIME_ROLE)
+                ))
             # Provisioning is idempotent and may run after the v4.3.0
             # governance migration. Re-apply the append-only Channel Thread
             # boundary after the broad legacy grant so a new Agent cannot
