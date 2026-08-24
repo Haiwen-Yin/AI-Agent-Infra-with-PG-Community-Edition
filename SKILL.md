@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with PostgreSQL
 
-> **Version:** 4.4.8 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
+> **Version:** 4.4.10 | **Driver:** psycopg2 2.9+ | **DB:** PostgreSQL 18.3+
 
 This is the operations guide for the AI Agent Infra with PostgreSQL
 release package. It covers everything an operator (human or AI Agent)
@@ -177,7 +177,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-PostgreSQL-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.4.8.md   # this release's notes
+├── RELEASE_NOTES_v4.4.10.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -305,7 +305,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.4.8.zip
+unzip AI-Agent-Infra-with-PG-Enterprise-Edition-v4.4.10.zip
 cd AI-Agent-Infra-with-PG-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -410,9 +410,9 @@ Use the checksum-journaled migration runner for every additive release step;
 do not select or reorder individual migration files manually:
 
 ```bash
-"$PYTHON_BIN" scripts/migration_runner.py --preflight --version 4.4.8 \
+"$PYTHON_BIN" scripts/migration_runner.py --preflight --version 4.4.10 \
   --database pg --edition <community|enterprise> --pg-config config.json
-"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.8 \
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.10 \
   --database pg --edition <community|enterprise> --pg-config config.json \
   --backup-evidence release_evidence/backup.json
 ```
