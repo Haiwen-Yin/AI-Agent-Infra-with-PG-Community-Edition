@@ -694,17 +694,23 @@ For a prepared target, run the package-local Bootstrap Deployment Agent:
 
 ```bash
 bash scripts/install_platform.sh initialize --database pg \
-  --edition <community|enterprise> --config config.json
+  --edition <community|enterprise> --version 4.4.10 --config config.json \
+  --backup-evidence release_evidence/backup.json
 ```
 
 The PostgreSQL deployer uses the packaged Python driver and does not require
 an external Agent or `psql`. It verifies a checksum-bound manifest, executes
-only packaged SQL, records sanitized evidence, and retires its temporary
+only packaged SQL through the terminal migration, prompts interactively for a
+deployment-specific initial `admin` password, records sanitized evidence, and retires its temporary
 identity after native-management handoff. Embedding Profiles, immutable
 Contracts, Spaces, and bindings govern vector writes and retrieval. Choose
 one mode: `PLATFORM_MANAGED`, `ENTERPRISE_DIRECT`, `ENTERPRISE_PROXY`,
 `PRECOMPUTED_IMPORT`, or `NONE`; run managed batches separately with
 `scripts/embedding_worker.py --limit 10`.
+
+Non-interactive initialization uses `--admin-password-file` with a current-
+user-owned regular file at mode `0600` or stricter. The plaintext password is
+never stored in configuration, deployment journals, or evidence.
 
 ## v4.4.0 Database-Native SDD And Governed Delivery
 
