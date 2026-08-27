@@ -791,6 +791,11 @@ def _provision_agent_login(agent_id: str) -> Dict[str, Any]:
 
     with get_connection() as conn:
         with conn.cursor() as cur:
+            # PostgreSQL 16+ no longer lets CREATEROLE alone manage an
+            # existing role.  Make each newly created Agent role grant its
+            # creator ADMIN OPTION so later credential rotation remains
+            # possible without SUPERUSER or cluster-wide role ownership.
+            cur.execute("SET LOCAL createrole_self_grant = 'set, inherit'")
             cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (_RUNTIME_ROLE,))
             if not cur.fetchone():
                 cur.execute(pg_sql.SQL("CREATE ROLE {} NOLOGIN NOBYPASSRLS").format(
@@ -913,6 +918,17 @@ def _ensure_agent_login(agent_id: str) -> None:
     if row and row.get("config_value"):
         return
     _provision_agent_login(agent_id)
+
+
+def ensure_external_agent_identity(agent_id: str) -> None:
+    """Ensure a redeemed external Agent has its dedicated database login."""
+    execute(
+        "INSERT INTO agent_registry(agent_id,agent_name,agent_type,status) "
+        "VALUES (%s,%s,'external-skill','ACTIVE') ON CONFLICT (agent_id) DO NOTHING",
+        [agent_id, agent_id],
+    )
+    _ensure_agent_login(agent_id)
+    _get_agent_login_credentials(agent_id)
 
 
 def elastic_pool_scale(target_pool_size: int) -> Dict[str, Any]:

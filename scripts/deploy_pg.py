@@ -14,10 +14,10 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Iterator, Tuple
+from typing import Iterator, Mapping, Tuple
 
 
-def _expand_psql_variables(sql: str) -> str:
+def _expand_psql_variables(sql: str, variable_overrides: Mapping[str, str] | None = None) -> str:
     """Expand the small trusted ``pg_dump`` variable subset used by 1_schema.
 
     The package never accepts caller supplied SQL.  Values originate only from
@@ -36,6 +36,12 @@ def _expand_psql_variables(sql: str) -> str:
                 raise ValueError("invalid trusted psql variable declaration") from exc
             continue
         retained.append(line)
+    for key, value in dict(variable_overrides or {}).items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)):
+            raise ValueError("invalid trusted psql variable name")
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*", str(value)):
+            raise ValueError("invalid trusted psql identifier override")
+        variables[str(key)] = str(value)
     source = "".join(retained)
     for key, value in variables.items():
         literal = "'" + value.replace("'", "''") + "'"
@@ -46,8 +52,8 @@ def _expand_psql_variables(sql: str) -> str:
     return source
 
 
-def _skip_psql_meta(sql: str) -> str:
-    sql = _expand_psql_variables(sql)
+def _skip_psql_meta(sql: str, variable_overrides: Mapping[str, str] | None = None) -> str:
+    sql = _expand_psql_variables(sql, variable_overrides)
     return "\n".join(
         line for line in sql.splitlines()
         if line.strip() == "\\." or not line.lstrip().startswith("\\")
@@ -64,9 +70,9 @@ def _leading_comments_removed(statement: str) -> str:
     return re.sub(r"^(?:\s*--[^\n]*(?:\n|$))+", "", statement).lstrip()
 
 
-def statements(content: str) -> Iterator[Tuple[str, str | None]]:
+def statements(content: str, variable_overrides: Mapping[str, str] | None = None) -> Iterator[Tuple[str, str | None]]:
     """Yield trusted SQL statements and optional COPY payloads."""
-    source = _skip_psql_meta(content)
+    source = _skip_psql_meta(content, variable_overrides)
     size = len(source)
     start = 0
     index = 0
@@ -157,11 +163,12 @@ def statements(content: str) -> Iterator[Tuple[str, str | None]]:
         yield trailing, None
 
 
-def execute_sql_file(conn, sql_file: str | Path, verbose: bool = True) -> bool:
+def execute_sql_file(conn, sql_file: str | Path, verbose: bool = True,
+                     define_overrides: Mapping[str, str] | None = None) -> bool:
     path = Path(sql_file)
     content = path.read_text(encoding="utf-8")
     ok = True
-    for number, (statement, payload) in enumerate(statements(content), start=1):
+    for number, (statement, payload) in enumerate(statements(content, define_overrides), start=1):
         try:
             with conn.cursor() as cursor:
                 if payload is not None:

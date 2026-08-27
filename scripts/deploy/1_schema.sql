@@ -6708,7 +6708,7 @@ CREATE POLICY cb_agent_isolation ON public.context_branches USING ((EXISTS ( SEL
 -- Name: compliance_log cl_aiadmin; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY cl_aiadmin ON public.compliance_log TO pgsql USING (true) WITH CHECK (true);
+CREATE POLICY cl_aiadmin ON public.compliance_log TO :"schema_owner" USING (true) WITH CHECK (true);
 
 
 --
@@ -6746,7 +6746,7 @@ ALTER TABLE public.context_branches ENABLE ROW LEVEL SECURITY;
 -- Name: entity_access_audit eaa_aiadmin; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY eaa_aiadmin ON public.entity_access_audit TO pgsql USING (true) WITH CHECK (true);
+CREATE POLICY eaa_aiadmin ON public.entity_access_audit TO :"schema_owner" USING (true) WITH CHECK (true);
 
 
 --
@@ -6830,7 +6830,7 @@ ALTER TABLE public.harness_meta ENABLE ROW LEVEL SECURITY;
 -- Name: harness_meta harness_meta_aiadmin; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY harness_meta_aiadmin ON public.harness_meta TO pgsql USING (true) WITH CHECK (true);
+CREATE POLICY harness_meta_aiadmin ON public.harness_meta TO :"schema_owner" USING (true) WITH CHECK (true);
 
 
 --
@@ -6852,7 +6852,7 @@ ALTER TABLE public.knowledge_meta ENABLE ROW LEVEL SECURITY;
 -- Name: knowledge_meta knowledge_meta_aiadmin; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY knowledge_meta_aiadmin ON public.knowledge_meta TO pgsql USING (true) WITH CHECK (true);
+CREATE POLICY knowledge_meta_aiadmin ON public.knowledge_meta TO :"schema_owner" USING (true) WITH CHECK (true);
 
 
 --
@@ -6868,7 +6868,7 @@ CREATE POLICY knowledge_meta_end_user ON public.knowledge_meta USING ((EXISTS ( 
 -- Name: ldap_config ldap_aiadmin; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY ldap_aiadmin ON public.ldap_config TO pgsql USING (true) WITH CHECK (true);
+CREATE POLICY ldap_aiadmin ON public.ldap_config TO :"schema_owner" USING (true) WITH CHECK (true);
 
 
 --
@@ -6881,7 +6881,7 @@ ALTER TABLE public.ldap_config ENABLE ROW LEVEL SECURITY;
 -- Name: skill_access_token sat_aiadmin; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY sat_aiadmin ON public.skill_access_token TO pgsql USING (true) WITH CHECK (true);
+CREATE POLICY sat_aiadmin ON public.skill_access_token TO :"schema_owner" USING (true) WITH CHECK (true);
 
 
 --
@@ -6920,7 +6920,7 @@ ALTER TABLE public.spec_meta ENABLE ROW LEVEL SECURITY;
 -- Name: spec_meta spec_meta_aiadmin; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY spec_meta_aiadmin ON public.spec_meta TO pgsql USING (true) WITH CHECK (true);
+CREATE POLICY spec_meta_aiadmin ON public.spec_meta TO :"schema_owner" USING (true) WITH CHECK (true);
 
 
 --
@@ -6972,7 +6972,7 @@ CREATE POLICY wc_agent_isolation ON public.workspace_context USING ((EXISTS ( SE
 -- Name: workspace_context_audit wca_aiadmin; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY wca_aiadmin ON public.workspace_context_audit TO pgsql USING (true) WITH CHECK (true);
+CREATE POLICY wca_aiadmin ON public.workspace_context_audit TO :"schema_owner" USING (true) WITH CHECK (true);
 
 
 --

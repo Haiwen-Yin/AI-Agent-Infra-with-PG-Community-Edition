@@ -293,6 +293,11 @@ If `ai_agent_runtime` does not exist, the first Admin provisioning request can
 create it, provided the Schema Owner has `CREATEROLE`; a DBA-created runtime
 role still requires the explicit `ADMIN OPTION` grant above. The resulting
 per-Agent login remains `NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`.
+The platform applies transaction-local `createrole_self_grant='set, inherit'`
+when it creates that LOGIN, granting the Schema Owner `ADMIN OPTION` only on
+the new Agent role so credential rotation remains possible on PostgreSQL 16+.
+Agent roles created outside this path need a one-time DBA `GRANT <ROLE> TO
+<SCHEMA_OWNER> WITH ADMIN OPTION` before platform-managed rotation.
 If either prerequisite is missing, registration fails closed with an
 actionable provisioning error and never falls back to the Schema Owner.
 
@@ -343,6 +348,7 @@ real credentials are NEVER bundled. Two ways to produce a runnable
 ./start_web_server.sh start
 # -> wizard auto-detects <PLACEHOLDER> tokens and prompts for:
 #     database: user / password / host / port / database
+#     server:   listen address / Web port
 #     llm:      api_url / model / api_key
 #     embedding: api_url / model / dimension
 # -> writes config.json
@@ -414,7 +420,7 @@ do not select or reorder individual migration files manually:
   --database pg --edition <community|enterprise> --pg-config config.json
 "$PYTHON_BIN" scripts/migration_runner.py --version 4.4.10 \
   --database pg --edition <community|enterprise> --pg-config config.json \
-  --backup-evidence release_evidence/backup.json
+  --confirm-database-backup
 ```
 
 The runner applies the edition-aware chain through steps `46` and `47`,
@@ -694,13 +700,13 @@ For a prepared target, run the package-local Bootstrap Deployment Agent:
 
 ```bash
 bash scripts/install_platform.sh initialize --database pg \
-  --edition <community|enterprise> --version 4.4.10 --config config.json \
-  --backup-evidence release_evidence/backup.json
+  --edition <community|enterprise> --version 4.4.10 --config config.json
 ```
 
 The PostgreSQL deployer uses the packaged Python driver and does not require
 an external Agent or `psql`. It verifies a checksum-bound manifest, executes
-only packaged SQL through the terminal migration, prompts interactively for a
+only packaged SQL through the terminal migration, requires a verified empty
+target without client-side backup evidence, prompts interactively for a
 deployment-specific initial `admin` password, records sanitized evidence, and retires its temporary
 identity after native-management handoff. Embedding Profiles, immutable
 Contracts, Spaces, and bindings govern vector writes and retrieval. Choose
@@ -711,6 +717,10 @@ one mode: `PLATFORM_MANAGED`, `ENTERPRISE_DIRECT`, `ENTERPRISE_PROXY`,
 Non-interactive initialization uses `--admin-password-file` with a current-
 user-owned regular file at mode `0600` or stricter. The plaintext password is
 never stored in configuration, deployment journals, or evidence.
+An interactive upgrade explains the database-native recovery boundary and
+requires `UPGRADE`; automation passes `--confirm-database-backup`. The accepted
+responsibility is journaled, but this client never claims to verify a
+PostgreSQL backup or requires a client-side evidence file.
 
 ## v4.4.0 Database-Native SDD And Governed Delivery
 
@@ -768,5 +778,5 @@ final human approval. The Enterprise Compliance Agent remains proposal-only.
 PostgreSQL platform private knowledge and control tables use forced RLS.
 Identity resolves from the trusted `agent_db_identity` role mapping first; a
 client-set `app.current_agent_id` is not authoritative when that mapping
-exists. Apply steps `48` and `49` only through the migration runner with
-backup evidence.
+exists. Apply steps `48` and `49` only through the migration runner after
+explicitly confirming database-side backup responsibility.

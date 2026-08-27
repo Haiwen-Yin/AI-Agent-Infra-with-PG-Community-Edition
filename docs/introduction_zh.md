@@ -1,6 +1,6 @@
 # AI Agent Infra with PostgreSQL — 社区版 v4.4.10
 
-**版本**: v4.4.10 | **日期**: 2026-08-24 | **作者**: 尹海文 | **许可**: Apache License 2.0
+**版本**: v4.4.10 | **日期**: 2026-08-27 | **作者**: 尹海文 | **许可**: Apache License 2.0
 
 📄 **官方网站：https://db4agent.cn**
 
@@ -916,6 +916,12 @@ GRANT ai_agent_runtime TO <SCHEMA_OWNER> WITH ADMIN OPTION;
 LOGIN 仍保持 `NOSUPERUSER/NOCREATEDB/NOCREATEROLE/NOBYPASSRLS`。缺少任一
 前提时，注册会明确失败并保持禁止回退到 Schema Owner。
 
+创建专属 LOGIN 时，平台会在当前事务中设置
+`createrole_self_grant='set, inherit'`，使 PostgreSQL 16+ 仅将新建角色的
+`ADMIN OPTION` 授回 Schema Owner，从而支持后续密码轮换而无需超级用户。
+若角色由其他管理员在平台外创建，DBA 需先将该角色以 `ADMIN OPTION` 定向
+授予 Schema Owner，平台才能接管轮换。
+
 #### 最小权限 Business Agent 登录
 
 Admin Agent 为每个 Business Agent 创建专属 LOGIN 角色，并授予共享的最小权限运行角色：
@@ -1420,6 +1426,7 @@ v4.0.0 起发布包不再携带真实 `config.json`，只携带 `config.example.
 ./start_web_server.sh start
 # → 向导自动检测 <PLACEHOLDER>，依次询问：
 #     database: user / password / dsn (host:port/service)
+#     server:   监听地址 / Web 端口
 #     llm:      api_url / model / api_key
 #     embedding: api_url / model / dimension
 # → 写入 config.json，随后服务器自动加密敏感字段
@@ -1525,4 +1532,6 @@ Dynamic Graph Migration、Framework Adapter Execution、A2A 与 OTLP 为
 
 模型网关保持可选，直连与平台网关可以并行。平台网关提供硬配额和软预算、原子预留与结算、AES-GCM 有界响应重放、统一错误关联标识；模型用量账、供应商账单、追加式纠正/对账和 Enterprise 内部分摊保持为相互可追溯但不混淆的事实层。
 
-可信外部适配器以 Ed25519 签名、版本化密钥、吊销、顺序号和 nonce 上报证据。平台不声称自动发现未经过网关且没有签名证据的模型调用。管理大屏支持 allowlist 定义版本、发布和回滚，但 Viewer 仍为登录后只读。v4.4.10 使用 `baseline_v4_4_10.json` 进行全新部署并执行到迁移 59；Bootstrap 在任何写入前验证备份证据，通过交互输入或 `0600` 密码文件建立首次管理员 Argon2id 凭据，然后创建平台原生管理 Agent 并退休临时部署身份。历史脚本继续保持 journal 和 checksum 完整，但不作为旧包原地升级承诺。v4.4.8 已撤回。
+可信外部适配器以 Ed25519 签名、版本化密钥、吊销、顺序号和 nonce 上报证据。平台不声称自动发现未经过网关且没有签名证据的模型调用。管理大屏支持 allowlist 定义版本、发布和回滚，但 Viewer 仍为登录后只读。v4.4.10 使用 `baseline_v4_4_10.json` 进行全新部署并执行到迁移 59；Bootstrap 在任何写入前严格验证空目标，记录数据库侧恢复边界而不要求客户端备份文件，通过交互输入或 `0600` 密码文件建立首次管理员 Argon2id 凭据，然后创建平台原生管理 Agent 并退休临时部署身份。历史脚本继续保持 journal 和 checksum 完整，但不作为旧包原地升级承诺。v4.4.8 已撤回。
+
+升级时，交互流程要求输入 `UPGRADE` 确认数据库侧备份恢复责任，自动化使用 `--confirm-database-backup`。确认写入 journal，但运行客户端不要求备份文件，也不伪称能够验证 PostgreSQL 原生备份。

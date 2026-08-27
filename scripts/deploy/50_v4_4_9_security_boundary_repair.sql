@@ -218,15 +218,12 @@ BEGIN
 END
 $cx_platform_controlplane_revoke$;
 
-INSERT INTO cx_platform_safe_autonomy_policies(policy_id,state,reason,updated_by)
-VALUES ('DEFAULT','DISABLED','v4.4.9 safe autonomy is disabled by default','SYSTEM_BOOTSTRAP')
-ON CONFLICT (policy_id) DO NOTHING;
-
 -- No ordinary runtime role receives direct control-plane rows. Governed
 -- security-definer APIs may expose filtered records after authorization.
 DO $cx_platform_no_direct_policy$
 DECLARE
     table_name text;
+    owner_name name;
 BEGIN
     FOREACH table_name IN ARRAY ARRAY[
         'cx_platform_commands', 'cx_platform_command_executors',
@@ -235,8 +232,23 @@ BEGIN
         'cx_platform_knowledge_chunks', 'cx_platform_knowledge_grants',
         'cx_database_isolation_inventory'
     ] LOOP
+        SELECT pg_get_userbyid(class.relowner)
+          INTO owner_name
+          FROM pg_class class
+          JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
+         WHERE namespace.nspname = 'public'
+           AND class.relname = table_name;
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'trusted_owner_control_plane', table_name);
+        EXECUTE format(
+            'CREATE POLICY %I ON public.%I TO %I USING (true) WITH CHECK (true)',
+            'trusted_owner_control_plane', table_name, owner_name
+        );
         EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'deny_direct_runtime', table_name);
         EXECUTE format('CREATE POLICY %I ON public.%I USING (false) WITH CHECK (false)', 'deny_direct_runtime', table_name);
     END LOOP;
 END
 $cx_platform_no_direct_policy$;
+
+INSERT INTO cx_platform_safe_autonomy_policies(policy_id,state,reason,updated_by)
+VALUES ('DEFAULT','DISABLED','v4.4.9 safe autonomy is disabled by default','SYSTEM_BOOTSTRAP')
+ON CONFLICT (policy_id) DO NOTHING;

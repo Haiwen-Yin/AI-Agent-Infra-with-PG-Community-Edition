@@ -7,6 +7,7 @@ Supports Admin/Agent separation modes (standalone, admin, agent).
 import json
 import re
 import threading
+from contextvars import ContextVar
 import logging
 import time
 from contextlib import contextmanager
@@ -162,14 +163,14 @@ def get_connection():
 
 
 def get_current_agent_id() -> Optional[str]:
-    return getattr(_thread_local, "agent_id", None)
+    return _agent_context.get()
 
 
-_thread_local = threading.local()
+_agent_context: ContextVar[Optional[str]] = ContextVar("cx_pg_agent_id", default=None)
 
 
 def set_agent_context(agent_id: Optional[str]) -> None:
-    _thread_local.agent_id = agent_id
+    _agent_context.set(agent_id)
 
 
 def close_end_user_connections():
