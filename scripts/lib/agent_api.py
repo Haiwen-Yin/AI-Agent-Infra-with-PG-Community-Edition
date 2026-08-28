@@ -765,8 +765,13 @@ def recover_agent_via_admin(
     }
 
 
-def _agent_role_name(agent_id: str) -> str:
-    digest = hashlib.sha256(agent_id.encode("utf-8")).hexdigest()[:24]
+def _agent_role_name(agent_id: str, database_name: str) -> str:
+    # PostgreSQL roles are cluster-wide, while one cluster can host multiple
+    # independent platform databases with different bounded Schema Owners.
+    namespace = str(database_name or "").strip().lower()
+    if not namespace:
+        raise ValueError("database name is required for Agent role isolation")
+    digest = hashlib.sha256(f"{namespace}\0{agent_id}".encode("utf-8")).hexdigest()[:24]
     return f"aia_{digest}"
 
 
@@ -775,7 +780,7 @@ def _provision_agent_login(agent_id: str) -> Dict[str, Any]:
     from .connection_crypto import encrypt_section
 
     db_cfg = get_config().database
-    role_name = _agent_role_name(agent_id)
+    role_name = _agent_role_name(agent_id, db_cfg.dbname)
     password = secrets.token_urlsafe(36)
     credential_data = {
         "username": role_name,
