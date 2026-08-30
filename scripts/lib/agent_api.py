@@ -84,8 +84,8 @@ def register_agent(
         ON CONFLICT (agent_id) DO UPDATE SET agent_name = EXCLUDED.agent_name,
                                               last_seen_at = CURRENT_TIMESTAMP
     """
-    caps_val = json.dumps(capabilities) if isinstance(capabilities, (dict, list)) else capabilities
-    cfg_val = json.dumps(config) if isinstance(config, (dict, list)) else config
+    caps_val = json.dumps(capabilities, default=str) if isinstance(capabilities, (dict, list)) else capabilities
+    cfg_val = json.dumps(config, default=str) if isinstance(config, (dict, list)) else config
     execute(sql, [agent_id, agent_name, agent_type, description, caps_val, cfg_val])
     try:
         from .agent_registration import register_agent as register_identity
