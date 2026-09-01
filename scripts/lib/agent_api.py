@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.10 - Community Edition - Agent API
+"""AI Agent Infra v4.4.11 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 collaboration tracking, pool management, and Admin/Agent separation support.
@@ -886,7 +886,7 @@ def _provision_agent_login(agent_id: str) -> Dict[str, Any]:
             cur.execute("""
                 INSERT INTO agent_db_identity (role_name, agent_id)
                 VALUES (%s, %s)
-                ON CONFLICT (role_name) DO UPDATE SET agent_id = EXCLUDED.agent_id
+                ON CONFLICT (agent_id) DO UPDATE SET role_name = EXCLUDED.role_name
             """, (role_name, agent_id))
             cur.execute("""
                 INSERT INTO system_config (config_key, config_value, description)
