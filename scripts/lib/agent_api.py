@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.11 - Community Edition - Agent API
+"""AI Agent Infra v4.4.12 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 collaboration tracking, pool management, and Admin/Agent separation support.
@@ -855,6 +855,15 @@ def _provision_agent_login(agent_id: str) -> Dict[str, Any]:
             cur.execute(pg_sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {}").format(
                 pg_sql.Identifier(_RUNTIME_ROLE)
             ))
+            # Direct partition access bypasses the parent's RLS policies.
+            cur.execute(pg_sql.SQL("REVOKE INSERT, UPDATE, DELETE ON public.agent_registry, "
+                                   "public.cx_principals FROM {}").format(pg_sql.Identifier(_RUNTIME_ROLE)))
+            cur.execute("SELECT n.nspname,c.relname FROM pg_partition_tree('public.entities') t "
+                        "JOIN pg_class c ON c.oid=t.relid JOIN pg_namespace n ON n.oid=c.relnamespace "
+                        "WHERE t.level>0")
+            for schema, table in cur.fetchall():
+                cur.execute(pg_sql.SQL("REVOKE ALL PRIVILEGES ON TABLE {}.{} FROM {}").format(
+                    pg_sql.Identifier(schema), pg_sql.Identifier(table), pg_sql.Identifier(_RUNTIME_ROLE)))
             # Keep legacy data-plane access without reopening platform control
             # tables after the v4.4.9 security migration.
             cur.execute("""
