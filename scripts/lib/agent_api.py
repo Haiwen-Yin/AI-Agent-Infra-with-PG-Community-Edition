@@ -525,8 +525,10 @@ def assign_pool_agent(user_id, required_skills):
 def assign_random_pool_agent(user_id: str, portal_node_id: Optional[str] = None, excluded_agent_ids=None) -> Optional[Dict[str, Any]]:
     rows = execute_query("""
         SELECT a.agent_id FROM agent_registry a
+        JOIN cx_principals p ON p.principal_id = a.agent_id
         LEFT JOIN agent_registrations r ON r.agent_id = a.agent_id
         WHERE a.status = 'POOL'
+          AND p.principal_type = 'AGENT' AND p.status = 'ACTIVE'
           AND (r.agent_id IS NULL OR r.status = 'ACTIVE')
         ORDER BY RANDOM()
     """)
