@@ -1,6 +1,6 @@
-# 川序：PostgreSQL 18 社区版 v4.4.12 中文介绍
+# 川序：PostgreSQL 18 社区版 v4.4.13 中文介绍
 
-**版本**: v4.4.12
+**版本**: v4.4.13
 **日期**: 2026-09-05
 **许可**: Apache License 2.0
 
@@ -57,7 +57,7 @@ pgvector、Apache AGE、JSONB、全文检索和 RLS；扩展须由具备权限�
 bash scripts/install_offline.sh
 bash scripts/config_wizard.sh
 bash scripts/install_platform.sh initialize \
-  --version 4.4.12 --database pg \
+  --version 4.4.13 --database pg \
   --edition community --config config.json
 bash start_web_server.sh start
 bash start_web_server.sh status
