@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.14 - Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v4.4.15 - Community Edition - Database Connection Pool Manager
 
 psycopg2-based connection pool with parameterized query support.
 Supports Admin/Agent separation modes (standalone, admin, agent).
@@ -25,6 +25,13 @@ DATABASE_DIALECT = "postgresql"
 
 def scalar_select_suffix() -> str:
     return ""
+
+
+def database_version_observation() -> str:
+    """Server handshake metadata, not the client library version."""
+    with get_connection_for_agent() as conn:
+        value=int(conn.server_version)
+        return f'{value//10000}.{value%10000}'
 
 
 def merge_scalar_suffix() -> str:
@@ -160,6 +167,19 @@ def get_connection():
                 pool.putconn(conn)
         finally:
             slots.release()
+
+
+def normalize_execution_reference(kind: str, value: str):
+    """Native Task/Workspace identifiers are BIGINT; reject invalid locators before SQL."""
+    if kind not in {'TASK','WORKSPACE'}:
+        return value
+    text=str(value)
+    if not text.isascii() or not text.isdecimal() or len(text)>19:
+        raise ValueError('Invalid native execution identifier')
+    number=int(text)
+    if number<1 or number>9223372036854775807 or str(number)!=text:
+        raise ValueError('Invalid native execution identifier')
+    return number
 
 
 def get_current_agent_id() -> Optional[str]:

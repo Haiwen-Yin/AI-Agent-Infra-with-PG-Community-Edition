@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.14 - Community Edition - Agent API
+"""AI Agent Infra v4.4.15 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 collaboration tracking, pool management, and Admin/Agent separation support.
@@ -857,6 +857,10 @@ def _provision_agent_login(agent_id: str) -> Dict[str, Any]:
             cur.execute(pg_sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {}").format(
                 pg_sql.Identifier(_RUNTIME_ROLE)
             ))
+            cur.execute("SELECT to_regclass('public.cx_mcp_exposed_tools')")
+            if cur.fetchone()[0]:
+                cur.execute(pg_sql.SQL("REVOKE INSERT, UPDATE, DELETE ON public.cx_mcp_exposed_tools FROM {}").format(
+                    pg_sql.Identifier(_RUNTIME_ROLE)))
             # Direct partition access bypasses the parent's RLS policies.
             cur.execute(pg_sql.SQL("REVOKE INSERT, UPDATE, DELETE ON public.agent_registry, "
                                    "public.cx_principals FROM {}").format(pg_sql.Identifier(_RUNTIME_ROLE)))
@@ -870,8 +874,20 @@ def _provision_agent_login(agent_id: str) -> Dict[str, Any]:
             # tables after the v4.4.9 security migration.
             cur.execute("""
                 SELECT table_name
-                FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_name = ANY(%s)
+                FROM information_schema.tables t
+                WHERE table_schema = 'public' AND (
+                    table_name = ANY(%s) OR EXISTS (
+                        SELECT 1 FROM pg_trigger g
+                        JOIN pg_class c ON c.oid=g.tgrelid
+                        JOIN pg_namespace n ON n.oid=c.relnamespace
+                        JOIN pg_proc p ON p.oid=g.tgfoid
+                        JOIN pg_namespace pn ON pn.oid=p.pronamespace
+                        WHERE n.nspname=t.table_schema AND c.relname=t.table_name
+                          AND pn.nspname='public'
+                          AND p.proname='cx86_reject_history_mutation'
+                          AND NOT g.tgisinternal
+                    )
+                )
             """, (list(_RUNTIME_DENY_TABLES),))
             for row in cur.fetchall():
                 cur.execute(pg_sql.SQL("REVOKE ALL PRIVILEGES ON TABLE public.{} FROM {}").format(
