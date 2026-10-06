@@ -1,6 +1,6 @@
-# 川序：PostgreSQL 18 社区版 v4.5.1 中文介绍
+# 川序：PostgreSQL 18 社区版 v4.5.2 中文介绍
 
-**版本**: v4.5.1
+**版本**: v4.5.2
 **日期**: 2026-10-06
 **许可**: Apache License 2.0
 
@@ -18,10 +18,11 @@
 
 ## 当前能力说明
 
-v4.5.1 增加模型能力实测、按需工具/技能目录、来源绑定的上下文预算、执行进度、
-受管图片/文档、离线回放与迁移预检，以及独立受控的 MCP、A2A、OTLP 和固定框架
-集成。完整使用流程、协议版本、审批和限制见 [Agent 扩展中文操作说明](agent-extensions_zh.md)。
-追加迁移链到 99；图的实际副作用回放、运行中迁移、任意框架执行与全局自治仍不开放。
+v4.5.2 在 v4.5.1 能力基础上，将标准 A2A 与 DB4A2A 统一关联到数据库任务计划，
+新增幂等 admission、租约与 fencing、未知发送结果（`UNOBSERVED`）恢复、精确上下文
+来源绑定和不可变转换历史。完整使用流程、协议版本、审批和限制见
+[Agent 扩展中文操作说明](agent-extensions_zh.md)。迁移链追加到 101；图的实际副作用
+回放、运行中迁移、任意框架执行与全局自治仍不开放。
 
 本版本以数据库中的能力矩阵为唯一准入依据，统一管理模型推理、结构化输出、模型工具调用、MCP、A2A 和受控执行。能力状态为 `OFF`（关闭）、`READ_ONLY`（只读）、`PROPOSAL_ONLY`（仅提案）或 `GOVERNED_EXECUTOR`（经治理的执行器），每次变更都需要并发版本和不可变审计记录。MCP 与 A2A 默认关闭；模型生成的写入、策略变更、Agent 控制、外部联系和发布默认只能形成提案，除非当前策略、信任信息和人工审批共同允许。
 
@@ -54,6 +55,10 @@ v4.5.1 增加模型能力实测、按需工具/技能目录、来源绑定的上
 
 DB4A2A 的委派携带上下文引用、版本、摘要和范围，接收 Agent 仍须独立认证授权。它用于共享数据平面的协作，不替代标准 A2A 互操作。具体实现与未完成验证见 [DB4A2A](operations_zh.md) 及发布证据；接口存在不能证明全部不变量均已实测。
 
+在 PostgreSQL 中，历史 `TASK_PLANS` 按状态分区且仅提供 `(PLAN_ID, STATUS)` 复合键，
+因此 v4.5.2 由服务在事务内锁定并校验稳定任务 ID，并在同一事务中维护任务、步骤和
+连续性记录。授权和未知发送语义仍由数据库约束与服务层共同保证。
+
 图运行时核心和图检查按权限提供。清单草稿导入、SLO 只读及检查点分叉为受控能力；回放、动态图迁移、框架适配器执行、A2A 和 OTLP 当前为禁用状态，不属于本版可启用的交付能力。不能由提示词或 Skill 自动开启。详见 [图工程](operations_zh.md)。
 
 ## 数据库适配
@@ -72,7 +77,7 @@ pgvector、Apache AGE、JSONB、全文检索和 RLS；扩展须由具备权限�
 bash scripts/install_offline.sh
 bash scripts/config_wizard.sh
 bash scripts/install_platform.sh initialize \
-  --version 4.5.1 --database pg \
+  --version 4.5.2 --database pg \
   --edition community --config config.json
 bash start_web_server.sh start
 bash start_web_server.sh status
