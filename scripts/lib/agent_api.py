@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.5.0 - Community Edition - Agent API
+"""AI Agent Infra v4.5.1 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 collaboration tracking, pool management, and Admin/Agent separation support.
@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 
 from psycopg2 import errors as pg_errors
 from psycopg2 import sql as pg_sql
+from .agent_extension_schema import TABLES as _AGENT_EXTENSION_TABLES
+from .agent_integration_bindings import TABLES as _AGENT_INTEGRATION_TABLES
 
 from .connection import (execute_query, execute_query_one, execute,
                          execute_insert_returning_id, get_connection)
@@ -29,7 +31,7 @@ _RUNTIME_DENY_TABLES = (
     "cx_database_isolation_inventory", "cx_platform_admin_commands",
     "cx_platform_capabilities", "cx_platform_capability_dependencies",
     "cx_platform_capability_history",
-)
+) + tuple(table.lower() for table in (*_AGENT_EXTENSION_TABLES, *_AGENT_INTEGRATION_TABLES))
 
 _JSON_COLUMNS = {"capabilities", "config", "context"}
 
